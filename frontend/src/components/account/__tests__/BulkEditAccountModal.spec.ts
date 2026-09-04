@@ -311,6 +311,102 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('OpenAI OAuth 批量编辑默认不修改上游协议', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    expect(wrapper.find('#bulk-edit-openai-transport-enabled').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').exists()).toBe(true)
+
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      status: 'active'
+    })
+  })
+
+  it('OpenAI OAuth 批量编辑切换到网页协议并清理 Codex 专属设置', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth']
+    })
+
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('web')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: {
+        openai_transport: 'web',
+        openai_passthrough: false,
+        openai_oauth_passthrough: false,
+        openai_responses_flatten_namespaces: false,
+        openai_oauth_responses_websockets_v2_mode: 'off',
+        openai_oauth_responses_websockets_v2_enabled: false,
+        codex_cli_only: false,
+        codex_cli_only_allow_app_server: false,
+        codex_fingerprint_mode: 'off',
+        openai_long_context_billing_enabled: false,
+        openai_compact_mode: null
+      }
+    })
+  })
+
+  it('OpenAI Setup Token 批量编辑切换到 Codex 协议', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['setup-token']
+    })
+
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('codex')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      extra: {
+        openai_transport: 'codex'
+      }
+    })
+  })
+
+  it('筛选目标批量切换网页协议时提交 filters 目标', async () => {
+    const wrapper = mountModal({
+      accountIds: [],
+      target: {
+        mode: 'filtered',
+        filters: { platform: 'openai', type: 'oauth', status: 'active' },
+        previewCount: 3,
+        selectedPlatforms: ['openai'],
+        selectedTypes: ['oauth']
+      }
+    })
+
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('web')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith({
+      filters: { platform: 'openai', type: 'oauth', status: 'active' },
+      extra: expect.objectContaining({ openai_transport: 'web' })
+    })
+  })
+
+  it('混合 OpenAI OAuth 与 API Key 时不显示上游协议批量编辑项', () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'],
+      selectedTypes: ['oauth', 'apikey']
+    })
+
+    expect(wrapper.find('#bulk-edit-openai-transport-enabled').exists()).toBe(false)
+  })
+
   it('namespace 摊平开关不对 setup-token 等非 OAuth 选择展示', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],

@@ -1027,6 +1027,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		result.LongContextInheritedCount = inheritedCount
 	}
+	if transport, _ := input.Extra[OpenAIWebTransportExtraKey].(string); openAISettings.transport && transport == OpenAITransportWeb {
+		// The bulk repository performs a top-level JSONB merge. Keep Web accounts
+		// isolated from stale Codex-only settings even for direct API callers.
+		input.Extra["openai_passthrough"] = false
+		input.Extra["openai_oauth_passthrough"] = false
+		input.Extra["openai_responses_flatten_namespaces"] = false
+		input.Extra["openai_oauth_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
+		input.Extra["openai_oauth_responses_websockets_v2_enabled"] = false
+		input.Extra["codex_cli_only"] = false
+		input.Extra["codex_cli_only_allow_app_server"] = false
+		input.Extra["codex_fingerprint_mode"] = "off"
+		input.Extra[openAILongContextBillingEnabledKey] = false
+		input.Extra["openai_compact_mode"] = nil
+	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {
 			account, ok := targetsByID[accountID]

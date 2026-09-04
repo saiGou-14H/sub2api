@@ -82,6 +82,48 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth-like upstream transport -->
+      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <div class="flex-1 pr-4">
+            <label
+              id="bulk-edit-openai-transport-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-transport-enabled"
+            >
+              {{ t('admin.accounts.openai.transportMode') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.transportModeDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAITransport"
+            id="bulk-edit-openai-transport-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-transport"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-transport"
+          :class="!enableOpenAITransport && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-openai-transport-label"
+        >
+          <Select
+            v-model="openaiTransportMode"
+            data-testid="bulk-edit-openai-transport-select"
+            :disabled="!enableOpenAITransport"
+            :options="openaiTransportOptions"
+            aria-labelledby="bulk-edit-openai-transport-label"
+          />
+          <p class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+            {{ t('admin.accounts.bulkEdit.transportModeHint') }}
+          </p>
+        </div>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="allOpenAIOAuthOnly"
@@ -1658,6 +1700,7 @@ const enableRateMultiplier = ref(false)
 const enableStatus = ref(false)
 const enableGroups = ref(false)
 const enableOpenAIPassthrough = ref(false)
+const enableOpenAITransport = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
 const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
@@ -1693,6 +1736,12 @@ const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
+type OpenAITransportMode = 'web' | 'codex'
+const openaiTransportMode = ref<OpenAITransportMode>('codex')
+const openaiTransportOptions = computed<Array<{ value: OpenAITransportMode; label: string }>>(() => [
+  { value: 'codex', label: t('admin.accounts.openai.transportCodex') },
+  { value: 'web', label: t('admin.accounts.openai.transportWeb') }
+])
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -1983,6 +2032,25 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enableOpenAITransport.value && allOpenAIOAuth.value) {
+    const extra = ensureExtra()
+    extra.openai_transport = openaiTransportMode.value
+    if (openaiTransportMode.value === 'web') {
+      // Bulk updates merge JSONB keys, so explicitly neutralize Codex-only
+      // settings that would otherwise remain active after a Web switch.
+      extra.openai_passthrough = false
+      extra.openai_oauth_passthrough = false
+      extra.openai_responses_flatten_namespaces = false
+      extra.openai_oauth_responses_websockets_v2_mode = 'off'
+      extra.openai_oauth_responses_websockets_v2_enabled = false
+      extra.codex_cli_only = false
+      extra.codex_cli_only_allow_app_server = false
+      extra.codex_fingerprint_mode = 'off'
+      extra.openai_long_context_billing_enabled = false
+      extra.openai_compact_mode = null
+    }
+  }
+
   // 同时校验可见性：勾选后又改了目标筛选条件时，不应把该键写到非 OAuth 账号上
   if (enableOpenAIFlattenNamespaces.value && allOpenAIOAuthOnly.value) {
     const extra = ensureExtra()
@@ -2202,6 +2270,7 @@ const handleSubmit = async () => {
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
+    (enableOpenAITransport.value && allOpenAIOAuth.value) ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
@@ -2364,6 +2433,7 @@ watch(
       enableStatus.value = false
       enableGroups.value = false
       enableOpenAIPassthrough.value = false
+      enableOpenAITransport.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAILongContextBilling.value = false
       enableOpenAIEndpointCapabilities.value = false
@@ -2403,6 +2473,7 @@ watch(
       groupIds.value = []
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+      openaiTransportMode.value = 'codex'
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false

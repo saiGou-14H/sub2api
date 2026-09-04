@@ -12,12 +12,13 @@ type bulkOpenAISettings struct {
 	longContextBilling      bool
 	endpointCapabilities    bool
 	responsesMode           bool
+	transport               bool
 	capabilitiesIncludeChat bool
 	forcedResponsesMode     bool
 }
 
 func (s bulkOpenAISettings) any() bool {
-	return s.longContextBilling || s.endpointCapabilities || s.responsesMode
+	return s.longContextBilling || s.endpointCapabilities || s.responsesMode || s.transport
 }
 
 func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISettings, error) {
@@ -31,6 +32,15 @@ func normalizeBulkOpenAISettings(input *BulkUpdateAccountsInput) (bulkOpenAISett
 		if err := ValidateOpenAILongContextBillingExtra(PlatformOpenAI, input.Extra); err != nil {
 			return settings, err
 		}
+	}
+
+	if _, exists := input.Extra[OpenAIWebTransportExtraKey]; exists {
+		settings.transport = true
+		normalized, err := normalizeOpenAITransportExtra(PlatformOpenAI, AccountTypeOAuth, input.Extra)
+		if err != nil {
+			return settings, err
+		}
+		input.Extra = normalized
 	}
 
 	if raw, exists := input.Credentials[openAIEndpointCapabilitiesCredentialKey]; exists {
@@ -176,6 +186,11 @@ func validateBulkOpenAISettingsTargets(
 			if account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey {
 				return 0, invalidBulkOpenAITarget(accountID, "endpoint capabilities and Responses routing require an OpenAI API-key account")
 			}
+		}
+
+		if settings.transport && (account.Platform != PlatformOpenAI ||
+			(account.Type != AccountTypeOAuth && account.Type != AccountTypeSetupToken)) {
+			return 0, invalidBulkOpenAITarget(accountID, "openai transport requires an OpenAI OAuth or setup-token account")
 		}
 
 		if settings.forcedResponsesMode && !settings.capabilitiesIncludeChat &&

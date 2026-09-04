@@ -348,6 +348,68 @@ func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {
 	require.Nil(t, repo.lastBulkUpdate.Extra["openai_responses_mode"])
 }
 
+func TestAdminServiceBulkUpdateAccounts_ValidatesAndIsolatesOpenAIWebTransport(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			"codex_cli_only": true,
+			"openai_responses_flatten_namespaces": true,
+		},
+	}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1},
+		Extra:      map[string]any{OpenAIWebTransportExtraKey: " WEB "},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, OpenAITransportWeb, repo.lastBulkUpdate.Extra[OpenAIWebTransportExtraKey])
+	require.Equal(t, false, repo.lastBulkUpdate.Extra["codex_cli_only"])
+	require.Equal(t, false, repo.lastBulkUpdate.Extra["openai_responses_flatten_namespaces"])
+	require.Equal(t, OpenAIWSIngressModeOff, repo.lastBulkUpdate.Extra["openai_oauth_responses_websockets_v2_mode"])
+	require.Equal(t, false, repo.lastBulkUpdate.Extra["openai_oauth_responses_websockets_v2_enabled"])
+}
+
+func TestAdminServiceBulkUpdateAccounts_RejectsOpenAITransportForNonOAuthTargets(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+	}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1},
+		Extra:      map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	})
+
+	require.Nil(t, result)
+	requireApplicationErrorReason(t, err, "OPENAI_BULK_TARGET_INVALID")
+	require.Zero(t, repo.bulkUpdateCalls)
+}
+
+func TestAdminServiceBulkUpdateAccounts_RejectsInvalidOpenAITransportValueBeforeWrite(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{{
+		ID:       1,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1},
+		Extra:      map[string]any{OpenAIWebTransportExtraKey: "browser"},
+	})
+
+	require.Nil(t, result)
+	requireApplicationErrorReason(t, err, "OPENAI_TRANSPORT_INVALID")
+	require.Zero(t, repo.bulkUpdateCalls)
+}
+
 func TestAdminServiceBulkUpdateAccounts_AcceptsLongContextAccountTypes(t *testing.T) {
 	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
 		t.Run(accountType, func(t *testing.T) {
