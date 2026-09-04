@@ -342,7 +342,9 @@ def main():
         run_request(result["tests"], "responses_text", "/v1/responses", responses_text, gateway_key, secrets)
         run_request(result["tests"], "responses_stream", "/v1/responses", responses_stream, gateway_key, secrets, stream=True)
 
-        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0dIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+        # Valid neutral fixture; keep the live probe focused on transport
+        # compatibility instead of an upstream image-parser rejection.
+        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02\x08\x02\x00\x00\x00\xfd\xd4\x9as\x00\x00\x00\x13IDATx\x9cc\xfc\xff\xff?\x03\x03\x03\x13\x03\x18\x00\x00$\x06\x03\x01]\xa2N\x88\x00\x00\x00\x00IEND\xaeB`\x82"
         fixtures = [
             ("png", "image/png", "sample.png", png),
             ("pdf", "application/pdf", "sample.pdf", b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"),
