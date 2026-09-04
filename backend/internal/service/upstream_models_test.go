@@ -229,6 +229,32 @@ func TestFetchUpstreamSupportedModelsParsesOpenAIOAuthManifest(t *testing.T) {
 	require.Equal(t, "Bearer openai-oauth-token", upstream.lastReq.Header.Get("Authorization"))
 }
 
+func TestFetchUpstreamSupportedModelsParsesOpenAISetupTokenManifest(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"models":[{"slug":"gpt-5.6-sol"}]}`)),
+	}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:       13,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token":       "openai-setup-token",
+			"chatgpt_account_id": "acct-setup-token",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5.6-sol"}, models)
+	require.Equal(t, "Bearer openai-setup-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "acct-setup-token", upstream.lastReq.Header.Get("chatgpt-account-id"))
+}
+
 func TestExtractGrokUpstreamModelIDs(t *testing.T) {
 	t.Parallel()
 

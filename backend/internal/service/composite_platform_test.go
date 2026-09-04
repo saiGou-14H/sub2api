@@ -49,6 +49,46 @@ func TestResolveCompositeModelOwnershipKeepsProviderAccountsIsolated(t *testing.
 	require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformOpenAI, Matched: true}, openAIOwnership)
 }
 
+func TestResolveCompositeModelOwnershipDerivesWebCatalogFromWebAccount(t *testing.T) {
+	groupID := int64(8)
+	repo := &compositeOwnershipAccountRepo{accounts: []Account{
+		{
+			ID:       1,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeSetupToken,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{"gpt-5.6-luna": "gpt-5.6-sol"},
+			},
+			Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+		},
+	}}
+	svc := &GatewayService{accountRepo: repo}
+
+	resolver := NewCompositeRouteResolver(nil)
+	resolver.SetModelOwnershipResolver(svc.resolveCompositeModelOwnership)
+	for _, model := range OpenAIWebModels() {
+		t.Run(model, func(t *testing.T) {
+			ownership, err := svc.resolveCompositeModelOwnership(context.Background(), groupID, model)
+			require.NoError(t, err)
+			require.Equal(t, CompositeModelOwnership{TargetPlatform: PlatformOpenAI, Matched: true}, ownership)
+
+			decision, err := resolver.Resolve(context.Background(), groupID, model, CompositeRouteEndpointResponses)
+			require.NoError(t, err)
+			require.True(t, decision.Matched)
+			require.Equal(t, CompositeRouteSourceAccount, decision.Source)
+			require.Equal(t, PlatformOpenAI, decision.TargetPlatform)
+		})
+	}
+	require.Equal(t, CompositeModelOwnership{}, mustCompositeOwnership(t, svc, "gpt-5.6"))
+}
+
+func mustCompositeOwnership(t *testing.T, svc *GatewayService, model string) CompositeModelOwnership {
+	t.Helper()
+	ownership, err := svc.resolveCompositeModelOwnership(context.Background(), 8, model)
+	require.NoError(t, err)
+	return ownership
+}
+
 // Scenario: 通配符和空映射不声明所有权
 func TestResolveCompositeModelOwnershipRequiresNonEmptyExactMappings(t *testing.T) {
 	groupID := int64(7)

@@ -217,6 +217,30 @@ func TestIsUpstreamModelRestrictedByChannel_PassthroughMatchesForwardPath(t *tes
 	}
 }
 
+func TestIsUpstreamModelRestrictedByChannel_WebUsesAutoInsteadOfLegacyMapping(t *testing.T) {
+	channelSvc := newTestChannelService(makeStandardRepo(Channel{
+		ID:                 1,
+		Status:             StatusActive,
+		GroupIDs:           []int64{10},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{
+			{Platform: PlatformOpenAI, Models: []string{OpenAIWebTestModel}},
+		},
+	}, map[int64]string{10: PlatformOpenAI}))
+	svc := &OpenAIGatewayService{channelService: channelSvc}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{OpenAIWebTestModel: "gpt-5.6-sol"},
+		},
+		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	require.False(t, svc.isUpstreamModelRestrictedByChannel(context.Background(), 10, account, OpenAIWebTestModel, false))
+}
+
 func TestIsUpstreamModelRestrictedByChannel_PassthroughFlagWithRawChatFallbackMatchesForwardPath(t *testing.T) {
 	t.Parallel()
 

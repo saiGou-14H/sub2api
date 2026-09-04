@@ -10,6 +10,9 @@ import (
 const (
 	// AccountTestModeDefault drives the standard /responses connection test.
 	AccountTestModeDefault = "default"
+	// AccountTestModeWeb selects the ChatGPT Web conversation transport for
+	// OpenAI OAuth/setup-token accounts. It is rejected for other accounts.
+	AccountTestModeWeb = "web"
 	// AccountTestModeCompact drives the remote-compaction probe test
 	// (native v2: streaming /responses with a compaction_trigger input item).
 	AccountTestModeCompact = "compact"
@@ -17,6 +20,8 @@ const (
 
 func normalizeAccountTestMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case AccountTestModeWeb:
+		return AccountTestModeWeb
 	case AccountTestModeCompact:
 		return AccountTestModeCompact
 	default:

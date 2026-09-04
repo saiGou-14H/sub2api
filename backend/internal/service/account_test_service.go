@@ -22,11 +22,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -153,6 +155,7 @@ type AccountTestService struct {
 	pluginManager             *PluginManager
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
+	openAIWebTransportFactory func() *OpenAIWebTransport
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
@@ -269,7 +272,8 @@ func createTestPayload(modelID string) (map[string]any, error) {
 // TestAccountConnection tests an account's connection by sending a test request
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
-// mode is optional - "compact" routes OpenAI accounts to the /responses/compact probe path
+// mode is optional - "compact" selects the compaction probe and "web" requires
+// an OpenAI OAuth/setup-token account configured for ChatGPT Web transport.
 // opts is optional media (image/audio data URLs for real generation / STT).
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
@@ -310,7 +314,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	if account.IsOpenAI() {
-		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+		// Preserve the raw mode so the OpenAI test service can distinguish an
+		// explicit Web request from the legacy default/compact modes.
+		return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 	}
 
 	if account.IsGemini() {
@@ -331,7 +337,11 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
 	testModelID := strings.TrimSpace(modelID)
 	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
+		if UsesOpenAIWebProtocol(account) {
+			testModelID = "auto"
+		} else {
+			testModelID = openai.DefaultTestModel
+		}
 	}
 	testModelID = account.GetMappedModel(testModelID)
 
@@ -646,9 +656,30 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 // testOpenAIAccountConnection tests an OpenAI account's connection
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
-	mode = normalizeAccountTestMode(mode)
+	rawMode := strings.TrimSpace(mode)
 
-	// Default to openai.DefaultTestModel for OpenAI testing
+	// Web accounts have an independent ChatGPT conversation contract. Route
+	// them before compact handling and model mapping so stale Codex settings or
+	// an administrator-supplied compact mode cannot change the upstream path.
+	if UsesOpenAIWebProtocol(account) {
+		credentialAccount := account
+		if account.IsCredentialShadow() {
+			resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+			if err != nil {
+				return s.sendErrorAndEnd(c, err.Error())
+			}
+			credentialAccount = resolved
+		}
+		return s.testOpenAIWebAccountConnection(c, account, credentialAccount, modelID, prompt)
+	}
+
+	// Do not silently downgrade an explicit Web test for a Codex/API-key
+	// account; that would make the admin result misleading.
+	if strings.EqualFold(rawMode, AccountTestModeWeb) {
+		return s.sendErrorAndEnd(c, "mode=web requires an OpenAI OAuth/setup-token account configured with web transport")
+	}
+	mode = normalizeAccountTestMode(rawMode)
+
 	testModelID := modelID
 	if testModelID == "" {
 		testModelID = openai.DefaultTestModel
@@ -662,7 +693,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if mode == AccountTestModeCompact {
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
-
 	// Route to image generation test if an image model is selected
 	if isOpenAIImageModel(testModelID) {
 		imagePrompt := strings.TrimSpace(prompt)
@@ -835,6 +865,90 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
+}
+
+func (s *AccountTestService) testOpenAIWebAccountConnection(
+	c *gin.Context,
+	account *Account,
+	credentialAccount *Account,
+	modelID string,
+	prompt string,
+) error {
+	if credentialAccount == nil {
+		return s.sendErrorAndEnd(c, "Failed to resolve account credentials")
+	}
+	authToken := credentialAccount.GetOpenAIAccessToken()
+	if strings.TrimSpace(authToken) == "" {
+		return s.sendErrorAndEnd(c, "No access token available")
+	}
+	testPrompt := strings.TrimSpace(prompt)
+	if testPrompt == "" {
+		testPrompt = "hi"
+	}
+	// Web account tests have their own selector contract. Do not apply Codex
+	// aliases or account model_mapping: the selected Web model is sent through
+	// the conversation transport unchanged after canonicalization.
+	canonicalModel, ok := NormalizeOpenAIWebModel(modelID)
+	if strings.TrimSpace(modelID) == "" {
+		canonicalModel = OpenAIWebTestModel
+		ok = true
+	}
+	if !ok {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("model %q is not supported by ChatGPT web transport", strings.TrimSpace(modelID)))
+	}
+	modelID = canonicalModel
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
+
+	transport := s.newOpenAIWebTransport()
+	if transport == nil {
+		return s.sendErrorAndEnd(c, "ChatGPT web transport is not configured")
+	}
+	resp, err := transport.Do(c.Request.Context(), account, authToken, OpenAIWebConversationOptions{
+		Request: newOpenAIWebAccountTestRequest(modelID, testPrompt),
+	})
+	if err != nil {
+		var upstreamErr *OpenAIWebHTTPError
+		if errors.As(err, &upstreamErr) && upstreamErr != nil && upstreamErr.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+			_ = s.accountRepo.SetError(c.Request.Context(), account.ID, "Authentication failed (401) via ChatGPT web transport")
+		}
+		return s.sendErrorAndEnd(c, fmt.Sprintf("ChatGPT web request failed: %s", err.Error()))
+	}
+	if resp == nil || resp.Body == nil {
+		return s.sendErrorAndEnd(c, "ChatGPT web returned no response body")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return s.processOpenAIStream(c, resp.Body)
+}
+
+func newOpenAIWebAccountTestRequest(modelID, prompt string) *apicompat.ChatCompletionsRequest {
+	return &apicompat.ChatCompletionsRequest{
+		Model:  modelID,
+		Stream: true,
+		Messages: []apicompat.ChatMessage{{
+			Role:    "user",
+			Content: json.RawMessage(strconv.Quote(prompt)),
+		}},
+	}
+}
+
+func (s *AccountTestService) newOpenAIWebTransport() *OpenAIWebTransport {
+	if s != nil && s.openAIWebTransportFactory != nil {
+		return s.openAIWebTransportFactory()
+	}
+	if s == nil {
+		return nil
+	}
+	return NewOpenAIWebTransport(&OpenAIGatewayService{
+		accountRepo:   s.accountRepo,
+		httpUpstream:  s.httpUpstream,
+		pluginManager: s.pluginManager,
+	}, OpenAIWebTransportOptions{})
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,

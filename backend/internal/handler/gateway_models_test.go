@@ -794,6 +794,40 @@ func TestGatewayModels_CompositeUnmappedCNAccountsContributeNoDefaults(t *testin
 	require.NotContains(t, ids, "claude-sonnet-4-6")
 }
 
+func TestGatewayModels_OpenAIWebPublishesAutoAndHidesLegacyMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 36
+	h := newGatewayModelsHandlerForTest(&gatewayModelsAccountRepoStub{
+		byGroup: map[int64][]service.Account{
+			groupID: {
+				{
+					ID:       1,
+					Platform: service.PlatformOpenAI,
+					Type:     service.AccountTypeSetupToken,
+					Credentials: map[string]any{
+						"model_mapping": map[string]any{"gpt-5.6-luna": "gpt-5.6-sol"},
+					},
+					Extra: map[string]any{service.OpenAIWebTransportExtraKey: service.OpenAITransportWeb},
+				},
+			},
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, []string{service.OpenAIWebTestModel}, modelIDsForTest(got.Data))
+}
+
 // 独立 CN 分组沿用 default 分支的 Claude 默认列表（Claude Code 客户端请求的
 // 就是这些模型名并经账号 model_mapping 转换），composite 支持不得改变该回退。
 func TestDefaultModelIDsForPlatform_CNProvidersKeepClaudeDefaults(t *testing.T) {

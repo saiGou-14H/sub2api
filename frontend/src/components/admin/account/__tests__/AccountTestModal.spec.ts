@@ -77,7 +77,10 @@ function mountModal(account: Record<string, unknown> = {
     global: {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
-        Select: { template: '<div class="select-stub"></div>' },
+        Select: {
+          props: ['options', 'disabled', 'modelValue'],
+          template: '<div class="select-stub" :data-disabled="String(disabled)" :data-options="JSON.stringify(options)"></div>'
+        },
         TextArea: {
           props: ['modelValue'],
           emits: ['update:modelValue'],
@@ -218,6 +221,67 @@ describe('AccountTestModal', () => {
       model_id: 'gpt-5.4',
       prompt: '',
       mode: 'compact'
+    })
+  })
+
+  it('OpenAI Web 账号加载五个 Web 模型并允许选择具体模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'auto', display_name: 'ChatGPT Web (auto)' },
+      { id: 'gpt-5.6-sol', display_name: 'GPT-5.6 Sol' },
+      { id: 'gpt-5.6-terra', display_name: 'GPT-5.6 Terra' },
+      { id: 'gpt-5.6-luna', display_name: 'GPT-5.6 Luna' },
+      { id: 'gpt-5.5', display_name: 'GPT-5.5' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"auto"}\n',
+        'data: {"type":"content","text":"OK"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal({
+      id: 77,
+      name: 'ChatGPT Web OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active',
+      extra: { openai_transport: 'web' }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(getAvailableModels).toHaveBeenCalledWith(77)
+    expect((wrapper.vm as any).availableModels).toHaveLength(5)
+    expect((wrapper.vm as any).availableModels.map((model: { id: string }) => model.id)).toEqual([
+      'auto',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5'
+    ])
+    expect((wrapper.vm as any).selectedModelId).toBe('auto')
+    expect(wrapper.find('textarea.textarea-stub').exists()).toBe(true)
+    expect(wrapper.findAll('.select-stub')).toHaveLength(1)
+    expect(wrapper.find('.select-stub').attributes('data-disabled')).toBe('false')
+
+    const promptInput = wrapper.find('textarea.textarea-stub')
+    await promptInput.setValue('请只回复 OK')
+    ;(wrapper.vm as any).selectedModelId = 'gpt-5.6-luna'
+    const startButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.accounts.startTest'))
+    expect(startButton).toBeTruthy()
+    await startButton!.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'gpt-5.6-luna',
+      prompt: '请只回复 OK',
+      mode: 'web'
     })
   })
 })

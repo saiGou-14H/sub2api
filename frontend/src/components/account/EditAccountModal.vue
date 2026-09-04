@@ -1619,8 +1619,9 @@
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="edit-openai-passthrough-settings"
       >
         <div class="flex items-center justify-between">
           <div>
@@ -1647,9 +1648,32 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth-like upstream transport (web or Codex) -->
+      <div
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="openai-transport-settings"
+      >
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.transportMode') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.transportModeDesc') }}
+            </p>
+          </div>
+          <div class="w-full flex-shrink-0 sm:w-64">
+            <Select
+              v-model="openaiTransportMode"
+              :options="openaiTransportOptions"
+              data-testid="edit-openai-transport-select"
+            />
+          </div>
+        </div>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        v-if="isOpenAICodexTransport && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -1680,8 +1704,9 @@
 
       <!-- OpenAI Codex hosted image_generation bridge policy -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="edit-openai-codex-image-settings"
       >
         <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
           <div class="flex items-start gap-3 px-4 py-3">
@@ -1740,8 +1765,9 @@
 
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="edit-openai-ws-settings"
       >
         <div class="flex items-center justify-between">
           <div>
@@ -2012,7 +2038,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="showOpenAICodexSettings && !isSparkShadow && !hideAccountLongContextBilling"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -2044,8 +2070,9 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="isOpenAICodexTransport"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="edit-openai-codex-cli-settings"
       >
         <div class="flex items-center justify-between">
           <div>
@@ -2100,7 +2127,7 @@
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+        v-if="isOpenAICodexTransport && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -2135,8 +2162,9 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+        data-testid="edit-openai-compact-settings"
       >
         <div class="flex items-center justify-between">
           <div>
@@ -3262,6 +3290,24 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
+type OpenAITransportMode = 'web' | 'codex'
+// Keep Codex as the implicit legacy mode when older accounts have no marker.
+const openaiTransportMode = ref<OpenAITransportMode>('codex')
+const openaiTransportOptions = computed<Array<{ value: OpenAITransportMode; label: string }>>(() => [
+  { value: 'codex', label: t('admin.accounts.openai.transportCodex') },
+  { value: 'web', label: t('admin.accounts.openai.transportWeb') }
+])
+const isOpenAIOAuthLikeAccount = computed(() =>
+  props.account?.platform === 'openai' &&
+  (props.account?.type === 'oauth' || props.account?.type === 'setup-token')
+)
+const isOpenAICodexTransport = computed(() =>
+  isOpenAIOAuthLikeAccount.value && openaiTransportMode.value === 'codex'
+)
+const showOpenAICodexSettings = computed(() =>
+  props.account?.platform === 'openai' &&
+  (props.account?.type === 'apikey' || isOpenAICodexTransport.value)
+)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -3743,6 +3789,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
+  openaiTransportMode.value = 'codex'
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   editPlanType.value = ''
@@ -3761,6 +3808,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   webSearchEmulationMode.value = 'default'
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+    if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
+      const storedTransport = typeof extra?.openai_transport === 'string'
+        ? extra.openai_transport.trim().toLowerCase()
+        : ''
+      openaiTransportMode.value = storedTransport === 'web' ? 'web' : 'codex'
+    }
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
@@ -5164,33 +5217,37 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
+      const usesWebTransport =
+        (props.account.type === 'oauth' || props.account.type === 'setup-token') &&
+        openaiTransportMode.value === 'web'
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+        const webSocketMode = usesWebTransport ? 'off' : openaiOAuthResponsesWebSocketV2Mode.value
+        newExtra.openai_oauth_responses_websockets_v2_mode = webSocketMode
+        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(webSocketMode)
       } else if (props.account.type === 'apikey') {
         newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
         newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
-      if (openaiPassthroughEnabled.value) {
+      if (!usesWebTransport && openaiPassthroughEnabled.value) {
         newExtra.openai_passthrough = true
       } else {
         delete newExtra.openai_passthrough
         delete newExtra.openai_oauth_passthrough
       }
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
-      if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
+      if (!usesWebTransport && props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
         newExtra.openai_responses_flatten_namespaces = true
       } else {
         delete newExtra.openai_responses_flatten_namespaces
       }
-      if (isSparkShadow.value) {
+      if (usesWebTransport || isSparkShadow.value) {
         delete newExtra.openai_long_context_billing_enabled
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
-      if (openAICompactMode.value === 'auto') {
+      if (usesWebTransport || openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
       } else {
         newExtra.openai_compact_mode = openAICompactMode.value
@@ -5231,23 +5288,29 @@ const handleSubmit = async () => {
 		delete newExtra.codex_auto_reset_credit_state
 
 		delete newExtra.codex_image_generation_bridge_enabled
-      switch (codexImageToolMode.value) {
-        case 'enabled':
-        case 'disabled':
-          newExtra.codex_image_generation_bridge = codexImageToolMode.value === 'enabled'
-          delete newExtra.codex_image_generation_explicit_tool_policy
-          break
-        case 'block':
-          newExtra.codex_image_generation_explicit_tool_policy = 'strip'
-          delete newExtra.codex_image_generation_bridge
-          break
-        default:
-          delete newExtra.codex_image_generation_bridge
-          delete newExtra.codex_image_generation_explicit_tool_policy
+      if (usesWebTransport) {
+        delete newExtra.codex_image_generation_bridge
+        delete newExtra.codex_image_generation_explicit_tool_policy
+      } else {
+        switch (codexImageToolMode.value) {
+          case 'enabled':
+          case 'disabled':
+            newExtra.codex_image_generation_bridge = codexImageToolMode.value === 'enabled'
+            delete newExtra.codex_image_generation_explicit_tool_policy
+            break
+          case 'block':
+            newExtra.codex_image_generation_explicit_tool_policy = 'strip'
+            delete newExtra.codex_image_generation_bridge
+            break
+          default:
+            delete newExtra.codex_image_generation_bridge
+            delete newExtra.codex_image_generation_explicit_tool_policy
+        }
       }
 
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        if (codexCLIOnlyEnabled.value) {
+        newExtra.openai_transport = openaiTransportMode.value
+        if (!usesWebTransport && codexCLIOnlyEnabled.value) {
           newExtra.codex_cli_only = true
         } else if (hadCodexCLIOnlyEnabled) {
           // 关闭时显式写 false，避免 extra 为空被后端忽略导致旧值无法清除
@@ -5257,7 +5320,7 @@ const handleSubmit = async () => {
         }
         // Claude Code 插件放行已迁移到全局 codex_cli_only_whitelist，编辑时清理废弃账号级快捷字段。
         delete newExtra.codex_cli_only_allowed_clients
-        if (codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
+        if (!usesWebTransport && codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
           newExtra.codex_cli_only_allow_app_server = true
         } else {
           delete newExtra.codex_cli_only_allow_app_server
@@ -5267,7 +5330,7 @@ const handleSubmit = async () => {
       // 指纹收敛模式：默认 off（不写入）；device/session/full 是显式 opt-in，
       // 必须落键，否则管理员的选择会被后端当作"未设置"而回落到 off（#5610）。
       if (props.account.type === 'oauth') {
-        if (codexFingerprintMode.value !== 'off') {
+        if (!usesWebTransport && codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {
           delete newExtra.codex_fingerprint_mode

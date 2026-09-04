@@ -1375,7 +1375,9 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
 	cacheKey := modelsListCacheKey(groupID, platform)
-	if s.modelsListCache != nil {
+	// Web model entitlements are refreshed per account, so do not serve an
+	// account-independent cached list for OpenAI groups before that refresh.
+	if s.modelsListCache != nil && platform != PlatformOpenAI && platform != "" {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
 			if models, ok := cached.([]string); ok {
 				modelsListCacheHitTotal.Add(1)
@@ -1414,6 +1416,19 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	hasAnyMapping := false
 
 	for _, acc := range accounts {
+		if acc.IsOpenAIWebTransport() {
+			refreshOpenAIWebModelCatalog(ctx, s.accountRepo, s.httpUpstream, &acc)
+		}
+		// Web accounts expose the authenticated browser selector catalog and
+		// ignore legacy Codex mappings.
+		if acc.IsOpenAIWebTransport() {
+			hasAnyMapping = true
+			for _, model := range openAIWebModelSet(acc) {
+				modelSet[model] = struct{}{}
+			}
+			continue
+		}
+
 		// Passthrough routing accepts models independently of model_mapping. A stale
 		// mapping on any eligible passthrough account therefore cannot define the
 		// public whitelist; return nil so the handler uses its default model set.
@@ -1503,6 +1518,9 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 }
 
 func explicitModelMappingClaims(account Account, model string) bool {
+	if account.IsOpenAIWebTransport() {
+		return account.IsModelSupported(model)
+	}
 	if account.Credentials == nil || model == "" {
 		return false
 	}

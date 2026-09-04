@@ -1585,6 +1585,38 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	}
 }
 
+func TestFetchCodexModelsManifestSetupTokenUsesCodexBearer(t *testing.T) {
+	manifestBody := `{"models":[{"slug":"gpt-5.6-sol"}]}`
+
+	var gotAuth, gotAccountID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAccountID = r.Header.Get("chatgpt-account-id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(manifestBody))
+	}))
+	defer server.Close()
+
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	account := newCodexModelsTestAccount()
+	account.Type = AccountTypeSetupToken
+	account.Credentials = map[string]any{
+		"access_token":       "setup-token-value",
+		"chatgpt_account_id": "acct-setup-token",
+	}
+
+	manifest, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(
+		context.Background(), account, "0.137.0", "",
+	)
+	require.NoError(t, err)
+	require.Equal(t, manifestBody, string(manifest.Body))
+	require.Equal(t, "Bearer setup-token-value", gotAuth)
+	require.Equal(t, "acct-setup-token", gotAccountID)
+}
+
 func TestFetchCodexModelsManifestAgentIdentityUsesAssertionWithoutOAuthToken(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	account := &Account{

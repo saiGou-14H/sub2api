@@ -80,15 +80,17 @@ const OAuthAuthorizationFlowStub = defineComponent({
   name: 'OAuthAuthorizationFlow',
   props: {
     showManualOption: Boolean,
+    showAccessTokenOption: Boolean,
     showCodexSessionImportOption: Boolean,
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: ['import-access-token', 'import-codex-session', 'import-codex-pat'],
   template: `
     <div>
+      <button data-testid="import-access-token" @click="$emit('import-access-token', 'access-token')">access token</button>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
       <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
     </div>
@@ -428,10 +430,27 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
     expect(flow.props('showManualOption')).toBe(true)
+    expect(flow.props('showAccessTokenOption')).toBe(true)
     expect(flow.props('showCodexSessionImportOption')).toBe(true)
     expect(flow.props('showAgentIdentityOption')).toBe(true)
     expect(flow.props('showCodexPatOption')).toBe(true)
     expect(flow.props('initialInputMethod')).toBe('manual')
+  })
+
+  it('creates an OpenAI setup-token account from a direct access token', async () => {
+    const wrapper = await openCodexImportStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+
+    flow.vm.$emit('import-access-token', 'web-access-token')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload?.platform).toBe('openai')
+    expect(payload?.type).toBe('setup-token')
+    expect(payload?.credentials).toMatchObject({ access_token: 'web-access-token' })
+    expect(payload?.credentials).not.toHaveProperty('refresh_token')
+    expect(payload?.extra?.openai_transport).toBe('web')
   })
 
   it.each([

@@ -73,6 +73,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 ) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	// The classic ChatGPT Web conversation endpoint is opt-in per account. Keep
+	// this branch before identity/restriction/Codex transforms: web credentials
+	// use the browser protocol and must not be shaped as a Codex Responses turn.
+	if UsesOpenAIWebProtocol(account) {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIWebConversationPath)
+		return s.forwardChatCompletionsViaOpenAIWeb(ctx, c, account, body, defaultMappedModel)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -417,7 +424,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-	if handleErr == nil && account.Type == AccountTypeOAuth && !account.IsShadow() {
+	if handleErr == nil && account.IsOpenAIOAuthLike() && !account.IsShadow() {
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
@@ -1143,6 +1150,109 @@ func writeChatCompletionsError(c *gin.Context, statusCode int, errType, message 
 			"message": message,
 		},
 	})
+}
+
+// forwardChatCompletionsViaOpenAIWeb sends an OpenAI Chat Completions request
+// through the authenticated ChatGPT Web conversation endpoint. The web
+// transport returns Responses-shaped SSE, so the established Chat Completions
+// response handlers remain the single response/usage conversion path.
+func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	defaultMappedModel string,
+) (*OpenAIForwardResult, error) {
+	startTime := time.Now()
+
+	var chatReq apicompat.ChatCompletionsRequest
+	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
+	if isResponsesShape {
+		var responsesReq apicompat.ResponsesRequest
+		if err := json.Unmarshal(body, &responsesReq); err != nil {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return nil, fmt.Errorf("parse responses-shaped chat completions request for web transport: %w", err)
+		}
+		if err := ValidateOpenAIWebResponsesRequest(&responsesReq); err != nil {
+			return nil, writeOpenAIWebRequestError(c, err)
+		}
+		converted, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+			ReasoningContentByID: s.reasoningContentByID,
+		})
+		if err != nil {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return nil, fmt.Errorf("convert responses-shaped chat completions request for web transport: %w", err)
+		}
+		chatReq = *converted
+	} else if err := json.Unmarshal(body, &chatReq); err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return nil, fmt.Errorf("parse chat completions request for web transport: %w", err)
+	}
+
+	originalModel := strings.TrimSpace(chatReq.Model)
+	if originalModel == "" {
+		return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("model", "model is required"))
+	}
+	if len(chatReq.Messages) == 0 {
+		return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("messages", "messages must contain at least one item"))
+	}
+	if err := ValidateOpenAIWebChatCompletionsRequest(&chatReq); err != nil {
+		return nil, writeOpenAIWebRequestError(c, err)
+	}
+	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
+	if strings.TrimSpace(upstreamModel) == "" {
+		upstreamModel = OpenAIWebTestModel
+	}
+	chatReq.Model = upstreamModel
+	if billingModel == "" {
+		billingModel = upstreamModel
+	}
+	SetOpsUpstreamModel(c, upstreamModel)
+
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
+	}
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	defer releaseUpstreamCtx()
+	resp, err := s.newOpenAIWebTransport().Do(
+		upstreamCtx,
+		account,
+		token,
+		OpenAIWebConversationOptions{Request: &chatReq},
+	)
+	if err != nil {
+		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, true)
+	}
+	if resp == nil || resp.Body == nil {
+		return s.handleOpenAIWebForwardError(ctx, c, account, errors.New("ChatGPT web transport returned no response body"), body, upstreamModel, true)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.Header == nil {
+		resp.Header = make(http.Header)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return s.handleOpenAIWebHTTPResponseError(ctx, c, account, resp, body, upstreamModel, true)
+	}
+
+	var result *OpenAIForwardResult
+	if chatReq.Stream {
+		result, err = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
+	} else {
+		result, err = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
+	}
+	if err != nil {
+		return result, err
+	}
+	if result == nil {
+		return nil, errors.New("ChatGPT web transport produced no forwarding result")
+	}
+	result.UpstreamEndpoint = OpenAIWebConversationPath
+	if result.ReasoningEffort == nil && strings.TrimSpace(chatReq.ReasoningEffort) != "" {
+		effort := strings.TrimSpace(chatReq.ReasoningEffort)
+		result.ReasoningEffort = &effort
+	}
+	return result, nil
 }
 
 // buildChatStreamErrorSSE builds one SSE data frame carrying an OpenAI chat

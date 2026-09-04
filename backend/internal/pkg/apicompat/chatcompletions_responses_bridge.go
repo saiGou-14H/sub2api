@@ -494,7 +494,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			pendingReasoning = ""
 			lastTurnReasoning = ""
 			continue
-		case "input_image":
+		case "input_image", "image_url", "input_file", "file":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
 				return nil, nil, err
@@ -914,12 +914,35 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 				imageURL = rawNestedString(part["image_url"], "url")
 			}
 			if imageURL == "" {
+				fileID := rawString(part["file_id"])
+				if fileID != "" {
+					hasNonText = true
+					chatParts = append(chatParts, ChatContentPart{
+						Type: "file",
+						File: &ChatFile{FileID: fileID},
+					})
+				}
 				continue
 			}
 			hasNonText = true
 			chatParts = append(chatParts, ChatContentPart{
 				Type:     "image_url",
 				ImageURL: &ChatImageURL{URL: imageURL},
+			})
+		case "input_file", "file":
+			fileData := rawString(part["file_data"])
+			fileID := rawString(part["file_id"])
+			if fileData == "" && fileID == "" {
+				continue
+			}
+			hasNonText = true
+			chatParts = append(chatParts, ChatContentPart{
+				Type: "file",
+				File: &ChatFile{
+					Filename: rawString(part["filename"]),
+					FileData: fileData,
+					FileID:   fileID,
+				},
 			})
 		}
 	}
@@ -946,9 +969,33 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 		if imageURL == "" {
 			imageURL = rawNestedString(part["image_url"], "url")
 		}
+		if imageURL == "" {
+			fileID := rawString(part["file_id"])
+			if fileID == "" {
+				return json.Marshal("")
+			}
+			return json.Marshal([]ChatContentPart{{
+				Type: "file",
+				File: &ChatFile{FileID: fileID},
+			}})
+		}
 		return json.Marshal([]ChatContentPart{{
 			Type:     "image_url",
 			ImageURL: &ChatImageURL{URL: imageURL},
+		}})
+	case "input_file", "file":
+		fileData := rawString(part["file_data"])
+		fileID := rawString(part["file_id"])
+		if fileData == "" && fileID == "" {
+			return json.Marshal("")
+		}
+		return json.Marshal([]ChatContentPart{{
+			Type: "file",
+			File: &ChatFile{
+				Filename: rawString(part["filename"]),
+				FileData: fileData,
+				FileID:   fileID,
+			},
 		}})
 	default:
 		return json.Marshal(rawString(part["text"]))

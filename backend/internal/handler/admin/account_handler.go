@@ -2576,6 +2576,18 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
+		// ChatGPT Web accounts have a separate selector contract from Codex.
+		// Prefer the account's authenticated catalog and ignore stale Codex
+		// model_mapping stored on an imported access-token account.
+		if account.IsOpenAIWebTransport() {
+			if !account.OpenAIWebModelCatalogFresh(time.Now()) && h.accountTestService != nil {
+				if _, syncErr := h.accountTestService.SyncOpenAIWebModelCatalog(c.Request.Context(), account); syncErr != nil {
+					slog.Debug("openai_web_model_catalog_refresh_failed", "account_id", account.ID)
+				}
+			}
+			response.Success(c, openAIWebAvailableModels(account))
+			return
+		}
 		// OpenAI 自动透传会绕过常规模型改写，测试/模型列表也应回落到默认模型集。
 		if account.IsOpenAIPassthroughEnabled() {
 			response.Success(c, openai.DefaultModels)
@@ -2752,6 +2764,38 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	}
 
 	response.Success(c, models)
+}
+
+// openAIWebAvailableModels adapts the Web transport's stable selector list to
+// the admin model DTO. Keep this separate from openai.DefaultModels because
+// Web selectors are not Codex upstream aliases.
+func openAIWebAvailableModels(account *service.Account) []openai.Model {
+	webModels := service.OpenAIWebModels()
+	if account != nil {
+		webModels, _ = account.GetOpenAIWebModelCatalog()
+	}
+	models := make([]openai.Model, 0, len(webModels))
+	for _, id := range webModels {
+		model := openai.Model{
+			ID:          id,
+			Object:      "model",
+			OwnedBy:     "openai",
+			Type:        "model",
+			DisplayName: id,
+		}
+		if id == service.OpenAIWebTestModel {
+			model.DisplayName = "ChatGPT Web (auto)"
+		} else {
+			for _, defaultModel := range openai.DefaultModels {
+				if defaultModel.ID == id {
+					model = defaultModel
+					break
+				}
+			}
+		}
+		models = append(models, model)
+	}
+	return models
 }
 
 // SyncUpstreamModels handles syncing live supported models from an account's upstream.

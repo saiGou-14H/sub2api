@@ -165,6 +165,227 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
 }
 
+func TestAccountTestService_OpenAIWebUsesConversationTransport(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	upstream := &openAIWebTestUpstream{responses: []*http.Response{
+		openAIWebTestResponse(http.StatusOK, "text/html", `<html data-build="test"><script src="/sdk.js"></script></html>`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"status":"ok","conduit_token":"conduit-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"prepare_token":"prepare-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"token":"requirements-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{}`),
+		openAIWebTestResponse(http.StatusOK, "text/event-stream", strings.Join([]string{
+			`data: {"conversation_id":"conv-test","o":"append","p":"/message/content/parts/0","v":"OK"}`,
+			"",
+			`data: {"conversation_id":"conv-test","is_complete":true}`,
+			"",
+		}, "\n")),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	svc.openAIWebTransportFactory = func() *OpenAIWebTransport {
+		return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
+	}
+	account := &Account{
+		ID:          91,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "", "reply OK", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 6)
+	require.Equal(t, "/", upstream.requests[0].URL.Path)
+	require.Equal(t, OpenAIWebConversationPath, upstream.requests[5].URL.Path)
+	require.NotEqual(t, chatgptCodexAPIURL, upstream.requests[5].URL.String())
+	body, readErr := io.ReadAll(upstream.requests[5].Body)
+	require.NoError(t, readErr)
+	require.Equal(t, "auto", gjson.GetBytes(body, "model").String())
+	require.Contains(t, string(body), "reply OK")
+	require.Contains(t, recorder.Body.String(), `"text":"OK"`)
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+}
+
+func TestAccountTestService_OpenAIWebOverridesCompactAndModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	upstream := &openAIWebTestUpstream{responses: []*http.Response{
+		openAIWebTestResponse(http.StatusOK, "text/html", `<html data-build="test"><script src="/sdk.js"></script></html>`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"status":"ok","conduit_token":"conduit-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"prepare_token":"prepare-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"token":"requirements-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{}`),
+		openAIWebTestResponse(http.StatusOK, "text/event-stream", strings.Join([]string{
+			`data: {"conversation_id":"conv-test","o":"append","p":"/message/content/parts/0","v":"OK"}`,
+			"",
+			`data: {"conversation_id":"conv-test","is_complete":true}`,
+			"",
+		}, "\n")),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	svc.openAIWebTransportFactory = func() *OpenAIWebTransport {
+		return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
+	}
+	account := &Account{
+		ID:          92,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "test-token",
+			"model_mapping": map[string]any{
+				"gpt-5.6-luna": "gpt-5.6-sol",
+			},
+		},
+		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	// A compact flag must not switch a Web account to the Codex probe. The
+	// selected Web model is preserved independently of account model_mapping.
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.6-luna", "reply OK", AccountTestModeCompact)
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 6)
+	require.Equal(t, OpenAIWebConversationPath, upstream.requests[5].URL.Path)
+	require.NotEqual(t, chatgptCodexAPIURL, upstream.requests[5].URL.String())
+	body, readErr := io.ReadAll(upstream.requests[5].Body)
+	require.NoError(t, readErr)
+	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(body, "model").String())
+	require.Contains(t, string(body), "reply OK")
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+}
+
+func TestAccountTestService_OpenAINonWebRejectsExplicitWebMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+	upstream := &queuedHTTPUpstream{}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          93,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportCodex},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "hello", " WEB ")
+	require.EqualError(t, err, "mode=web requires an OpenAI OAuth/setup-token account configured with web transport")
+	require.Empty(t, upstream.requests)
+	require.Contains(t, recorder.Body.String(), `"type":"error"`)
+}
+
+func TestAccountTestService_OpenAIWebIgnoresCodexCompactMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+
+	upstream := &openAIWebTestUpstream{responses: []*http.Response{
+		openAIWebTestResponse(http.StatusOK, "text/html", `<html data-build="test"><script src="/sdk.js"></script></html>`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"status":"ok","conduit_token":"conduit-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"prepare_token":"prepare-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"token":"requirements-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{}`),
+		openAIWebTestResponse(http.StatusOK, "text/event-stream", strings.Join([]string{
+			`data: {"conversation_id":"conv-test","o":"append","p":"/message/content/parts/0","v":"OK"}`,
+			"",
+			`data: {"conversation_id":"conv-test","is_complete":true}`,
+			"",
+		}, "\n")),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	svc.openAIWebTransportFactory = func() *OpenAIWebTransport {
+		return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
+	}
+	account := &Account{
+		ID:          92,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.6-luna", "reply OK", AccountTestModeCompact)
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 6)
+	require.Equal(t, OpenAIWebConversationPath, upstream.requests[5].URL.Path)
+	body, err := io.ReadAll(upstream.requests[5].Body)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.6-luna", gjson.GetBytes(body, "model").String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+}
+
+func TestAccountTestService_OpenAIWebRejectsUnsupportedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, recorder := newTestContext()
+	upstream := &openAIWebTestUpstream{}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          94,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "hello", "")
+	require.EqualError(t, err, `model "gpt-5.4" is not supported by ChatGPT web transport`)
+	require.Empty(t, upstream.requests)
+	require.Contains(t, recorder.Body.String(), `gpt-5.4`)
+	require.Contains(t, recorder.Body.String(), `is not supported by ChatGPT web transport`)
+}
+
+func TestAccountTestService_OpenAIWebProbeUsesMinimalChatCompletionsRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	upstream := &openAIWebTestUpstream{responses: []*http.Response{
+		openAIWebTestResponse(http.StatusOK, "text/html", `<html data-build="test"><script src="/sdk.js"></script></html>`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"status":"ok","conduit_token":"conduit-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"prepare_token":"prepare-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"token":"requirements-test"}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{}`),
+		openAIWebTestResponse(http.StatusOK, "text/event-stream", strings.Join([]string{
+			`data: {"conversation_id":"conv-test","o":"append","p":"/message/content/parts/0","v":"OK"}`,
+			"",
+			`data: {"conversation_id":"conv-test","is_complete":true}`,
+			"",
+		}, "\n")),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	svc.openAIWebTransportFactory = func() *OpenAIWebTransport {
+		return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
+	}
+	account := &Account{
+		ID:          95,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeSetupToken,
+		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.5", "reply OK", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 6)
+	body, readErr := io.ReadAll(upstream.requests[5].Body)
+	require.NoError(t, readErr)
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(body, "model").String())
+	require.NotContains(t, string(body), `"max_tokens"`)
+	require.NotContains(t, string(body), `"max_completion_tokens"`)
+	require.NotContains(t, string(body), `"temperature"`)
+	require.NotContains(t, string(body), `"top_p"`)
+
+	request := newOpenAIWebAccountTestRequest("gpt-5.5", "reply OK")
+	require.True(t, request.Stream)
+	require.Nil(t, request.MaxTokens)
+	require.Nil(t, request.MaxCompletionTokens)
+	require.Nil(t, request.Temperature)
+	require.Nil(t, request.TopP)
+}
+
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()

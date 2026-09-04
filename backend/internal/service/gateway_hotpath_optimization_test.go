@@ -713,6 +713,32 @@ func TestGetAvailableModels_OpenAIPassthroughUsesDefaultFallback(t *testing.T) {
 	}
 }
 
+func TestGetAvailableModels_OpenAIWebPublishesAutoAndIgnoresLegacyMapping(t *testing.T) {
+	groupID := int64(12)
+	repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{
+		groupID: {
+			{
+				ID:       1,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeSetupToken,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{"gpt-5.6-luna": "gpt-5.6-sol"},
+				},
+				Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+			},
+			{
+				ID:          2,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.5": "gpt-5.5"}},
+			},
+		},
+	}}
+	svc := &GatewayService{accountRepo: repo}
+
+	require.Equal(t, []string{OpenAIWebTestModel, "gpt-5.5"}, svc.GetAvailableModels(context.Background(), &groupID, PlatformOpenAI))
+}
+
 func TestGetAvailableModels_GlobalListPreservesMappedModelsWithOpenAIPassthrough(t *testing.T) {
 	groupID := int64(11)
 	repo := &modelsListAccountRepoStub{

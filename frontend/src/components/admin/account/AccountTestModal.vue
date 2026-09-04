@@ -58,7 +58,7 @@
 
       <div v-if="showModelSelect" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {{ t('admin.accounts.selectTestModel') }}
+          {{ isOpenAIWebAccount ? t('admin.accounts.openai.webTestModelLabel') : t('admin.accounts.selectTestModel') }}
         </label>
         <Select
           v-model="selectedModelId"
@@ -68,9 +68,12 @@
           label-key="display_name"
           :placeholder="loadingModels ? t('common.loading') + '...' : t('admin.accounts.selectTestModel')"
         />
+        <p v-if="isOpenAIWebAccount" class="text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.webTestModelHint') }}
+        </p>
       </div>
 
-      <div v-if="isOpenAIAccount" class="space-y-1.5">
+      <div v-if="isOpenAIAccount && !isOpenAIWebAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.openai.testMode') }}
         </label>
@@ -423,6 +426,11 @@ const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+const isOpenAIWebAccount = computed(() => {
+  if (!isOpenAIAccount.value) return false
+  const transport = props.account?.extra?.openai_transport
+  return typeof transport === 'string' && transport.trim().toLowerCase() === 'web'
+})
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
@@ -497,6 +505,7 @@ const modelOptionsForMode = computed(() => {
 })
 
 const supportsPromptInput = computed(() => {
+  if (isOpenAIWebAccount.value) return true
   if (!isGrokAccount.value) {
     return supportsImageTest.value
   }
@@ -597,6 +606,7 @@ const clearMediaUploads = () => {
 }
 
 const promptInputLabel = computed(() => {
+  if (isOpenAIWebAccount.value) return t('admin.accounts.openai.webTestPromptLabel')
   if (supportsGrokVideoTest.value || grokTestMode.value === 'video') {
     return t('admin.accounts.videoPromptLabel')
   }
@@ -613,6 +623,7 @@ const promptInputLabel = computed(() => {
 })
 
 const promptInputPlaceholder = computed(() => {
+  if (isOpenAIWebAccount.value) return t('admin.accounts.openai.webTestPromptPlaceholder')
   if (grokTestMode.value === 'video') {
     return t('admin.accounts.videoPromptPlaceholder')
   }
@@ -629,6 +640,7 @@ const promptInputPlaceholder = computed(() => {
 })
 
 const promptInputHint = computed(() => {
+  if (isOpenAIWebAccount.value) return t('admin.accounts.openai.webTestPromptHint')
   if (grokTestMode.value === 'video') {
     return t('admin.accounts.videoTestHint')
   }
@@ -651,6 +663,7 @@ const promptInputHint = computed(() => {
 })
 
 const testModeSummary = computed(() => {
+  if (isOpenAIWebAccount.value) return t('admin.accounts.openai.webTestMode')
   if (isGrokAccount.value) {
     switch (grokTestMode.value) {
       case 'video':
@@ -704,7 +717,9 @@ const sortTestModels = (models: ClaudeModel[]) => {
 const applyDefaultPromptForMode = () => {
   if (!supportsPromptInput.value) return
   if (testPrompt.value.trim()) return
-  if (grokTestMode.value === 'video') {
+  if (isOpenAIWebAccount.value) {
+    testPrompt.value = t('admin.accounts.openai.webTestPromptDefault')
+  } else if (grokTestMode.value === 'video') {
     testPrompt.value = t('admin.accounts.videoPromptDefault')
   } else if (grokTestMode.value === 'image' || supportsImageTest.value) {
     testPrompt.value = t('admin.accounts.imagePromptDefault')
@@ -742,7 +757,7 @@ watch(
       grokTestMode.value = 'text'
       resetState()
       await loadAvailableModels()
-      if (isGrokAccount.value) {
+      if (isGrokAccount.value || isOpenAIWebAccount.value) {
         pickDefaultModelForMode()
         applyDefaultPromptForMode()
       }
@@ -855,7 +870,7 @@ const startTest = async () => {
       prompt: supportsPromptInput.value ? testPrompt.value.trim() : ''
     }
     if (isOpenAIAccount.value) {
-      requestBody.mode = testMode.value
+      requestBody.mode = isOpenAIWebAccount.value ? 'web' : testMode.value
     }
     if (isGrokAccount.value) {
       // Always send explicit Grok mode. search/tts/stt/realtime are standalone

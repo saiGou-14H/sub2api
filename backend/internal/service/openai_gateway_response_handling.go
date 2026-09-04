@@ -1587,12 +1587,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// misrouted into handleSSEToJSON and lose their usage accounting.
 	bodyLooksLikeSSE := bodyHasSSEFraming(body)
 
-	// For OAuth accounts, also fall back to a body-content heuristic because
+	// For ChatGPT/Codex bearer accounts, also fall back to a body-content heuristic because
 	// the upstream may omit the Content-Type header while still sending SSE.
 	// This heuristic is NOT applied to API-key accounts to avoid false
 	// positives on JSON responses that coincidentally contain "data:" or
 	// "event:" in their text content.
-	if account.Type == AccountTypeOAuth && bodyLooksLikeSSE {
+	if account != nil && account.IsOpenAIOAuthLike() && bodyLooksLikeSSE {
 		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 	if account != nil && account.IsGrok() && isOpenAIResponsesCompactPath(c) {

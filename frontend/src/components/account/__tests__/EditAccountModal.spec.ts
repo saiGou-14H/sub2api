@@ -1239,6 +1239,110 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
   })
 
+  it('defaults OAuth-like accounts to Codex transport and persists the non-sensitive marker', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = {}
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const transportSelect = wrapper.get('[data-testid="edit-openai-transport-select"]')
+
+    expect((transportSelect.element as HTMLSelectElement).value).toBe('codex')
+    await transportSelect.setValue('web')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.extra?.openai_transport).toBe('web')
+    expect(payload?.extra?.openai_oauth_responses_websockets_v2_mode).toBe('off')
+    expect(payload?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(false)
+    expect(payload).not.toHaveProperty('type')
+    expect(payload?.credentials).not.toHaveProperty('access_token')
+    expect(payload?.credentials).not.toHaveProperty('refresh_token')
+    wrapper.unmount()
+  })
+
+  it('hides and clears Codex-only settings when an OAuth account switches to web transport', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = {
+      openai_transport: 'codex',
+      openai_passthrough: true,
+      openai_responses_flatten_namespaces: true,
+      openai_long_context_billing_enabled: true,
+      openai_oauth_responses_websockets_v2_mode: 'ctx_pool',
+      openai_oauth_responses_websockets_v2_enabled: true,
+      openai_compact_mode: 'force_on',
+      codex_image_generation_bridge: true,
+      codex_cli_only: true,
+      codex_cli_only_allow_app_server: true,
+      codex_fingerprint_mode: 'full'
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="edit-openai-passthrough-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-openai-flatten-namespaces-toggle"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-openai-codex-image-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-openai-ws-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-openai-codex-cli-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-codex-fingerprint-mode-select"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="edit-openai-compact-settings"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue('web')
+
+    expect(wrapper.find('[data-testid="edit-openai-passthrough-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-openai-flatten-namespaces-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-openai-codex-image-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-openai-ws-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-openai-codex-cli-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-codex-fingerprint-mode-select"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="edit-openai-compact-settings"]').exists()).toBe(false)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra?.openai_transport).toBe('web')
+    expect(extra?.openai_oauth_responses_websockets_v2_mode).toBe('off')
+    expect(extra?.openai_oauth_responses_websockets_v2_enabled).toBe(false)
+    expect(extra?.codex_cli_only).toBe(false)
+    expect(extra).not.toHaveProperty('openai_passthrough')
+    expect(extra).not.toHaveProperty('openai_responses_flatten_namespaces')
+    expect(extra).not.toHaveProperty('openai_long_context_billing_enabled')
+    expect(extra).not.toHaveProperty('openai_compact_mode')
+    expect(extra).not.toHaveProperty('codex_image_generation_bridge')
+    expect(extra).not.toHaveProperty('codex_cli_only_allow_app_server')
+    expect(extra).not.toHaveProperty('codex_fingerprint_mode')
+    wrapper.unmount()
+  })
+
+  it('rehydrates a stored web transport and hides the selector for API key accounts', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'web' }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="edit-openai-transport-select"]').element as HTMLSelectElement).value).toBe('web')
+    wrapper.unmount()
+
+    const apiKeyWrapper = mountModal(buildAccount())
+    expect(apiKeyWrapper.find('[data-testid="edit-openai-transport-select"]').exists()).toBe(false)
+    expect(apiKeyWrapper.find('[data-testid="edit-openai-passthrough-settings"]').exists()).toBe(true)
+    expect(apiKeyWrapper.find('[data-testid="edit-openai-codex-image-settings"]').exists()).toBe(true)
+    expect(apiKeyWrapper.find('[data-testid="edit-openai-ws-settings"]').exists()).toBe(true)
+    expect(apiKeyWrapper.find('[data-testid="edit-openai-compact-settings"]').exists()).toBe(true)
+    apiKeyWrapper.unmount()
+  })
+
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {
     // 新前端 + 新后端：响应已脱敏，credentials 里没有 api_key，credentials_status.has_api_key=true
     const account = buildAccount()

@@ -480,6 +480,74 @@ func TestChatCompletionsToResponses_EmptyFilePartSkipped(t *testing.T) {
 	assert.Equal(t, "input_text", parts[0].Type)
 }
 
+func TestResponsesToChatCompletions_PreservesInputFilePart(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[{"role":"user","content":[{"type":"input_text","text":"Summarize this"},{"type":"input_file","filename":"notes.txt","file_id":"file-abc123"}]}]`),
+	}
+	out, err := ResponsesToChatCompletionsRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 1)
+	var parts []ChatContentPart
+	require.NoError(t, json.Unmarshal(out.Messages[0].Content, &parts))
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "file", parts[1].Type)
+	require.NotNil(t, parts[1].File)
+	assert.Equal(t, "notes.txt", parts[1].File.Filename)
+	assert.Equal(t, "file-abc123", parts[1].File.FileID)
+}
+
+func TestResponsesToChatCompletions_PreservesTopLevelInputFile(t *testing.T) {
+	req := &ResponsesRequest{
+		Model: "gpt-5.5",
+		Input: json.RawMessage(`[{"type":"input_file","filename":"report.pdf","file_data":"data:application/pdf;base64,JVBERi0xLjQ="}]`),
+	}
+	out, err := ResponsesToChatCompletionsRequest(req)
+	require.NoError(t, err)
+	require.Len(t, out.Messages, 1)
+	assert.Equal(t, "user", out.Messages[0].Role)
+
+	var parts []ChatContentPart
+	require.NoError(t, json.Unmarshal(out.Messages[0].Content, &parts))
+	require.Len(t, parts, 1)
+	assert.Equal(t, "file", parts[0].Type)
+	require.NotNil(t, parts[0].File)
+	assert.Equal(t, "report.pdf", parts[0].File.Filename)
+	assert.Equal(t, "data:application/pdf;base64,JVBERi0xLjQ=", parts[0].File.FileData)
+}
+
+func TestResponsesToChatCompletions_PreservesInputImageFileID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input json.RawMessage
+	}{
+		{
+			name:  "nested message part",
+			input: json.RawMessage(`[{"role":"user","content":[{"type":"input_image","file_id":"file-image123"}]}]`),
+		},
+		{
+			name:  "top-level part",
+			input: json.RawMessage(`[{"type":"input_image","file_id":"file-image123"}]`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := ResponsesToChatCompletionsRequest(&ResponsesRequest{Model: "gpt-5.5", Input: tt.input})
+			require.NoError(t, err)
+			require.Len(t, out.Messages, 1)
+
+			var parts []ChatContentPart
+			require.NoError(t, json.Unmarshal(out.Messages[0].Content, &parts))
+			require.Len(t, parts, 1)
+			assert.Equal(t, "file", parts[0].Type)
+			require.NotNil(t, parts[0].File)
+			assert.Equal(t, "file-image123", parts[0].File.FileID)
+		})
+	}
+}
+
 func TestChatCompletionsToResponses_EmptyContentNeverNull(t *testing.T) {
 	// Regression for #2515: the upstream Responses API rejects an input item
 	// whose content field is JSON null. Any chat-completions message that

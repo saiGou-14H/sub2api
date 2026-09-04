@@ -277,6 +277,18 @@ func TestResolveOpenAIForwardMappedModels_CompactMappingPrecedence(t *testing.T)
 			wantBilling:    "gpt-5.4",
 			wantUpstream:   "gpt-5.4",
 		},
+		{
+			name: "web transport ignores legacy mappings",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
+				Credentials: map[string]any{
+					"model_mapping":         map[string]any{OpenAIWebTestModel: "gpt-5.6-sol"},
+					"compact_model_mapping": map[string]any{OpenAIWebTestModel: "gpt-5.5-openai-compact"},
+				},
+				Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb}},
+			requireCompact: true,
+			wantBilling:    OpenAIWebTestModel,
+			wantUpstream:   OpenAIWebTestModel,
+		},
 	}
 
 	for _, tt := range tests {
@@ -321,6 +333,14 @@ func TestCanonicalOpenAIAccountSchedulingModelMatchesForwardSemantics(t *testing
 			account: &Account{Platform: PlatformGrok, Type: AccountTypeOAuth},
 			model:   "gpt-5.6",
 			want:    "gpt-5.6",
+		},
+		{
+			name: "OpenAI Web always schedules auto",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
+				Credentials: map[string]any{"model_mapping": map[string]any{OpenAIWebTestModel: "gpt-5.6-sol"}},
+				Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb}},
+			model: OpenAIWebTestModel,
+			want:  OpenAIWebTestModel,
 		},
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
@@ -117,6 +118,14 @@ const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"
 	openAIAuthModeLegacyCredentialKey = "openai_auth_mode"
+)
+
+// OpenAI transport modes select the upstream protocol for OpenAI OAuth-like
+// accounts.  The account type remains the credential/lifecycle type; keeping
+// these concerns separate preserves refresh and scheduler behavior.
+const (
+	OpenAITransportWeb   = "web"
+	OpenAITransportCodex = "codex"
 )
 
 func isOpenAIPersonalAccessTokenAuthMode(value string) bool {
@@ -836,6 +845,26 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 // 请求卡死在该账号上、无法 failover 到真正支持该模型的 API Key 账号（#3662）。
 // 未知/自定义别名仍保持允许（兼容渠道级映射），见 isOpenAIOAuthServableModel。
 func (a *Account) IsModelSupported(requestedModel string) bool {
+	// ChatGPT Web has its own finite selector catalog. Account mappings belong
+	// to the Codex/API-key transports and must not hide or rename Web models.
+	if a.IsOpenAIWebTransport() {
+		model, supported := NormalizeOpenAIWebModel(requestedModel)
+		if !supported {
+			return false
+		}
+		models, known := a.GetOpenAIWebModelCatalog()
+		if !known {
+			// Before the first authenticated catalog refresh, allow a valid
+			// upstream slug so a direct request can trigger the real Web path.
+			return true
+		}
+		for _, advertised := range models {
+			if advertised == model {
+				return true
+			}
+		}
+		return false
+	}
 	// 透传模式仅替换认证、模型语义完全交由上游决定，因此放行所有模型。
 	// 该短路必须在 model_mapping 判定之前：账号从"白名单模式"切换到透传后，
 	// credentials 里常残留旧的非空 model_mapping，若不在此放行，透传账号会被
@@ -1299,10 +1328,31 @@ func (a *Account) IsOpenAIOAuthLike() bool {
 	return a != nil && a.IsOpenAI() && (a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken)
 }
 
+// OpenAITransport returns the normalized per-account OpenAI upstream mode.
+// Missing and invalid values intentionally default to Codex for backwards
+// compatibility with accounts created before the selector existed.
+func (a *Account) OpenAITransport() string {
+	if a == nil || !a.IsOpenAIOAuthLike() {
+		return OpenAITransportCodex
+	}
+	value, _ := a.Extra[OpenAIWebTransportExtraKey].(string)
+	if strings.EqualFold(strings.TrimSpace(value), OpenAITransportWeb) {
+		return OpenAITransportWeb
+	}
+	return OpenAITransportCodex
+}
+
+// IsOpenAIWebTransport reports whether this account explicitly opts into the
+// authenticated ChatGPT web conversation endpoint.
+func (a *Account) IsOpenAIWebTransport() bool {
+	return a != nil && a.IsOpenAIOAuthLike() && a.OpenAITransport() == OpenAITransportWeb
+}
+
 // UsesOpenAICodexProtocol preserves legacy OpenAI gateway OAuth routing for
-// accounts whose platform is implicit, while adding OpenAI SetupToken.
+// accounts whose platform is implicit, while adding OpenAI SetupToken. An
+// explicit web transport is the only exception for OpenAI OAuth-like accounts.
 func (a *Account) UsesOpenAICodexProtocol() bool {
-	return a != nil && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
+	return a != nil && !a.IsOpenAIWebTransport() && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
 }
 
 func (a *Account) IsOpenAIChatGPTSubscription() bool {
@@ -1725,7 +1775,20 @@ func (a *Account) GetChatGPTAccountID() string {
 	if !a.IsOpenAIOAuthLike() {
 		return ""
 	}
-	return a.GetCredential("chatgpt_account_id")
+	if accountID := strings.TrimSpace(a.GetCredential("chatgpt_account_id")); accountID != "" {
+		return accountID
+	}
+
+	// Access-token-only imports do not have the metadata normally returned by
+	// OAuth exchange. OpenAI access tokens are JWTs in the web/Codex flow and
+	// carry the account id under the same claim used by ID tokens. Decode this
+	// optional metadata lazily; opaque tokens and malformed payloads simply
+	// keep the header absent.
+	claims, err := openai.DecodeIDToken(a.GetOpenAIAccessToken())
+	if err != nil || claims == nil || claims.OpenAIAuth == nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
 }
 
 func (a *Account) IsChatGPTAccountFedRAMP() bool {
@@ -2056,7 +2119,7 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
-	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() || a.Extra == nil {
 		return false
 	}
 	if a.IsOpenAIOAuthLike() {
@@ -2125,7 +2188,7 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
-	if a == nil || !a.IsOpenAI() {
+	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() {
 		return OpenAIWSIngressModeOff
 	}
 	if a.Extra == nil {

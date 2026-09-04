@@ -1089,7 +1089,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 		if !isOpenAICodexImageInputModel(upstreamModel) {
 			return false
 		}
-		if account.IsOpenAIOAuth() {
+		if account.IsOpenAIOAuthLike() {
 			return true
 		}
 		if !account.IsOpenAIApiKey() {
@@ -1488,7 +1488,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	useAPIKeyUpstream := false
 	appendModelsPath := false
 	switch {
-	case credAccount.IsOpenAIOAuth():
+	case credAccount.IsOpenAIOAuthLike():
 		authToken = strings.TrimSpace(credAccount.GetOpenAIAccessToken())
 		if authToken == "" && !credAccount.IsOpenAIAgentIdentity() {
 			return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_TOKEN_MISSING", "account has no Codex backend access token")
@@ -1607,17 +1607,17 @@ func isAgentIdentityTaskInvalidCodexModelsError(err error) bool {
 // whose OAuth token was revoked upstream stays active and schedulable and
 // keeps being selected for every subsequent /models request (#4544).
 //
-// Scope is deliberately limited to plain OAuth accounts: the manifest
-// endpoint authenticates with the same token as /responses forwarding, so a
-// 401 is authoritative for the account. Agent Identity accounts are excluded
-// because their 401s can be task-scoped and have a dedicated recovery flow,
-// and API key manifests come from custom upstreams whose /models auth may
-// diverge from their chat endpoints.
+// Scope is limited to ChatGPT/Codex bearer accounts: the manifest endpoint
+// authenticates with the same token as /responses forwarding, so a 401 is
+// authoritative for the account. Agent Identity accounts are excluded because
+// their 401s can be task-scoped and have a dedicated recovery flow, and API key
+// manifests come from custom upstreams whose /models auth may diverge from
+// their chat endpoints.
 func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx context.Context, account, credAccount *Account, err error) {
 	if s == nil || account == nil || err == nil {
 		return
 	}
-	if credAccount == nil || !credAccount.IsOpenAIOAuth() || credAccount.IsOpenAIAgentIdentity() {
+	if credAccount == nil || !credAccount.IsOpenAIOAuthLike() || credAccount.IsOpenAIAgentIdentity() {
 		return
 	}
 	var upstreamErr *codexModelsManifestUpstreamError

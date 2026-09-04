@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -61,4 +63,41 @@ func TestResolveAndSetOpenAIChatGPTAccountHeaders(t *testing.T) {
 		require.Equal(t, "org-own", headers.Get("chatgpt-account-id"),
 			"普通账号应透传自身的 chatgpt-account-id")
 	})
+}
+
+func TestOpenAIChatGPTAccountIDFallsBackToAccessTokenClaims(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"https://api.openai.com/auth": map[string]any{
+			"chatgpt_account_id": "acct-from-access-token",
+		},
+	})
+	require.NoError(t, err)
+	accessToken := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": accessToken,
+		},
+	}
+
+	require.Equal(t, "acct-from-access-token", account.GetChatGPTAccountID())
+	headers := make(http.Header)
+	setOpenAIChatGPTAccountHeaders(headers, account)
+	require.Equal(t, "acct-from-access-token", headers.Get("chatgpt-account-id"))
+}
+
+func TestOpenAIChatGPTAccountIDIgnoresOpaqueAccessToken(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"access_token": "opaque-access-token",
+		},
+	}
+
+	require.Empty(t, account.GetChatGPTAccountID())
+	headers := make(http.Header)
+	setOpenAIChatGPTAccountHeaders(headers, account)
+	require.Empty(t, headers.Get("chatgpt-account-id"))
 }

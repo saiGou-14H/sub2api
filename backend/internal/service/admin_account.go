@@ -307,7 +307,11 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 		SkipDefaultGroupBind:  true,
 		SkipMixedChannelCheck: true,
 	}
-	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
+	accountExtra, err := normalizeOpenAITransportExtra(input.Platform, input.Type, input.Extra)
+	if err != nil {
+		return nil, fmt.Errorf("normalize duplicate account transport: %w", err)
+	}
+	accountExtra, err = normalizeOpenAILongContextBillingExtra(input.Platform, accountExtra)
 	if err != nil {
 		return nil, fmt.Errorf("normalize duplicate account extra: %w", err)
 	}
@@ -359,6 +363,49 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 		)
 	}
 	return nil
+}
+
+// ValidateOpenAITransportExtra validates the optional upstream protocol
+// selector. It is meaningful only for OpenAI OAuth-like accounts so a stale or
+// misplaced value cannot silently change operator expectations.
+func ValidateOpenAITransportExtra(platform, accountType string, extra map[string]any) error {
+	if extra == nil {
+		return nil
+	}
+	raw, exists := extra[OpenAIWebTransportExtraKey]
+	if !exists || raw == nil {
+		return nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+	}
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized != OpenAITransportWeb && normalized != OpenAITransportCodex {
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+	}
+	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_UNSUPPORTED", "openai_transport is only supported for OpenAI OAuth or setup-token accounts")
+	}
+	return nil
+}
+
+func normalizeOpenAITransportExtra(platform, accountType string, extra map[string]any) (map[string]any, error) {
+	if extra == nil {
+		return nil, nil
+	}
+	if err := ValidateOpenAITransportExtra(platform, accountType, extra); err != nil {
+		return nil, err
+	}
+	normalized := maps.Clone(extra)
+	if raw, exists := normalized[OpenAIWebTransportExtraKey]; exists {
+		if raw == nil {
+			delete(normalized, OpenAIWebTransportExtraKey)
+		} else if value, ok := raw.(string); ok {
+			normalized[OpenAIWebTransportExtraKey] = strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return normalized, nil
 }
 
 func normalizeOpenAILongContextBillingExtra(platform string, extra map[string]any) (map[string]any, error) {
@@ -462,7 +509,11 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
-	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
+	accountExtra, err := normalizeOpenAITransportExtra(input.Platform, input.Type, input.Extra)
+	if err != nil {
+		return nil, err
+	}
+	accountExtra, err = normalizeOpenAILongContextBillingExtra(input.Platform, accountExtra)
 	if err != nil {
 		return nil, err
 	}
@@ -553,19 +604,25 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	effectiveType := account.Type
+	if input.Type != "" {
+		effectiveType = input.Type
+	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
-		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
+		transportExtra, transportErr := normalizeOpenAITransportExtra(account.Platform, effectiveType, input.Extra)
+		if transportErr != nil {
+			return nil, transportErr
+		}
+		billingInput := *input
+		billingInput.Extra = transportExtra
+		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, &billingInput)
 		if err != nil {
 			return nil, err
 		}
 		normalizedExtra, err = normalizeGrokMediaEligibilityUpdateExtra(account, input, normalizedExtra)
 		if err != nil {
 			return nil, err
-		}
-		effectiveType := account.Type
-		if input.Type != "" {
-			effectiveType = input.Type
 		}
 		normalizedExtra, err = normalizeOpenAIAutoResetCreditExtra(account.Platform, effectiveType, account.IsShadow(), normalizedExtra)
 		if err != nil {
@@ -880,6 +937,17 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(updates, OllamaCloudUsageSnapshotExtraKey)
+	if _, exists := updates[OpenAIWebTransportExtraKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		normalized, err := normalizeOpenAITransportExtra(account.Platform, account.Type, updates)
+		if err != nil {
+			return err
+		}
+		updates = normalized
+	}
 	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {

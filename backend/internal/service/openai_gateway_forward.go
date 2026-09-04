@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -21,6 +23,13 @@ import (
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	// Explicit web accounts use the classic browser conversation protocol. This
+	// must precede all Codex normalization, identity, restriction, passthrough,
+	// and WebSocket routing so the request is not mutated for another protocol.
+	if UsesOpenAIWebProtocol(account) {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIWebConversationPath)
+		return s.forwardResponsesViaOpenAIWeb(ctx, c, account, body)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -1274,6 +1283,233 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return forwardResult, nil
 	}
+}
+
+// forwardResponsesViaOpenAIWeb converts a Responses request to the text-chat
+// shape accepted by the authenticated ChatGPT Web conversation endpoint. The
+// transport converts its response back to Responses SSE, allowing the normal
+// Responses handlers to preserve the public OpenAI wire format.
+func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+) (*OpenAIForwardResult, error) {
+	if suffix := openAIResponsesRequestPathSuffix(c); suffix != "" {
+		message := "ChatGPT web transport supports only the standard /v1/responses endpoint"
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", message)
+		return nil, errors.New(message)
+	}
+
+	startTime := time.Now()
+	var responsesReq apicompat.ResponsesRequest
+	if err := json.Unmarshal(body, &responsesReq); err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return nil, fmt.Errorf("parse responses request for web transport: %w", err)
+	}
+	originalModel := strings.TrimSpace(responsesReq.Model)
+	if originalModel == "" {
+		return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("model", "model is required"))
+	}
+	if err := ValidateOpenAIWebResponsesRequest(&responsesReq); err != nil {
+		return nil, writeOpenAIWebRequestError(c, err)
+	}
+
+	s.recacheReasoningItemsFromInput(responsesReq.Input)
+	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+		ReasoningContentByID: s.reasoningContentByID,
+	})
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, fmt.Errorf("convert responses request for web transport: %w", err)
+	}
+
+	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
+	if strings.TrimSpace(upstreamModel) == "" {
+		upstreamModel = "auto"
+	}
+	if strings.TrimSpace(billingModel) == "" {
+		billingModel = upstreamModel
+	}
+	chatReq.Model = upstreamModel
+	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	reasoningEffortValue := ""
+	if reasoningEffort != nil {
+		reasoningEffortValue = *reasoningEffort
+	}
+	SetOpsUpstreamModel(c, upstreamModel)
+
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
+	}
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	defer releaseUpstreamCtx()
+	resp, err := s.newOpenAIWebTransport().Do(
+		upstreamCtx,
+		account,
+		token,
+		OpenAIWebConversationOptions{Request: chatReq},
+	)
+	if err != nil {
+		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, false)
+	}
+	if resp == nil || resp.Body == nil {
+		return s.handleOpenAIWebForwardError(ctx, c, account, errors.New("ChatGPT web transport returned no response body"), body, upstreamModel, false)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.Header == nil {
+		resp.Header = make(http.Header)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return s.handleOpenAIWebHTTPResponseError(ctx, c, account, resp, body, upstreamModel, false)
+	}
+
+	var usage *OpenAIUsage
+	var firstTokenMs *int
+	responseID := ""
+	if responsesReq.Stream {
+		streamResult, handleErr := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
+		if handleErr != nil {
+			return nil, handleErr
+		}
+		usage = streamResult.usage
+		firstTokenMs = streamResult.firstTokenMs
+		responseID = strings.TrimSpace(streamResult.responseID)
+	} else {
+		nonStreamResult, handleErr := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
+		if handleErr != nil {
+			return nil, handleErr
+		}
+		usage = nonStreamResult.usage
+		responseID = strings.TrimSpace(nonStreamResult.responseID)
+	}
+	s.bindHTTPResponseAccount(ctx, c, account, responseID)
+	if usage == nil {
+		usage = &OpenAIUsage{}
+	}
+
+	return &OpenAIForwardResult{
+		RequestID:                     resp.Header.Get("x-request-id"),
+		ResponseID:                    responseID,
+		Usage:                         *usage,
+		Model:                         originalModel,
+		BillingModel:                  billingModel,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
+		UpstreamEndpoint:              OpenAIWebConversationPath,
+		ReasoningEffort:               reasoningEffort,
+		Stream:                        responsesReq.Stream,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+	}, nil
+}
+
+// handleOpenAIWebForwardError preserves the gateway's existing distinction
+// between HTTP upstream failures and transport failures. Challenge responses
+// are represented as a retryable upstream failure so a pool can select another
+// web account without exposing bearer or sentinel material.
+func (s *OpenAIGatewayService) handleOpenAIWebForwardError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	err error,
+	requestBody []byte,
+	upstreamModel string,
+	chatCompletions bool,
+) (*OpenAIForwardResult, error) {
+	var requestError *OpenAIWebRequestError
+	if errors.As(err, &requestError) {
+		return nil, writeOpenAIWebRequestError(c, requestError)
+	}
+
+	var webHTTPError *OpenAIWebHTTPError
+	if errors.As(err, &webHTTPError) && webHTTPError != nil {
+		statusCode := webHTTPError.StatusCode
+		if statusCode < 100 || statusCode > 599 {
+			statusCode = http.StatusBadGateway
+		}
+		message := strings.TrimSpace(webHTTPError.Message)
+		if message == "" {
+			message = http.StatusText(statusCode)
+		}
+		return s.handleOpenAIWebSyntheticHTTPError(ctx, c, account, statusCode, "upstream_error", message, requestBody, upstreamModel, chatCompletions)
+	}
+
+	var challengeError *OpenAIWebChallengeError
+	if errors.As(err, &challengeError) {
+		message := "ChatGPT web requires an interactive challenge"
+		if challengeError != nil && strings.TrimSpace(challengeError.Kind) != "" {
+			message += ": " + strings.TrimSpace(challengeError.Kind)
+		}
+		return s.handleOpenAIWebSyntheticHTTPError(ctx, c, account, http.StatusServiceUnavailable, "web_challenge_required", message, requestBody, upstreamModel, chatCompletions)
+	}
+
+	return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+}
+
+func writeOpenAIWebRequestError(c *gin.Context, err error) error {
+	requestError := &OpenAIWebRequestError{Message: "invalid ChatGPT web request"}
+	if !errors.As(err, &requestError) || requestError == nil {
+		requestError = &OpenAIWebRequestError{Message: strings.TrimSpace(err.Error())}
+	}
+	payload := gin.H{
+		"type":    "invalid_request_error",
+		"message": requestError.Error(),
+	}
+	if param := strings.TrimSpace(requestError.Param); param != "" {
+		payload["param"] = param
+	}
+	MarkResponseCommitted(c)
+	c.JSON(http.StatusBadRequest, gin.H{"error": payload})
+	return requestError
+}
+
+func (s *OpenAIGatewayService) handleOpenAIWebSyntheticHTTPError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	statusCode int,
+	errType string,
+	message string,
+	requestBody []byte,
+	upstreamModel string,
+	chatCompletions bool,
+) (*OpenAIForwardResult, error) {
+	payload, marshalErr := json.Marshal(gin.H{"error": gin.H{
+		"type":    errType,
+		"message": sanitizeUpstreamErrorMessage(message),
+	}})
+	if marshalErr != nil {
+		payload = []byte(`{"error":{"type":"upstream_error","message":"ChatGPT web request failed"}}`)
+	}
+	resp := &http.Response{
+		StatusCode: statusCode,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(payload)),
+	}
+	return s.handleOpenAIWebHTTPResponseError(ctx, c, account, resp, requestBody, upstreamModel, chatCompletions)
+}
+
+func (s *OpenAIGatewayService) handleOpenAIWebHTTPResponseError(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	requestBody []byte,
+	upstreamModel string,
+	chatCompletions bool,
+) (*OpenAIForwardResult, error) {
+	respBody, upstreamMessage := s.readOpenAIUpstreamError(resp)
+	if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMessage, upstreamModel); foErr != nil {
+		return nil, foErr
+	}
+	if chatCompletions {
+		return s.handleChatCompletionsErrorResponse(resp, c, account, upstreamModel)
+	}
+	return s.handleErrorResponse(ctx, resp, c, account, requestBody, upstreamModel)
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {

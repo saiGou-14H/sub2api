@@ -797,6 +797,14 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+	if account != nil && account.IsOpenAIWebTransport() {
+		model, supported := NormalizeOpenAIWebModel(requestedModel)
+		if !supported {
+			return ""
+		}
+		return model
+	}
+
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.
@@ -856,6 +864,13 @@ func ResolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 // accounting, while upstreamModel is the model the scheduler has admitted.
 func resolveOpenAIForwardMappedModels(account *Account, requestedModel string, requireCompact bool) (billingModel, upstreamModel string) {
 	requestedModel = strings.TrimSpace(requestedModel)
+	if account != nil && account.IsOpenAIWebTransport() {
+		model, supported := NormalizeOpenAIWebModel(requestedModel)
+		if !supported {
+			return requestedModel, ""
+		}
+		return model, model
+	}
 	if account != nil && account.IsOpenAIPassthroughEnabled() {
 		billingModel = requestedModel
 	} else if account != nil {

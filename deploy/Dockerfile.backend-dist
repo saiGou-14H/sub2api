@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1.7
+
+ARG GOLANG_IMAGE=golang:1.27.0-alpine
+ARG RUNTIME_IMAGE=weishaw/sub2api@sha256:753050001a140f118b74161fbf501391f112726d34fca9caad26dfa62e03b6ab
+
+FROM ${GOLANG_IMAGE} AS backend-builder
+
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+
+ENV GOPROXY=${GOPROXY}
+ENV GOSUMDB=${GOSUMDB}
+
+RUN apk add --no-cache ca-certificates git tzdata
+
+WORKDIR /src/backend
+
+COPY backend/go.mod backend/go.sum ./
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+    go mod download
+
+COPY backend/ ./
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
+    -tags embed \
+    -trimpath \
+    -ldflags="-s -w -X main.Version=local-web-attachments -X main.Commit=local -X main.BuildType=release" \
+    -o /out/sub2api \
+    ./cmd/server
+
+FROM ${RUNTIME_IMAGE}
+
+COPY --from=backend-builder --chown=1000:1000 /out/sub2api /app/sub2api

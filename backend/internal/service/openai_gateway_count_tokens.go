@@ -171,7 +171,7 @@ func isOpenAIResponsesInputTokensUnsupported(account *Account, statusCode int, b
 	if statusCode == http.StatusNotFound {
 		return true
 	}
-	return account != nil && account.Type == AccountTypeOAuth && isOpenAIOAuthInputTokensUnsupported(statusCode, body)
+	return account != nil && account.IsOpenAIOAuthLike() && isOpenAIOAuthInputTokensUnsupported(statusCode, body)
 }
 
 func writeOpenAIResponsesInputTokensFallback(c *gin.Context, account *Account, prepared *openAIInputTokensCountPrepared, statusCode int, reason string) {
@@ -340,7 +340,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	if resp.StatusCode >= 400 {
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if account.Type == AccountTypeOAuth && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
+		if account.IsOpenAIOAuthLike() && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
 			writeOpenAIOAuthInputTokensFallback(c, account, prepared, resp.StatusCode)
 			return nil
 		}

@@ -3422,7 +3422,7 @@
         :show-refresh-token-option="form.platform === 'openai' || form.platform === 'antigravity' || form.platform === 'grok'"
         :show-mobile-refresh-token-option="form.platform === 'openai'"
         :show-session-token-option="false"
-        :show-access-token-option="false"
+        :show-access-token-option="form.platform === 'openai'"
         :show-codex-session-import-option="form.platform === 'openai'"
         :show-agent-identity-option="form.platform === 'openai'"
         :show-codex-pat-option="form.platform === 'openai'"
@@ -3437,6 +3437,7 @@
         @validate-refresh-token="handleValidateRefreshToken"
         @validate-mobile-refresh-token="handleOpenAIValidateMobileRT"
         @validate-session-token="handleValidateSessionToken"
+        @import-access-token="handleOpenAIImportAccessToken"
         @import-codex-session="handleOpenAIImportCodexSession"
         @import-codex-pat="handleOpenAIImportCodexPAT"
         @import-sso="handleGrokImportSSO"
@@ -3850,6 +3851,7 @@ interface OAuthFlowExposed {
   projectId: string
   sessionKey: string
   refreshToken: string
+  accessToken: string
   sessionToken: string
   codexSession: string
   codexPAT: string
@@ -6318,6 +6320,45 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       error.response?.data?.message ||
       error.message ||
       t('admin.accounts.oauth.openai.codexPatImportFailed')
+    appStore.showError(oauthClient.error.value)
+  } finally {
+    oauthClient.loading.value = false
+  }
+}
+
+// OpenAI 网页 access token：创建 setup-token 账号，绕过 OAuth refresh 生命周期。
+const handleOpenAIImportAccessToken = async (accessToken: string) => {
+  const oauthClient = openaiOAuth
+  const trimmed = accessToken.trim()
+  if (!trimmed) {
+    oauthClient.error.value = t('admin.accounts.oauth.openai.accessTokenEmpty')
+    return
+  }
+
+  const credentialExtras = buildOpenAICodexImportCredentialExtras()
+  if (credentialExtras === null) {
+    return
+  }
+
+  oauthClient.loading.value = true
+  oauthClient.error.value = ''
+
+  try {
+    const credentials: Record<string, unknown> = {
+      access_token: trimmed,
+      ...credentialExtras
+    }
+    const extra = {
+      ...buildOpenAICodexImportExtra(),
+      openai_transport: 'web'
+    }
+    await createAccountAndFinish('openai', 'setup-token', credentials, extra)
+  } catch (error: any) {
+    oauthClient.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.accessTokenImportFailed')
     appStore.showError(oauthClient.error.value)
   } finally {
     oauthClient.loading.value = false

@@ -203,6 +203,18 @@ func TestAccount_IsOpenAIResponsesWebSocketV2Enabled(t *testing.T) {
 		}
 		require.False(t, account.IsOpenAIResponsesWebSocketV2Enabled())
 	})
+
+	t.Run("网页协议账号强制关闭", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeSetupToken,
+			Extra: map[string]any{
+				OpenAIWebTransportExtraKey:                     OpenAITransportWeb,
+				"openai_oauth_responses_websockets_v2_enabled": true,
+			},
+		}
+		require.False(t, account.IsOpenAIResponsesWebSocketV2Enabled())
+	})
 }
 
 func TestAccount_ResolveOpenAIResponsesWebSocketV2Mode(t *testing.T) {
@@ -294,6 +306,39 @@ func TestAccount_ResolveOpenAIResponsesWebSocketV2Mode(t *testing.T) {
 		}
 		require.Equal(t, OpenAIWSIngressModeOff, account.ResolveOpenAIResponsesWebSocketV2Mode(OpenAIWSIngressModeDedicated))
 	})
+
+	t.Run("web transport always off", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeSetupToken,
+			Extra: map[string]any{
+				OpenAIWebTransportExtraKey:                  OpenAITransportWeb,
+				"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			},
+		}
+		require.Equal(t, OpenAIWSIngressModeOff, account.ResolveOpenAIResponsesWebSocketV2Mode(OpenAIWSIngressModeCtxPool))
+	})
+}
+
+func TestAccount_OpenAIWebSupportsCurrentModelCatalogIgnoringLegacyMapping(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				OpenAIWebTestModel: "gpt-5.6-sol",
+				"gpt-5.6-luna":    "gpt-5.6-sol",
+			},
+		},
+		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+
+	for _, model := range OpenAIWebModels() {
+		require.True(t, account.IsModelSupported(model), "model=%s", model)
+	}
+	require.True(t, account.IsModelSupported(" AUTO "))
+	require.False(t, account.IsModelSupported("gpt-5.6"))
+	require.False(t, account.IsModelSupported("claude-sonnet-4-6"))
 }
 
 func TestAccount_OpenAIWSExtraFlags(t *testing.T) {
