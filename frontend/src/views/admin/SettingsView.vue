@@ -7031,7 +7031,10 @@
                 {{ t('admin.settings.features.openaiWebPromptTools.enabledHint') }}
               </p>
             </div>
-            <Toggle v-model="form.enable_openai_web_prompt_tools" />
+            <Toggle
+              v-model="form.enable_openai_web_prompt_tools"
+              data-testid="openai-web-prompt-tools-toggle"
+            />
           </div>
         </div>
 
