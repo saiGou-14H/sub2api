@@ -333,6 +333,23 @@ def main():
         key_id = int(key_id)
 
         result["tests"] = {}
+        models_status, models_payload, _ = request(PUBLIC + "/v1/models", "GET", bearer=gateway_key, timeout=120)
+        models_data = unwrap(models_payload)
+        model_ids = []
+        if isinstance(models_data, dict) and isinstance(models_data.get("data"), list):
+            model_ids = [
+                str(item.get("id"))
+                for item in models_data["data"]
+                if isinstance(item, dict) and item.get("id")
+            ]
+        result["tests"]["models"] = {
+            "status": models_status,
+            "ok": models_status == 200 and "auto" in model_ids,
+            "model_ids": model_ids,
+        }
+        if not result["tests"]["models"]["ok"]:
+            result["tests"]["models"]["error"] = safe_error(models_payload, secrets)
+
         chat_text = {"model": "auto", "stream": False, "messages": [{"role": "user", "content": "Reply with OK"}]}
         chat_stream = {"model": "auto", "stream": True, "messages": [{"role": "user", "content": "Reply with OK"}]}
         responses_text = {"model": "auto", "stream": False, "input": "Reply with OK"}
