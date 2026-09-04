@@ -168,6 +168,45 @@ func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T)
 	require.NotContains(t, string(raw), prompt.Nonce)
 }
 
+func TestOpenAIWebPromptToolsReaderRejectsPlainTextForRequiredChoice(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model:      "auto",
+		ToolChoice: json.RawMessage(`"required"`),
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":\"plain answer\"}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	reader := newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "auto", nil, prompt)
+	raw, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"type":"response.failed"`)
+	require.Contains(t, string(raw), `"code":"tool_protocol_error"`)
+	require.NotContains(t, string(raw), `"type":"response.completed"`)
+}
+
+func TestOpenAIWebPromptToolsReaderCarriesParallelToolMetadata(t *testing.T) {
+	parallel := true
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model:             "auto",
+		ParallelToolCalls: &parallel,
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"calls": []any{map[string]any{"name": "lookup", "arguments": map[string]any{}}, map[string]any{"name": "lookup", "arguments": map[string]any{}}},
+	})
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":" + mustPromptJSONString(string(envelope)) + "}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	reader := newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "auto", nil, prompt)
+	raw, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"parallel_tool_calls":true`)
+}
+
 func mustPromptJSONString(value string) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)

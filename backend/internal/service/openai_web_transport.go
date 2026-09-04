@@ -2795,6 +2795,10 @@ func (r *openAIWebResponsesReader) responseObject(status string, output []any) m
 	if output == nil {
 		output = []any{}
 	}
+	parallel := false
+	if r.promptTools != nil {
+		parallel = r.promptTools.Parallel
+	}
 	return map[string]any{
 		"id":                  r.responseID,
 		"object":              "response",
@@ -2804,7 +2808,7 @@ func (r *openAIWebResponsesReader) responseObject(status string, output []any) m
 		"incomplete_details":  nil,
 		"model":               r.model,
 		"output":              output,
-		"parallel_tool_calls": false,
+		"parallel_tool_calls": parallel,
 	}
 }
 
@@ -2849,6 +2853,15 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 		}
 		if recognized && len(calls) > 0 {
 			r.finishPromptToolCalls(calls)
+			return
+		}
+		if !recognized && (r.promptTools.Choice == "required" || r.promptTools.ChoiceName != "") {
+			r.failed = true
+			response := r.responseObject("failed", nil)
+			response["error"] = map[string]any{"code": "tool_protocol_error", "message": "model did not satisfy the required tool_choice"}
+			r.emit("response.failed", map[string]any{"response": response})
+			r.finished = true
+			_, _ = r.output.WriteString("data: [DONE]\n\n")
 			return
 		}
 		// Prompt mode buffers the upstream text until classification. Emit the
