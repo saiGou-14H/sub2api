@@ -395,6 +395,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	if account.Platform != platform || !account.IsOpenAICompatible() {
 		return "platform_mismatch"
 	}
+	if reason := account.OpenAITransportRateLimitReason(); reason != "" {
+		return reason
+	}
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		if account.IsSchedulable() {
 			return "model_rate_limited"

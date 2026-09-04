@@ -2345,18 +2345,22 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 }
 
 type selectionFailureStats struct {
-	Total              int
-	Eligible           int
-	Excluded           int
-	Unschedulable      int
-	PlatformFiltered   int
-	ModelUnsupported   int
-	ModelRateLimited   int
-	ProfitThreshold    int
-	ProfitInvalidRate  int
-	SamplePlatformIDs  []int64
-	SampleMappingIDs   []int64
-	SampleRateLimitIDs []string
+	Total                   int
+	Eligible                int
+	Excluded                int
+	Unschedulable           int
+	PlatformFiltered        int
+	ModelUnsupported        int
+	ModelRateLimited        int
+	WebRateLimited          int
+	CodexRateLimited        int
+	ProfitThreshold         int
+	ProfitInvalidRate       int
+	SamplePlatformIDs       []int64
+	SampleMappingIDs        []int64
+	SampleRateLimitIDs      []string
+	SampleWebRateLimitIDs   []string
+	SampleCodexRateLimitIDs []string
 }
 
 type selectionFailureDiagnosis struct {
@@ -2377,7 +2381,7 @@ func (s *GatewayService) logDetailedSelectionFailure(
 	stats := s.collectSelectionFailureStats(ctx, accounts, requestedModel, platform, excludedIDs, allowMixedScheduling)
 	logger.LegacyPrintf(
 		"service.gateway",
-		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v",
+		"[SelectAccountDetailed] group_id=%v model=%s platform=%s session=%s total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d web_rate_limited=%d codex_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d sample_platform_filtered=%v sample_model_unsupported=%v sample_model_rate_limited=%v sample_web_rate_limited=%v sample_codex_rate_limited=%v",
 		derefGroupID(groupID),
 		requestedModel,
 		platform,
@@ -2389,11 +2393,15 @@ func (s *GatewayService) logDetailedSelectionFailure(
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,
+		stats.WebRateLimited,
+		stats.CodexRateLimited,
 		stats.ProfitThreshold,
 		stats.ProfitInvalidRate,
 		stats.SamplePlatformIDs,
 		stats.SampleMappingIDs,
 		stats.SampleRateLimitIDs,
+		stats.SampleWebRateLimitIDs,
+		stats.SampleCodexRateLimitIDs,
 	)
 	return stats
 }
@@ -2424,6 +2432,12 @@ func (s *GatewayService) collectSelectionFailureStats(
 		case "model_unsupported":
 			stats.ModelUnsupported++
 			stats.SampleMappingIDs = appendSelectionFailureSampleID(stats.SampleMappingIDs, acc.ID)
+		case "web_rate_limited":
+			stats.WebRateLimited++
+			stats.SampleWebRateLimitIDs = appendSelectionFailureRateSample(stats.SampleWebRateLimitIDs, acc.ID, acc.OpenAITransportRateLimitRemaining())
+		case "codex_rate_limited":
+			stats.CodexRateLimited++
+			stats.SampleCodexRateLimitIDs = appendSelectionFailureRateSample(stats.SampleCodexRateLimitIDs, acc.ID, acc.OpenAITransportRateLimitRemaining())
 		case "model_rate_limited":
 			stats.ModelRateLimited++
 			remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel).Truncate(time.Second)
@@ -2453,6 +2467,12 @@ func (s *GatewayService) diagnoseSelectionFailure(
 	}
 	if _, excluded := excludedIDs[acc.ID]; excluded {
 		return selectionFailureDiagnosis{Category: "excluded"}
+	}
+	if reason := acc.OpenAITransportRateLimitReason(); reason != "" {
+		return selectionFailureDiagnosis{
+			Category: reason,
+			Detail:   fmt.Sprintf("remaining=%s", acc.OpenAITransportRateLimitRemaining().Truncate(time.Second)),
+		}
 	}
 	if !s.isAccountSchedulableForSelection(acc) {
 		return selectionFailureDiagnosis{Category: "unschedulable", Detail: "generic_unschedulable"}
@@ -2516,7 +2536,7 @@ func appendSelectionFailureRateSample(samples []string, accountID int64, remaini
 
 func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 	return fmt.Sprintf(
-		"total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d",
+		"total=%d eligible=%d excluded=%d unschedulable=%d platform_filtered=%d model_unsupported=%d model_rate_limited=%d web_rate_limited=%d codex_rate_limited=%d profit_threshold=%d profit_invalid_account_rate=%d",
 		stats.Total,
 		stats.Eligible,
 		stats.Excluded,
@@ -2524,6 +2544,8 @@ func summarizeSelectionFailureStats(stats selectionFailureStats) string {
 		stats.PlatformFiltered,
 		stats.ModelUnsupported,
 		stats.ModelRateLimited,
+		stats.WebRateLimited,
+		stats.CodexRateLimited,
 		stats.ProfitThreshold,
 		stats.ProfitInvalidRate,
 	)

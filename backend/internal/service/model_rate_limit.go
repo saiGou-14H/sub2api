@@ -13,10 +13,56 @@ const (
 	antigravityGeminiModelRateLimitKey = "antigravity:gemini"
 	openAIImageGenerationRateLimitKey  = "openai:image_generation"
 	openAICodexSparkRateLimitReason    = "openai_codex_spark_rate_limit"
+	// Transport scopes keep ChatGPT Web and Codex windows independent while
+	// reusing the existing persisted model_rate_limits JSONB structure.
+	openAIWebTransportRateLimitKey   = "openai_transport_web"
+	openAICodexTransportRateLimitKey = "openai_transport_codex"
 	// anthropicFableRateLimitKey 是 Anthropic 7d_oi（Fable 专属 7d 窗口）限流的
 	// 家族级 scope：命中后所有 Fable 变体（含 [1m] 等后缀）都不再调度到该账号。
 	anthropicFableRateLimitKey = "claude-fable-5"
 )
+
+// OpenAITransportRateLimitReason returns the protocol-specific scheduler veto
+// for an OpenAI OAuth-like account. An empty string means no active transport
+// window was observed.
+func (a *Account) OpenAITransportRateLimitReason() string {
+	if a == nil || !a.IsOpenAIOAuthLike() {
+		return ""
+	}
+	if a.IsOpenAIWebTransport() {
+		if a.isRateLimitActiveForKey(openAIWebTransportRateLimitKey) {
+			return "web_rate_limited"
+		}
+		return ""
+	}
+	if a.isRateLimitActiveForKey(openAICodexTransportRateLimitKey) {
+		return "codex_rate_limited"
+	}
+	// Older Codex records only have the account-level reset. Treat that legacy
+	// value as Codex-scoped for diagnostics without applying it to Web accounts.
+	if a.RateLimitResetAt != nil && time.Now().Before(*a.RateLimitResetAt) {
+		return "codex_rate_limited"
+	}
+	return ""
+}
+
+// OpenAITransportRateLimitRemaining returns the active protocol window. It is
+// intentionally independent from the other transport's state.
+func (a *Account) OpenAITransportRateLimitRemaining() time.Duration {
+	if a == nil || !a.IsOpenAIOAuthLike() {
+		return 0
+	}
+	if a.IsOpenAIWebTransport() {
+		return a.getRateLimitRemainingForKey(openAIWebTransportRateLimitKey)
+	}
+	remaining := a.getRateLimitRemainingForKey(openAICodexTransportRateLimitKey)
+	if a.RateLimitResetAt != nil {
+		if legacy := time.Until(*a.RateLimitResetAt); legacy > remaining {
+			remaining = legacy
+		}
+	}
+	return remaining
+}
 
 // isRateLimitActiveForKey 检查指定 key 的限流是否生效
 func (a *Account) isRateLimitActiveForKey(key string) bool {
@@ -72,11 +118,22 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 		modelKey = resolveFinalAntigravityModelKey(ctx, a, requestedModel)
 	}
 	modelKey = strings.TrimSpace(modelKey)
-	if modelKey == "" {
-		return nil
-	}
 
-	keys := []string{modelKey}
+	keys := make([]string, 0, 3)
+	// OpenAI OAuth-like accounts use a protocol-wide bucket in addition to any
+	// model-specific bucket. Including it here covers legacy GatewayService
+	// sticky/routing paths that only call IsSchedulableForModelWithContext.
+	if a.IsOpenAIOAuthLike() {
+		if a.IsOpenAIWebTransport() {
+			keys = append(keys, openAIWebTransportRateLimitKey)
+		} else {
+			keys = append(keys, openAICodexTransportRateLimitKey)
+		}
+	}
+	if modelKey == "" {
+		return keys
+	}
+	keys = append(keys, modelKey)
 	switch a.Platform {
 	case PlatformAntigravity:
 		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {

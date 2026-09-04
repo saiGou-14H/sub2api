@@ -1127,6 +1127,13 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 // handle429 处理429限流错误
 // 解析响应头获取重置时间，标记账号为限流状态
 func (s *RateLimitService) handle429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+	// ChatGPT Web uses a body-driven hourly message bucket rather than the
+	// Codex x-codex-* quota headers. Keep it completely out of the global
+	// account reset and Codex retry path.
+	if account != nil && account.IsOpenAIWebTransport() {
+		s.handleOpenAIWeb429(ctx, account, headers, responseBody)
+		return
+	}
 	// OpenAI OAuth stays on the same account for the gateway's bounded retry
 	// window. Persisting a rate-limit reset on the first 429 would make the next
 	// retry ineligible and silently turn same-account recovery into a switch.
@@ -1161,6 +1168,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		s.persistOpenAICodexSnapshot(ctx, account, headers)
 		notifyOpenAIAutoReset(account.ID)
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
+			s.persistOpenAITransportRateLimit(ctx, account, openAICodexTransportRateLimitKey, *resetAt, "codex_429")
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
 			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
@@ -1203,6 +1211,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			// 尝试解析 OpenAI 的 usage_limit_reached 错误
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
+				s.persistOpenAITransportRateLimit(ctx, account, openAICodexTransportRateLimitKey, resetTime, "codex_429")
 				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
 				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
@@ -1270,6 +1279,70 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
 }
 
+func (s *RateLimitService) handleOpenAIWeb429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+	if s == nil || account == nil || !account.IsOpenAIWebTransport() {
+		return
+	}
+	now := time.Now()
+	disposition, resetAt := classifyOpenAIWeb429(headers, responseBody)
+	reason := "web_429"
+	if disposition == openAIWeb429MessageLimit {
+		reason = "web_message_limit"
+	}
+	if resetAt == nil || !resetAt.After(now) {
+		cooldown := openAIOAuth429FallbackCooldown
+		if disposition == openAIWeb429MessageLimit {
+			cooldown = openAIWebMessageLimitCooldown
+		} else if configured, ok := s.get429FallbackCooldown(ctx, account); ok && configured > 0 {
+			cooldown = configured
+		}
+		reset := now.Add(cooldown)
+		resetAt = &reset
+	}
+	s.persistOpenAITransportRateLimit(ctx, account, openAIWebTransportRateLimitKey, *resetAt, reason)
+	s.notifyAccountSchedulingBlocked(account, *resetAt, reason)
+	slog.Info("openai_web_rate_limited",
+		"account_id", account.ID,
+		"scope", openAIWebTransportRateLimitKey,
+		"reason", reason,
+		"reset_at", resetAt.UTC(),
+		"reset_in", time.Until(*resetAt).Truncate(time.Second))
+}
+
+func (s *RateLimitService) persistOpenAITransportRateLimit(ctx context.Context, account *Account, scope string, resetAt time.Time, reason string) {
+	if s == nil || s.accountRepo == nil || account == nil || !account.IsOpenAIOAuthLike() || resetAt.IsZero() {
+		return
+	}
+	if !resetAt.After(time.Now()) {
+		return
+	}
+	setAccountModelRateLimitSnapshot(account, scope, resetAt, reason, time.Now())
+	if err := setModelRateLimitSafely(s.accountRepo, ctx, account.ID, scope, resetAt, reason); err != nil {
+		slog.Warn("openai_transport_rate_limit_set_failed",
+			"account_id", account.ID,
+			"transport", account.OpenAITransport(),
+			"scope", scope,
+			"reset_at", resetAt.UTC(),
+			"error", err)
+	}
+}
+
+// setModelRateLimitSafely keeps an account error path fail-closed when a
+// lightweight repository double embeds a nil AccountRepository interface. The
+// production repository never panics, while older unit doubles remain usable
+// as the transport scopes are introduced.
+func setModelRateLimitSafely(repo AccountRepository, ctx context.Context, accountID int64, scope string, resetAt time.Time, reason string) (err error) {
+	if repo == nil {
+		return nil
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("set model rate limit panic: %v", recovered)
+		}
+	}()
+	return repo.SetModelRateLimit(ctx, accountID, scope, resetAt, reason)
+}
+
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
 	cooldown, enabled := s.get429FallbackCooldown(ctx, account)
 	if !enabled {
@@ -1278,6 +1351,9 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 	}
 
 	resetAt := time.Now().Add(cooldown)
+	if account != nil && account.Platform == PlatformOpenAI && account.UsesOpenAICodexProtocol() {
+		s.persistOpenAITransportRateLimit(ctx, account, openAICodexTransportRateLimitKey, resetAt, "codex_"+reason)
+	}
 	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429_fallback")
 	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {

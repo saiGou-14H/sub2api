@@ -223,6 +223,9 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
 
 const formatScopeName = (scope: string): string => {
   const aliases: Record<string, string> = {
+    // OpenAI protocol buckets
+    openai_transport_web: 'Web',
+    openai_transport_codex: 'Codex',
     // Claude 系列
     'claude-fable-5-1': 'CFable51',
     'claude-fable-5': 'CFable5',

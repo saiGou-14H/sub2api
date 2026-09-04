@@ -68,6 +68,8 @@ type openAIAccountTestRepo struct {
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
 	rateLimitedAt      *time.Time
+	modelRateLimitKey  string
+	modelRateLimitAt   *time.Time
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
@@ -87,6 +89,12 @@ func (r *openAIAccountTestRepo) BulkUpdate(_ context.Context, ids []int64, updat
 func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, resetAt time.Time) error {
 	r.rateLimitedID = id
 	r.rateLimitedAt = &resetAt
+	return nil
+}
+
+func (r *openAIAccountTestRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, _ ...string) error {
+	r.modelRateLimitKey = scope
+	r.modelRateLimitAt = &resetAt
 	return nil
 }
 
@@ -384,6 +392,27 @@ func TestAccountTestService_OpenAIWebProbeUsesMinimalChatCompletionsRequest(t *t
 	require.Nil(t, request.MaxCompletionTokens)
 	require.Nil(t, request.Temperature)
 	require.Nil(t, request.TopP)
+}
+
+func TestAccountTestService_ReconcileOpenAIWeb429UsesDedicatedScope(t *testing.T) {
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{
+		ID:       96,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Extra:    map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+	body := []byte(`{"error":{"message":"You've reached our limit of messages per hour. Please try again later."}}`)
+
+	svc.reconcileOpenAI429State(context.Background(), account, http.Header{}, body)
+
+	require.Zero(t, repo.rateLimitedID)
+	require.Equal(t, openAIWebTransportRateLimitKey, repo.modelRateLimitKey)
+	require.NotNil(t, repo.modelRateLimitAt)
+	require.True(t, repo.modelRateLimitAt.After(time.Now().Add(59*time.Minute)))
+	require.Equal(t, "web_rate_limited", account.OpenAITransportRateLimitReason())
+	require.Nil(t, account.RateLimitResetAt)
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

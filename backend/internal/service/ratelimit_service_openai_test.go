@@ -262,6 +262,33 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, account.ID, repo.rateLimitedID)
 }
 
+func TestHandle429_OpenAIWebMessageLimitUsesDedicatedScope(t *testing.T) {
+	repo := &oauth429RateLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       125,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
+	}
+	body := []byte(`{"error":{"message":"You've reached our limit of messages per hour. Please try again later."}}`)
+
+	before := time.Now()
+	svc.handle429(context.Background(), account, http.Header{}, body)
+
+	require.Zero(t, repo.setRateLimitedCalls, "Web 429 must not write the global Codex/account reset")
+	require.Equal(t, 1, repo.setModelRateLimitCalls)
+	require.Equal(t, openAIWebTransportRateLimitKey, repo.lastModelRateLimitKey)
+	require.True(t, repo.lastModelRateLimitedUntil.After(before.Add(59*time.Minute)))
+	require.Equal(t, "web_rate_limited", account.OpenAITransportRateLimitReason())
+	require.False(t, svcShouldRetryOpenAIWeb429(account, body))
+}
+
+func svcShouldRetryOpenAIWeb429(account *Account, body []byte) bool {
+	svc := &OpenAIGatewayService{}
+	return svc.ShouldRetryOpenAIOAuth429(account, http.Header{}, body)
+}
+
 // TestHandle429_SkipsSparkShadow 外审第8轮 P1:spark 影子的限流状态只由 QueryUsage(/wham/usage
 // codex_bengalfox)维护;/responses 429 携带的 global x-codex-* 不得对影子做任何 DB 限流写入,
 // 否则会把 spark 误耦合到 global codex 窗口、冷却到 global reset。

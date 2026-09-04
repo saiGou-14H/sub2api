@@ -1439,6 +1439,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				continue
 			}
 		}
+		if reason := account.OpenAITransportRateLimitReason(); reason != "" {
+			filterStats.exclude(reason)
+			continue
+		}
 		if !account.IsSchedulable() {
 			filterStats.exclude("not_schedulable")
 			continue
@@ -1774,6 +1778,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIProxyStreamQuarantined(ctx, account) {
 		return false, "proxy_stream_quarantined"
+	}
+	if reason := account.OpenAITransportRateLimitReason(); reason != "" {
+		return false, reason
 	}
 	// Quota auto-pause must be evaluated during the initial filter too. Without it the
 	// TopK candidate pool can be filled with paused accounts and the later fresh/DB

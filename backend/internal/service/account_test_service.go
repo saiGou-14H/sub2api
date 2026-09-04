@@ -2308,6 +2308,23 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	if s == nil || s.accountRepo == nil || account == nil {
 		return
 	}
+	if account.IsOpenAIWebTransport() {
+		now := time.Now()
+		disposition, resetAt := classifyOpenAIWeb429(headers, body)
+		reason := "web_429"
+		cooldown := openAIOAuth429FallbackCooldown
+		if disposition == openAIWeb429MessageLimit {
+			reason = "web_message_limit"
+			cooldown = openAIWebMessageLimitCooldown
+		}
+		if resetAt == nil || !resetAt.After(now) {
+			reset := now.Add(cooldown)
+			resetAt = &reset
+		}
+		setAccountModelRateLimitSnapshot(account, openAIWebTransportRateLimitKey, *resetAt, reason, now)
+		_ = setModelRateLimitSafely(s.accountRepo, ctx, account.ID, openAIWebTransportRateLimitKey, *resetAt, reason)
+		return
+	}
 
 	persistOpenAI429PlanType(ctx, s.accountRepo, account, body)
 

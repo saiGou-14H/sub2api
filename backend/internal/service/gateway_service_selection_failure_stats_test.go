@@ -139,3 +139,44 @@ func TestDiagnoseSelectionFailure_ModelRateLimitedDetail(t *testing.T) {
 		t.Fatalf("detail=%s want contains remaining=", diagnosis.Detail)
 	}
 }
+
+func TestCollectSelectionFailureStats_SeparatesOpenAITransportLimits(t *testing.T) {
+	svc := &GatewayService{}
+	resetAt := time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339)
+	accounts := []Account{
+		{
+			ID:          9,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Extra: map[string]any{
+				OpenAIWebTransportExtraKey: OpenAITransportWeb,
+				modelRateLimitsKey: map[string]any{
+					openAIWebTransportRateLimitKey: map[string]any{"rate_limit_reset_at": resetAt},
+				},
+			},
+		},
+		{
+			ID:          10,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Extra: map[string]any{
+				OpenAIWebTransportExtraKey: OpenAITransportCodex,
+				modelRateLimitsKey: map[string]any{
+					openAICodexTransportRateLimitKey: map[string]any{"rate_limit_reset_at": resetAt},
+				},
+			},
+		},
+	}
+
+	stats := svc.collectSelectionFailureStats(context.Background(), accounts, "auto", PlatformOpenAI, map[int64]struct{}{}, false)
+	if stats.WebRateLimited != 1 || stats.CodexRateLimited != 1 {
+		t.Fatalf("transport limits = web:%d codex:%d, want web:1 codex:1", stats.WebRateLimited, stats.CodexRateLimited)
+	}
+	if stats.ModelRateLimited != 0 {
+		t.Fatalf("transport limits leaked into model_rate_limited: %d", stats.ModelRateLimited)
+	}
+}

@@ -12,6 +12,7 @@ import (
 const (
 	openAIAccountStateUpdateTimeout       = 5 * time.Second
 	openAIOAuth429FallbackCooldown        = 5 * time.Second
+	openAIWebMessageLimitCooldown         = time.Hour
 	openAIOAuth429RetryWindow             = 2 * time.Minute
 	openAIOAuth429RetryDelay              = 500 * time.Millisecond
 	openAIOAuth429MaxRetryDelay           = 8 * time.Second
@@ -20,6 +21,50 @@ const (
 	openAIOAuth429StormWindow             = 10 * time.Second
 	openAIOAuth429StormMaxAccountSwitches = 1
 )
+
+type openAIWeb429Disposition uint8
+
+const (
+	openAIWeb429Transient openAIWeb429Disposition = iota
+	openAIWeb429MessageLimit
+)
+
+// classifyOpenAIWeb429 handles ChatGPT Web's body-only quota response. Web
+// does not emit Codex x-codex-* headers, so routing it through the Codex
+// classifier loses the hourly message window and causes repeated retries.
+func classifyOpenAIWeb429(headers http.Header, responseBody []byte) (openAIWeb429Disposition, *time.Time) {
+	now := time.Now()
+	if resetAt := parseRetryAfterResetTime(headers, now); resetAt != nil && resetAt.After(now) {
+		if isOpenAIWebMessageLimitBody(responseBody) {
+			return openAIWeb429MessageLimit, resetAt
+		}
+		return openAIWeb429Transient, resetAt
+	}
+	if isOpenAIWebMessageLimitBody(responseBody) {
+		return openAIWeb429MessageLimit, nil
+	}
+	return openAIWeb429Transient, nil
+}
+
+func isOpenAIWebMessageLimitBody(responseBody []byte) bool {
+	body := strings.ToLower(string(responseBody))
+	if body == "" {
+		return false
+	}
+	markers := []string{
+		"messages per hour",
+		"message limit",
+		"limit of messages",
+		"you've reached our limit",
+		"you have reached our limit",
+	}
+	for _, marker := range markers {
+		if strings.Contains(body, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 // OpenAIOAuth429FailoverState tracks the request-local follow-up budget after
 // the first Grok OAuth 429. Once that 429 occurs, exactly one different account
@@ -217,6 +262,27 @@ func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(ctx context.Context
 	if s == nil || !isOpenAIOAuthAccount(account) {
 		return
 	}
+	// ChatGPT Web has a separate hourly message bucket. Do not count it in the
+	// Codex OAuth storm/retry window and do not write the global account reset.
+	if account.IsOpenAIWebTransport() {
+		now := time.Now()
+		disposition, resetAt := classifyOpenAIWeb429(headers, responseBody)
+		if resetAt == nil || !resetAt.After(now) {
+			cooldown := openAIOAuth429FallbackCooldown
+			if disposition == openAIWeb429MessageLimit {
+				cooldown = openAIWebMessageLimitCooldown
+			} else if s.rateLimitService != nil {
+				if configured, ok := s.rateLimitService.get429FallbackCooldown(ctx, account); ok && configured > 0 {
+					cooldown = configured
+				}
+			}
+			reset := now.Add(cooldown)
+			resetAt = &reset
+		}
+		s.BlockAccountScheduling(account, *resetAt, "web_rate_limited")
+		s.openaiOAuth429RetryStartedAt.Delete(account.ID)
+		return
+	}
 	// Spark 影子：不按 /responses 429 的 global x-codex-* 信号做内存运行时熔断(同 handle429,外审第8轮 P1)。
 	// 同时避免把 spark 的 429 计入全局 429 storm 计数(recordOpenAIOAuth429),否则会误伤母账号 failover 决策。
 	if account.IsShadow() {
@@ -245,7 +311,7 @@ func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccount(account *A
 }
 
 func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccountWithResponse(account *Account, statusCode int, shouldDisable bool, headers http.Header, responseBody []byte) bool {
-	if shouldDisable || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsShadow() {
+	if shouldDisable || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() {
 		return false
 	}
 	disposition, _ := classifyOpenAIOAuth429(headers, responseBody)
@@ -263,7 +329,7 @@ func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccountWithRespons
 // ShouldRetryOpenAIOAuth429 lets RateLimitService defer persistent account
 // cooldown until the gateway's same-account retry window is exhausted.
 func (s *OpenAIGatewayService) ShouldRetryOpenAIOAuth429(account *Account, headers http.Header, responseBody []byte) bool {
-	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || s.isOpenAIAccountRuntimeBlocked(account) {
+	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() || s.isOpenAIAccountRuntimeBlocked(account) {
 		return false
 	}
 	disposition, _ := classifyOpenAIOAuth429(headers, responseBody)
