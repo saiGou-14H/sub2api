@@ -335,11 +335,14 @@ def main():
         result["tests"] = {}
         models_status, models_payload, _ = request(PUBLIC + "/v1/models", "GET", bearer=gateway_key, timeout=120)
         models_data = unwrap(models_payload)
+        model_items = models_data if isinstance(models_data, list) else (
+            models_data.get("data", []) if isinstance(models_data, dict) else []
+        )
         model_ids = []
-        if isinstance(models_data, dict) and isinstance(models_data.get("data"), list):
+        if isinstance(model_items, list):
             model_ids = [
                 str(item.get("id"))
-                for item in models_data["data"]
+                for item in model_items
                 if isinstance(item, dict) and item.get("id")
             ]
         result["tests"]["models"] = {
