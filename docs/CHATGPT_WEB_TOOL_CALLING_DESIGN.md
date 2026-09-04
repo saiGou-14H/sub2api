@@ -1,6 +1,6 @@
 # ChatGPT Web Tool Calling Compatibility
 
-Status: Draft
+Status: Implementation baseline
 
 Last updated: 2026-09-04
 
@@ -12,9 +12,11 @@ model discovery, streaming, and attachments through the existing
 function tools because the private ChatGPT Web conversation protocol does not
 accept OpenAI API `tools` definitions directly.
 
-This document records the initial design for adding OpenAI-compatible function
-calling without claiming that ChatGPT Web provides a native function-calling
-API.
+This document records the implementation baseline for adding OpenAI-compatible
+tool calling without claiming that ChatGPT Web provides a native function-
+calling API. The bridge is prompt-based: the public request is validated and
+normalized, a private protocol instruction is sent to ChatGPT Web, and the
+result is converted back to standard Responses/Chat tool events.
 
 ## 2. Current behavior
 
@@ -142,22 +144,67 @@ more `role: "tool"` messages correlated by `tool_call_id`.
 The implementation should generate one internal Responses-style representation
 and reuse Sub2API's existing Responses-to-Chat conversion where possible.
 
-## 8. Initial supported surface
+## 8. Strict schema and tool registry
 
-Phase one should support:
+The bridge uses a normalized internal representation rather than passing raw
+OpenAI tool JSON into the Web endpoint. Function-like schemas are parsed as
+JSON Schema Draft 2020-12 documents. The validator enforces valid JSON, object
+roots, valid keyword types, bounded depth/bytes, consistent `required` and
+`properties`, and safe `additionalProperties` handling. Tool arguments are
+validated against the same normalized schema before a call is emitted. Invalid
+schemas or arguments fail closed with an OpenAI-shaped 400/upstream protocol
+error; they are never silently repaired into a different call.
 
-- `type: "function"` tools;
-- `tool_choice` values `auto`, `none`, `required`, and a specifically named
-  function;
-- `parallel_tool_calls` with a bounded maximum call count;
-- Chat Completions assistant tool calls and tool-result messages;
-- Responses `function_call` and `function_call_output` input items;
-- streaming and non-streaming output;
-- tool-enabled requests that also contain supported attachments.
+The registry is type-driven and extensible. It currently recognizes these
+OpenAI/ChatGPT tool families:
 
-Phase one should not claim support for built-in web search, code execution,
-computer use, custom/freeform tools, remote MCP discovery, or server-side tool
-execution.
+| Declaration type | Prompt representation | Public result | Execution boundary |
+|---|---|---|---|
+| `function` | function schema | `function_call` / `tool_calls` | API client |
+| `custom` | strict `{input:string}` wrapper | function-compatible call | API client |
+| `web_search`, `web_search_preview`, `x_search` | typed search wrapper | function-compatible call | API client or configured search service |
+| `file_search` | typed retrieval wrapper | function-compatible call | API client or configured retrieval service |
+| `code_interpreter`, `shell`, `local_shell` | typed execution wrapper | function-compatible call | external sandbox required |
+| `computer_use` | typed action wrapper | function-compatible call | external computer-use runner required |
+| `image_generation` | typed image wrapper | function-compatible call | image executor required |
+| `remote_mcp`, `mcp`, `skills`, `tool_search`, `programmatic_tool_call` | typed namespace/search wrapper | function-compatible call | configured MCP/skills executor required |
+| `namespace` | flattened, collision-checked function names | function-compatible call | API client or registered executor |
+
+The registry accepts newly introduced declaration types through the generic
+typed-wrapper path, so the public `/v1/models` catalog and Web model selectors
+do not need a hard-coded five-model/tool ceiling. Generic wrappers preserve the
+original declaration type in the private protocol and include an explicit
+capability marker in the returned call metadata. They do not imply that the
+gateway can execute the tool: only the API caller or an administrator-
+configured executor may do so.
+
+The normalized envelope is:
+
+```json
+{
+  "protocol": "sub2api.prompt_tool.v1",
+  "nonce": "request_nonce",
+  "schema_hash": "sha256-prefix",
+  "calls": [
+    {
+      "name": "get_weather",
+      "type": "function",
+      "arguments": {"city": "Shanghai"}
+    }
+  ]
+}
+```
+
+Every request receives a random nonce and schema hash. The parser requires the
+exact protocol, nonce, hash, allowlisted name, valid argument object, bounded
+call count/size, and no unparsed non-whitespace text in a tool envelope.
+
+The bridge supports `auto`, `none`, `required`, named choices, parallel calls,
+legacy `functions`/`function_call` normalization, assistant tool-call history,
+tool-result continuation, attachments, and both streaming and non-streaming
+public endpoints. Tool-enabled Web streams are buffered until the classifier
+can prove whether the output is text or a valid envelope; private markers are
+never leaked to clients.
 
 Legacy `functions` and `function_call` may be normalized to the modern function
 tool representation after the primary flow is stable.
@@ -254,17 +301,19 @@ WebCodex mode, if implemented, requires a separate acceptance suite with an
 isolated test project, a read-only tool first, explicit mutation approval tests,
 and Runner disconnect/retry coverage.
 
-## 14. Open decisions
+## 14. Implementation gates
 
-- Whether phase one should support only modern function tools or also normalize
-  legacy `functions` immediately.
-- Maximum schema size, call count, and argument/result size.
-- Whether tool-enabled streaming always buffers or supports an incremental
-  classifier after the initial release.
-- Whether invalid model envelopes fail immediately or permit one bounded repair
-  attempt in a later release.
-- Whether WebCodex execution belongs in Sub2API core or a separately versioned
-  provider/plugin.
+- Prompt Tool is disabled by default and enabled only by the administrator
+  setting `enable_openai_web_prompt_tools`.
+- When disabled, Web requests with tools keep the existing explicit 400 error.
+- When enabled, all declarations go through the strict registry and generic
+  wrappers. Unsupported execution environments return a clear capability error
+  after the client receives the call; the gateway never executes arbitrary
+  caller-provided code.
+- Focused tests must cover schema rejection, all registry families, nonce/hash
+  validation, tool-choice semantics, parallel calls, history/result replay,
+  stream buffering, malformed envelopes, and attachment coexistence.
 
-No tool-calling behavior described here is implemented until the corresponding
-code, tests, live verification, and deployment are completed.
+This document is the contract for the first runtime implementation; any change
+to the envelope or registry requires a versioned protocol update and regression
+tests.

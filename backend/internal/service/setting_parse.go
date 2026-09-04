@@ -882,6 +882,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
 	}
+	// Web Prompt Tool is opt-in and fail-closed.
+	result.EnableOpenAIWebPromptTools = settings[SettingKeyEnableOpenAIWebPromptTools] == "true"
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

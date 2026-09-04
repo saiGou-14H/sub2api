@@ -1311,7 +1311,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	if originalModel == "" {
 		return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("model", "model is required"))
 	}
-	if err := ValidateOpenAIWebResponsesRequest(&responsesReq); err != nil {
+	promptToolsEnabled := s != nil && s.settingService != nil && s.settingService.IsOpenAIWebPromptToolsEnabled(ctx)
+	var promptTools *OpenAIWebPromptTools
+	if promptToolsEnabled {
+		var promptErr error
+		promptTools, promptErr = NewOpenAIWebPromptToolsFromResponsesRequest(&responsesReq)
+		if promptErr != nil {
+			return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("tools", promptErr.Error()))
+		}
+	}
+	if err := ValidateOpenAIWebResponsesRequestWithPromptTools(&responsesReq, promptToolsEnabled); err != nil {
 		return nil, writeOpenAIWebRequestError(c, err)
 	}
 
@@ -1322,6 +1331,15 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	if err != nil {
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses request for web transport: %w", err)
+	}
+	if promptTools != nil {
+		strict := true
+		chatReq.Tools = make([]apicompat.ChatTool, 0, len(promptTools.Tools))
+		for _, tool := range promptTools.Tools {
+			chatReq.Tools = append(chatReq.Tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{
+				Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: &strict,
+			}})
+		}
 	}
 
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
@@ -1349,7 +1367,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		upstreamCtx,
 		account,
 		token,
-		OpenAIWebConversationOptions{Request: chatReq},
+		OpenAIWebConversationOptions{Request: chatReq, PromptTools: promptTools},
 	)
 	if err != nil {
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, false)

@@ -14,6 +14,12 @@ export default {
         payment: 'Payment',
       },
       features: {
+        openaiWebPromptTools: {
+          title: 'ChatGPT Web Prompt Tool',
+          description: 'Bridge OpenAI tool declarations through a strict prompt protocol for ChatGPT Web accounts.',
+          enabled: 'Enable Web Prompt Tool',
+          enabledHint: 'Opt-in. Tool schemas are validated, calls are buffered and converted back to standard Responses/Chat tool events. The gateway never executes caller-provided code.',
+        },
         channelMonitor: {
           title: 'Channel Monitor',
           description: 'Choose either V1 active probes or V2 passive usage monitoring. When disabled, both background jobs stop and the user entry is hidden.',

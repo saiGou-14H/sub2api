@@ -14,6 +14,12 @@ export default {
         payment: '支付设置',
       },
       features: {
+        openaiWebPromptTools: {
+          title: 'ChatGPT 网页 Prompt Tool',
+          description: '通过严格的提示协议，将 OpenAI 工具声明桥接到 ChatGPT 网页账号。',
+          enabled: '启用网页 Prompt Tool',
+          enabledHint: '默认关闭。工具 Schema 会先校验，调用会缓冲并转换回标准 Responses/Chat 工具事件；网关不会执行调用方代码。',
+        },
         channelMonitor: {
           title: '渠道监控',
           description: '启用后在 V1 主动探测与 V2 被动用量监控中二选一。关闭后两种模式的后台任务均停止，用户端入口隐藏。',

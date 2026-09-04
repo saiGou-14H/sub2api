@@ -197,6 +197,12 @@ func validateOpenAIWebModel(value string) error {
 // be represented by the Web conversation protocol. Advisory compatibility
 // fields are validated and then omitted from the private payload.
 func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsRequest) error {
+	return ValidateOpenAIWebChatCompletionsRequestWithPromptTools(req, false)
+}
+
+// ValidateOpenAIWebChatCompletionsRequestWithPromptTools applies the regular
+// Web compatibility checks and optionally enables the prompt-based tool bridge.
+func ValidateOpenAIWebChatCompletionsRequestWithPromptTools(req *apicompat.ChatCompletionsRequest, promptToolsEnabled bool) error {
 	if req == nil {
 		return openAIWebInvalidParam("", "Chat Completions request is nil")
 	}
@@ -222,18 +228,40 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 		return openAIWebUnsupportedParam("stop")
 	}
 	if len(req.Tools) > 0 {
-		return openAIWebUnsupportedParam("tools")
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("tools")
+		}
+		if _, err := NewOpenAIWebPromptToolsFromChatRequest(req); err != nil {
+			return openAIWebInvalidParam("tools", err.Error())
+		}
 	}
 	if !openAIWebNoOpToolChoice(req.ToolChoice) {
-		return openAIWebUnsupportedParam("tool_choice")
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("tool_choice")
+		}
+		if _, _, err := normalizeOpenAIWebPromptToolChoice(req.ToolChoice, nil); err != nil {
+			return openAIWebInvalidParam("tool_choice", err.Error())
+		}
 	}
 	// parallel_tool_calls is a no-op when tools are absent (tools themselves
 	// are rejected below), so either boolean value can be safely ignored.
 	if len(req.Functions) > 0 {
-		return openAIWebUnsupportedParam("functions")
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("functions")
+		}
+		if len(req.Tools) == 0 {
+			if _, err := NewOpenAIWebPromptToolsFromChatRequest(req); err != nil {
+				return openAIWebInvalidParam("functions", err.Error())
+			}
+		}
 	}
 	if !openAIWebNoOpToolChoice(req.FunctionCall) {
-		return openAIWebUnsupportedParam("function_call")
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("function_call")
+		}
+		if _, _, err := normalizeOpenAIWebPromptToolChoice(nil, req.FunctionCall); err != nil {
+			return openAIWebInvalidParam("function_call", err.Error())
+		}
 	}
 	if !openAIWebPlainTextFormat(req.ResponseFormat) {
 		return openAIWebUnsupportedParam("response_format")
@@ -249,18 +277,24 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 		switch role {
 		case "", "system", "developer", "user", "assistant":
 		case "tool", "function":
-			return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].role", index))
+			if !promptToolsEnabled {
+				return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].role", index))
+			}
 		default:
 			return openAIWebInvalidParam(fmt.Sprintf("messages[%d].role", index), fmt.Sprintf("unsupported Chat Completions message role %q", role))
 		}
-		if len(message.ToolCalls) > 0 {
+		if len(message.ToolCalls) > 0 && !promptToolsEnabled {
 			return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].tool_calls", index))
 		}
 		if message.FunctionCall != nil {
-			return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].function_call", index))
+			if !promptToolsEnabled {
+				return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].function_call", index))
+			}
 		}
 		if strings.TrimSpace(message.ToolCallID) != "" {
-			return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].tool_call_id", index))
+			if !promptToolsEnabled {
+				return openAIWebUnsupportedParam(fmt.Sprintf("messages[%d].tool_call_id", index))
+			}
 		}
 	}
 	return nil
@@ -269,6 +303,12 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 // ValidateOpenAIWebResponsesRequest performs the same compatibility check
 // before a Responses request is bridged to Chat Completions.
 func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
+	return ValidateOpenAIWebResponsesRequestWithPromptTools(req, false)
+}
+
+// ValidateOpenAIWebResponsesRequestWithPromptTools applies the regular Web
+// compatibility checks and optionally enables the prompt-based tool bridge.
+func ValidateOpenAIWebResponsesRequestWithPromptTools(req *apicompat.ResponsesRequest, promptToolsEnabled bool) error {
 	if req == nil {
 		return openAIWebInvalidParam("", "Responses request is nil")
 	}
@@ -287,11 +327,26 @@ func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
 	if err := validateOpenAIPositiveIntegerParameter("max_output_tokens", req.MaxOutputTokens); err != nil {
 		return err
 	}
-	if len(req.Tools) > 0 {
-		return openAIWebUnsupportedParam("tools")
+	effectiveTools, effectiveErr := apicompat.EffectiveResponsesTools(req)
+	if effectiveErr != nil {
+		return openAIWebInvalidParam("tools", effectiveErr.Error())
+	}
+	if len(effectiveTools) > 0 {
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("tools")
+		}
+		if _, err := NewOpenAIWebPromptToolsFromResponsesRequest(req); err != nil {
+			return openAIWebInvalidParam("tools", err.Error())
+		}
 	}
 	if !openAIWebNoOpToolChoice(req.ToolChoice) {
-		return openAIWebUnsupportedParam("tool_choice")
+		if !promptToolsEnabled {
+			return openAIWebUnsupportedParam("tool_choice")
+		}
+		choiceRaw := normalizeOpenAIWebResponsesPromptToolChoice(req.ToolChoice, effectiveTools)
+		if _, _, err := normalizeOpenAIWebPromptToolChoice(choiceRaw, nil); err != nil {
+			return openAIWebInvalidParam("tool_choice", err.Error())
+		}
 	}
 	// With no Web tool bridge, parallel_tool_calls has no observable effect.
 	if req.Store != nil && *req.Store {
@@ -1223,7 +1278,10 @@ func requiredBool(root map[string]any, key, nested string) bool {
 // OpenAIWebConversationOptions controls conversion of a Chat Completions
 // request into the classic web conversation envelope.
 type OpenAIWebConversationOptions struct {
-	Request         *apicompat.ChatCompletionsRequest
+	Request *apicompat.ChatCompletionsRequest
+	// PromptTools is populated only when the administrator-enabled Web Prompt
+	// Tool bridge is active. It carries request-scoped nonce/schema state.
+	PromptTools     *OpenAIWebPromptTools
 	ConversationID  string
 	ParentMessageID string
 	// TurnTraceID is shared by the browser's conversation/prepare and
@@ -1251,19 +1309,23 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		return nil, errors.New("Chat Completions request is nil")
 	}
 	request := options.Request
-	if err := ValidateOpenAIWebChatCompletionsRequest(request); err != nil {
+	if err := ValidateOpenAIWebChatCompletionsRequestWithPromptTools(request, options.PromptTools != nil); err != nil {
 		return nil, err
 	}
 	model, ok := NormalizeOpenAIWebModel(request.Model)
 	if !ok {
 		return nil, openAIWebInvalidParam("model", fmt.Sprintf("model %q is not supported by ChatGPT web transport", strings.TrimSpace(request.Model)))
 	}
-	messages, err := openAIWebMessagesFromChatRequestWithTransport(ctx, account, token, t, request)
+	messages, err := openAIWebMessagesFromChatRequestWithPromptTools(ctx, account, token, t, request, options.PromptTools)
 	if err != nil {
 		return nil, err
 	}
 	if len(messages) == 0 {
 		return nil, errors.New("Chat Completions request has no messages")
+	}
+	if options.PromptTools != nil {
+		prompt := openAIWebMessage("system", options.PromptTools.Instruction(), nil)
+		messages = append([]map[string]any{prompt}, messages...)
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -1376,6 +1438,10 @@ type openAIWebMessageContent struct {
 }
 
 func openAIWebMessagesFromChatRequestWithTransport(ctx context.Context, account *Account, token string, transport *OpenAIWebTransport, request *apicompat.ChatCompletionsRequest) ([]map[string]any, error) {
+	return openAIWebMessagesFromChatRequestWithPromptTools(ctx, account, token, transport, request, nil)
+}
+
+func openAIWebMessagesFromChatRequestWithPromptTools(ctx context.Context, account *Account, token string, transport *OpenAIWebTransport, request *apicompat.ChatCompletionsRequest, promptTools *OpenAIWebPromptTools) ([]map[string]any, error) {
 	if request == nil {
 		return nil, errors.New("Chat Completions request is nil")
 	}
@@ -1402,6 +1468,19 @@ func openAIWebMessagesFromChatRequestWithTransport(ctx context.Context, account 
 		content, err := openAIWebMessageContentFromRaw(message.Content)
 		if err != nil {
 			return nil, err
+		}
+		if promptTools != nil {
+			if len(message.ToolCalls) > 0 {
+				content.Text = promptTools.EncodeAssistantToolCalls(message.ToolCalls)
+			} else if message.FunctionCall != nil {
+				content.Text = promptTools.EncodeAssistantToolCalls([]apicompat.ChatToolCall{{
+					Type:     "function",
+					Function: *message.FunctionCall,
+				}})
+			}
+			if strings.EqualFold(strings.TrimSpace(message.Role), "tool") {
+				content.Text = promptTools.EncodeToolResult(message.ToolCallID, content.Text)
+			}
 		}
 		metadata := map[string]any{}
 		if message.Name != "" {
@@ -2436,7 +2515,7 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	if options.Request != nil {
 		history = options.Request.Messages
 	}
-	resp.Body = NewOpenAIWebResponsesBodyWithHistory(resp.Body, model, history)
+	resp.Body = newOpenAIWebResponsesBodyWithPromptTools(resp.Body, model, history, options.PromptTools)
 	resp.Header.Set("Content-Type", "text/event-stream")
 	return resp, nil
 }
@@ -2449,6 +2528,10 @@ func NewOpenAIWebResponsesBody(source io.ReadCloser, model string) io.ReadCloser
 // NewOpenAIWebResponsesBodyWithHistory also removes assistant messages that
 // the web endpoint replays from the submitted conversation history.
 func NewOpenAIWebResponsesBodyWithHistory(source io.ReadCloser, model string, messages []apicompat.ChatMessage) io.ReadCloser {
+	return newOpenAIWebResponsesBodyWithPromptTools(source, model, messages, nil)
+}
+
+func newOpenAIWebResponsesBodyWithPromptTools(source io.ReadCloser, model string, messages []apicompat.ChatMessage, promptTools *OpenAIWebPromptTools) io.ReadCloser {
 	if source == nil {
 		// Keep the exported constructor safe for callers that only have an
 		// optional upstream body. Do will reject a nil response body before it
@@ -2466,6 +2549,7 @@ func NewOpenAIWebResponsesBodyWithHistory(source io.ReadCloser, model string, me
 		createdAt:       time.Now().Unix(),
 		historyText:     historyText,
 		historyMessages: historyMessages,
+		promptTools:     promptTools,
 	}
 }
 
@@ -2496,25 +2580,27 @@ func openAIWebAssistantHistory(messages []apicompat.ChatMessage) ([]string, stri
 }
 
 type openAIWebResponsesReader struct {
-	source          io.ReadCloser
-	reader          *bufio.Reader
-	model           string
-	responseID      string
-	itemID          string
-	conversationID  string
-	createdAt       int64
-	sequenceNumber  int
-	rawText         string
-	text            string
-	historyText     string
-	historyMessages []string
-	historyIndex    int
-	usage           map[string]any
-	output          bytes.Buffer
-	started         bool
-	failed          bool
-	finished        bool
-	closed          bool
+	source           io.ReadCloser
+	reader           *bufio.Reader
+	model            string
+	responseID       string
+	itemID           string
+	conversationID   string
+	createdAt        int64
+	sequenceNumber   int
+	rawText          string
+	text             string
+	historyText      string
+	historyMessages  []string
+	historyIndex     int
+	promptTools      *OpenAIWebPromptTools
+	promptClassified bool
+	usage            map[string]any
+	output           bytes.Buffer
+	started          bool
+	failed           bool
+	finished         bool
+	closed           bool
 }
 
 func (r *openAIWebResponsesReader) Close() error {
@@ -2672,13 +2758,15 @@ func (r *openAIWebResponsesReader) convertFrame(frame openAIWebSSEFrame) {
 			}
 			return
 		}
-		r.emit("response.output_text.delta", map[string]any{
-			"response_id":   r.responseID,
-			"item_id":       r.itemID,
-			"output_index":  0,
-			"content_index": 0,
-			"delta":         delta,
-		})
+		if r.promptTools == nil {
+			r.emit("response.output_text.delta", map[string]any{
+				"response_id":   r.responseID,
+				"item_id":       r.itemID,
+				"output_index":  0,
+				"content_index": 0,
+				"delta":         delta,
+			})
+		}
 	}
 	if openAIWebFrameTerminal(payload, frame.event) {
 		r.finish(true)
@@ -2691,6 +2779,9 @@ func (r *openAIWebResponsesReader) start() {
 	}
 	r.started = true
 	r.emit("response.created", map[string]any{"response": r.responseObject("in_progress", []any{})})
+	if r.promptTools != nil {
+		return
+	}
 	r.emit("response.output_item.added", map[string]any{
 		"response_id": r.responseID, "output_index": 0, "item": r.messageItem("in_progress", []any{}),
 	})
@@ -2744,6 +2835,32 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 	if r == nil || r.finished {
 		return
 	}
+	if r.promptTools != nil && !r.promptClassified {
+		r.promptClassified = true
+		calls, recognized, err := r.promptTools.ParseResponse(r.text)
+		if err != nil {
+			r.failed = true
+			response := r.responseObject("failed", nil)
+			response["error"] = map[string]any{"code": "tool_protocol_error", "message": redactOpenAIWebSecret(err.Error())}
+			r.emit("response.failed", map[string]any{"response": response})
+			r.finished = true
+			_, _ = r.output.WriteString("data: [DONE]\n\n")
+			return
+		}
+		if recognized && len(calls) > 0 {
+			r.finishPromptToolCalls(calls)
+			return
+		}
+		// Prompt mode buffers the upstream text until classification. Emit the
+		// ordinary message lifecycle only after we know it is not a tool envelope.
+		r.emitPromptMessageStart()
+		if r.text != "" {
+			r.emit("response.output_text.delta", map[string]any{
+				"response_id": r.responseID, "item_id": r.itemID, "output_index": 0,
+				"content_index": 0, "delta": r.text,
+			})
+		}
+	}
 	if r.failed {
 		r.finished = true
 		_, _ = r.output.WriteString("data: [DONE]\n\n")
@@ -2776,6 +2893,53 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 		response["usage"] = r.usage
 	}
 	r.emit(terminalEvent, map[string]any{"response": response})
+	r.finished = true
+	_, _ = r.output.WriteString("data: [DONE]\n\n")
+}
+
+func (r *openAIWebResponsesReader) emitPromptMessageStart() {
+	if r == nil {
+		return
+	}
+	r.emit("response.output_item.added", map[string]any{
+		"response_id": r.responseID, "output_index": 0, "item": r.messageItem("in_progress", []any{}),
+	})
+	r.emit("response.content_part.added", map[string]any{
+		"response_id": r.responseID, "item_id": r.itemID, "output_index": 0,
+		"content_index": 0, "part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}},
+	})
+}
+
+func (r *openAIWebResponsesReader) finishPromptToolCalls(calls []OpenAIWebPromptToolCall) {
+	items := make([]any, 0, len(calls))
+	for index, call := range calls {
+		itemID := "fc_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		callID := "call_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		arguments := string(call.Arguments)
+		item := map[string]any{
+			"id": itemID, "type": "function_call", "status": "completed",
+			"call_id": callID, "name": call.Name, "arguments": arguments,
+		}
+		r.emit("response.output_item.added", map[string]any{
+			"response_id": r.responseID, "output_index": index,
+			"item": map[string]any{
+				"id": itemID, "type": "function_call", "status": "in_progress",
+				"call_id": callID, "name": call.Name, "arguments": "",
+			},
+		})
+		r.emit("response.function_call_arguments.delta", map[string]any{
+			"response_id": r.responseID, "item_id": itemID, "output_index": index, "delta": arguments,
+		})
+		r.emit("response.function_call_arguments.done", map[string]any{
+			"response_id": r.responseID, "item_id": itemID, "output_index": index, "arguments": arguments,
+		})
+		r.emit("response.output_item.done", map[string]any{
+			"response_id": r.responseID, "output_index": index, "item": item,
+		})
+		items = append(items, item)
+	}
+	response := r.responseObject("completed", items)
+	r.emit("response.completed", map[string]any{"response": response})
 	r.finished = true
 	_, _ = r.output.WriteString("data: [DONE]\n\n")
 }

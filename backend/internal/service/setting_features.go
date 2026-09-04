@@ -557,6 +557,17 @@ func (s *SettingService) IsIdentityPatchEnabled(ctx context.Context) bool {
 	return value == "true"
 }
 
+// IsOpenAIWebPromptToolsEnabled reports the administrator opt-in for the
+// ChatGPT Web prompt-based tool bridge. Missing or unreadable settings fail
+// closed so Web requests do not unexpectedly accept tool declarations.
+func (s *SettingService) IsOpenAIWebPromptToolsEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyEnableOpenAIWebPromptTools)
+	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
 // GetIdentityPatchPrompt 获取自定义身份补丁提示词（为空表示使用内置默认模板）
 func (s *SettingService) GetIdentityPatchPrompt(ctx context.Context) string {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyIdentityPatchPrompt)

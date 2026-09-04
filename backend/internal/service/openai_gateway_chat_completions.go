@@ -1166,6 +1166,8 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 	startTime := time.Now()
 
 	var chatReq apicompat.ChatCompletionsRequest
+	var promptTools *OpenAIWebPromptTools
+	promptToolsEnabled := s != nil && s.settingService != nil && s.settingService.IsOpenAIWebPromptToolsEnabled(ctx)
 	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
 	if isResponsesShape {
 		var responsesReq apicompat.ResponsesRequest
@@ -1173,7 +1175,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return nil, fmt.Errorf("parse responses-shaped chat completions request for web transport: %w", err)
 		}
-		if err := ValidateOpenAIWebResponsesRequest(&responsesReq); err != nil {
+		if err := ValidateOpenAIWebResponsesRequestWithPromptTools(&responsesReq, promptToolsEnabled); err != nil {
 			return nil, writeOpenAIWebRequestError(c, err)
 		}
 		converted, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
@@ -1184,6 +1186,20 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 			return nil, fmt.Errorf("convert responses-shaped chat completions request for web transport: %w", err)
 		}
 		chatReq = *converted
+		if promptToolsEnabled {
+			var promptErr error
+			promptTools, promptErr = NewOpenAIWebPromptToolsFromResponsesRequest(&responsesReq)
+			if promptErr != nil {
+				return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("tools", promptErr.Error()))
+			}
+			if promptTools != nil {
+				chatReq.Tools = make([]apicompat.ChatTool, 0, len(promptTools.Tools))
+				for _, tool := range promptTools.Tools {
+					strict := true
+					chatReq.Tools = append(chatReq.Tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: &strict}})
+				}
+			}
+		}
 	} else if err := json.Unmarshal(body, &chatReq); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return nil, fmt.Errorf("parse chat completions request for web transport: %w", err)
@@ -1196,8 +1212,15 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 	if len(chatReq.Messages) == 0 {
 		return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("messages", "messages must contain at least one item"))
 	}
-	if err := ValidateOpenAIWebChatCompletionsRequest(&chatReq); err != nil {
+	if err := ValidateOpenAIWebChatCompletionsRequestWithPromptTools(&chatReq, promptToolsEnabled); err != nil {
 		return nil, writeOpenAIWebRequestError(c, err)
+	}
+	if promptTools == nil && promptToolsEnabled && openAIWebPromptToolsEnabledForRequest(&chatReq) {
+		var promptErr error
+		promptTools, promptErr = NewOpenAIWebPromptToolsFromChatRequest(&chatReq)
+		if promptErr != nil {
+			return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("tools", promptErr.Error()))
+		}
 	}
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
 	if strings.TrimSpace(upstreamModel) == "" {
@@ -1219,7 +1242,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 		upstreamCtx,
 		account,
 		token,
-		OpenAIWebConversationOptions{Request: &chatReq},
+		OpenAIWebConversationOptions{Request: &chatReq, PromptTools: promptTools},
 	)
 	if err != nil {
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, true)
