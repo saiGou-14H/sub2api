@@ -21,6 +21,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"math"
 	mathrand "math/rand"
 	"mime"
 	"net/http"
@@ -192,9 +193,9 @@ func validateOpenAIWebModel(value string) error {
 	return nil
 }
 
-// ValidateOpenAIWebChatCompletionsRequest rejects fields that would otherwise
-// be silently dropped while translating a Chat Completions request to the web
-// conversation payload.
+// ValidateOpenAIWebChatCompletionsRequest rejects only constraints that cannot
+// be represented by the Web conversation protocol. Advisory compatibility
+// fields are validated and then omitted from the private payload.
 func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsRequest) error {
 	if req == nil {
 		return openAIWebInvalidParam("", "Chat Completions request is nil")
@@ -202,11 +203,20 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 	if err := validateOpenAIWebModel(req.Model); err != nil {
 		return err
 	}
-	if req.Temperature != nil && *req.Temperature != 1 {
-		return openAIWebUnsupportedParam("temperature")
+	// ChatGPT Web has no sampling controls. These fields are intentionally
+	// accepted for OpenAI-client compatibility and omitted from the private
+	// payload; reject only values that are invalid under the public contract.
+	if err := validateOpenAISamplingParameter("temperature", req.Temperature, 0, 2); err != nil {
+		return err
 	}
-	if req.TopP != nil && *req.TopP != 1 {
-		return openAIWebUnsupportedParam("top_p")
+	if err := validateOpenAISamplingParameter("top_p", req.TopP, 0, 1); err != nil {
+		return err
+	}
+	if err := validateOpenAIPositiveIntegerParameter("max_tokens", req.MaxTokens); err != nil {
+		return err
+	}
+	if err := validateOpenAIPositiveIntegerParameter("max_completion_tokens", req.MaxCompletionTokens); err != nil {
+		return err
 	}
 	if openAIWebRawJSONHasValue(req.Stop) && !openAIWebJSONIsEmptyArray(req.Stop) {
 		return openAIWebUnsupportedParam("stop")
@@ -214,16 +224,15 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 	if len(req.Tools) > 0 {
 		return openAIWebUnsupportedParam("tools")
 	}
-	if openAIWebRawJSONHasValue(req.ToolChoice) {
+	if !openAIWebNoOpToolChoice(req.ToolChoice) {
 		return openAIWebUnsupportedParam("tool_choice")
 	}
-	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
-		return openAIWebUnsupportedParam("parallel_tool_calls")
-	}
+	// parallel_tool_calls is a no-op when tools are absent (tools themselves
+	// are rejected below), so either boolean value can be safely ignored.
 	if len(req.Functions) > 0 {
 		return openAIWebUnsupportedParam("functions")
 	}
-	if openAIWebRawJSONHasValue(req.FunctionCall) {
+	if !openAIWebNoOpToolChoice(req.FunctionCall) {
 		return openAIWebUnsupportedParam("function_call")
 	}
 	if !openAIWebPlainTextFormat(req.ResponseFormat) {
@@ -258,8 +267,7 @@ func ValidateOpenAIWebChatCompletionsRequest(req *apicompat.ChatCompletionsReque
 }
 
 // ValidateOpenAIWebResponsesRequest performs the same compatibility check
-// before a Responses request is bridged to Chat Completions. Several Responses
-// fields disappear during that bridge, so validation must happen first.
+// before a Responses request is bridged to Chat Completions.
 func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
 	if req == nil {
 		return openAIWebInvalidParam("", "Responses request is nil")
@@ -267,32 +275,30 @@ func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
 	if err := validateOpenAIWebModel(req.Model); err != nil {
 		return err
 	}
-	if req.Temperature != nil && *req.Temperature != 1 {
-		return openAIWebUnsupportedParam("temperature")
+	// Sampling controls are not part of the classic Web conversation payload.
+	// Preserve OpenAI compatibility by accepting valid values and dropping them
+	// during the Responses -> Chat -> Web conversion.
+	if err := validateOpenAISamplingParameter("temperature", req.Temperature, 0, 2); err != nil {
+		return err
 	}
-	if req.TopP != nil && *req.TopP != 1 {
-		return openAIWebUnsupportedParam("top_p")
+	if err := validateOpenAISamplingParameter("top_p", req.TopP, 0, 1); err != nil {
+		return err
+	}
+	if err := validateOpenAIPositiveIntegerParameter("max_output_tokens", req.MaxOutputTokens); err != nil {
+		return err
 	}
 	if len(req.Tools) > 0 {
 		return openAIWebUnsupportedParam("tools")
 	}
-	if openAIWebRawJSONHasValue(req.ToolChoice) {
+	if !openAIWebNoOpToolChoice(req.ToolChoice) {
 		return openAIWebUnsupportedParam("tool_choice")
 	}
-	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
-		return openAIWebUnsupportedParam("parallel_tool_calls")
-	}
-	if len(req.Include) > 0 {
-		return openAIWebUnsupportedParam("include")
-	}
+	// With no Web tool bridge, parallel_tool_calls has no observable effect.
 	if req.Store != nil && *req.Store {
 		return openAIWebUnsupportedParam("store")
 	}
 	if !openAIWebDefaultServiceTier(req.ServiceTier) {
 		return openAIWebUnsupportedParam("service_tier")
-	}
-	if strings.TrimSpace(req.PromptCacheKey) != "" {
-		return openAIWebUnsupportedParam("prompt_cache_key")
 	}
 	if strings.TrimSpace(req.PreviousResponseID) != "" {
 		return openAIWebUnsupportedParam("previous_response_id")
@@ -301,17 +307,16 @@ func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
 		if !openAIWebReasoningEffortSupported(req.Reasoning.Effort) {
 			return openAIWebInvalidParam("reasoning.effort", "reasoning.effort is not supported by ChatGPT web transport")
 		}
-		if strings.TrimSpace(req.Reasoning.Summary) != "" {
-			return openAIWebUnsupportedParam("reasoning.summary")
+		if !openAIWebReasoningSummarySupported(req.Reasoning.Summary) {
+			return openAIWebInvalidParam("reasoning.summary", "reasoning.summary must be auto, concise, or detailed")
 		}
 	}
 	if req.Text != nil {
 		if !openAIWebPlainTextFormat(req.Text.Format) {
 			return openAIWebUnsupportedParam("text.format")
 		}
-		verbosity := strings.ToLower(strings.TrimSpace(req.Text.Verbosity))
-		if verbosity != "" && verbosity != "medium" {
-			return openAIWebUnsupportedParam("text.verbosity")
+		if !openAIWebTextVerbositySupported(req.Text.Verbosity) {
+			return openAIWebInvalidParam("text.verbosity", "text.verbosity must be low, medium, or high")
 		}
 	}
 	return nil
@@ -320,6 +325,42 @@ func ValidateOpenAIWebResponsesRequest(req *apicompat.ResponsesRequest) error {
 func openAIWebRawJSONHasValue(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+func validateOpenAISamplingParameter(param string, value *float64, min, max float64) error {
+	if value == nil {
+		return nil
+	}
+	if math.IsNaN(*value) || math.IsInf(*value, 0) || *value < min || *value > max {
+		return openAIWebInvalidParam(param, fmt.Sprintf("%s must be between %g and %g", param, min, max))
+	}
+	return nil
+}
+
+func validateOpenAIPositiveIntegerParameter(param string, value *int) error {
+	if value == nil {
+		return nil
+	}
+	if *value <= 0 {
+		return openAIWebInvalidParam(param, fmt.Sprintf("%s must be greater than 0", param))
+	}
+	return nil
+}
+
+func openAIWebNoOpToolChoice(raw json.RawMessage) bool {
+	if !openAIWebRawJSONHasValue(raw) {
+		return true
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "auto", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 func openAIWebJSONIsEmptyArray(raw json.RawMessage) bool {
@@ -352,7 +393,25 @@ func openAIWebDefaultServiceTier(value string) bool {
 
 func openAIWebReasoningEffortSupported(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "none", "low", "medium", "high", "xhigh", "extended":
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "extended":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIWebReasoningSummarySupported(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto", "concise", "detailed":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIWebTextVerbositySupported(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "low", "medium", "high":
 		return true
 	default:
 		return false
@@ -1274,7 +1333,10 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 
 func normalizeOpenAIWebThinkingEffort(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high":
+	case "minimal", "low", "medium", "high":
+		if strings.EqualFold(strings.TrimSpace(value), "minimal") {
+			return "min"
+		}
 		return strings.ToLower(strings.TrimSpace(value))
 	case "xhigh", "extended":
 		return "extended"

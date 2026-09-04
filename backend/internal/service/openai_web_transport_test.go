@@ -175,9 +175,9 @@ func TestAccountOpenAIWebModelCatalogSnapshotControlsSupport(t *testing.T) {
 	require.False(t, account.IsModelSupported("gpt-unknown"))
 }
 
-func TestValidateOpenAIWebModelRejectsUnknownModelAsOpenAIRequestError(t *testing.T) {
+func TestValidateOpenAIWebModelRejectsMalformedModelAsOpenAIRequestError(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
-		Model:    "gpt-5.6-preview",
+		Model:    "gpt 5.6",
 		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
 	}
 	err := ValidateOpenAIWebChatCompletionsRequest(request)
@@ -203,28 +203,23 @@ func TestValidateOpenAIWebModelRejectsUnknownModelAsOpenAIRequestError(t *testin
 	require.Equal(t, requestErr.Error(), payload.Error.Message)
 }
 
-func TestValidateOpenAIWebResponsesModelRejectsUnknownModelAsOpenAIRequestError(t *testing.T) {
-	err := ValidateOpenAIWebResponsesRequest(&apicompat.ResponsesRequest{Model: "gpt-5.6-preview"})
+func TestValidateOpenAIWebResponsesModelRejectsMalformedModelAsOpenAIRequestError(t *testing.T) {
+	err := ValidateOpenAIWebResponsesRequest(&apicompat.ResponsesRequest{Model: "gpt 5.6"})
 	var requestErr *OpenAIWebRequestError
 	require.ErrorAs(t, err, &requestErr)
 	require.Equal(t, "model", requestErr.Param)
 }
 
 func TestOpenAIWebTransportRejectsUnsupportedChatParameters(t *testing.T) {
-	zero := 0.0
-	falseValue := false
 	tests := []struct {
 		name  string
 		param string
 		req   *apicompat.ChatCompletionsRequest
 	}{
-		{name: "sampling", param: "temperature", req: &apicompat.ChatCompletionsRequest{Temperature: &zero}},
 		{name: "stop", param: "stop", req: &apicompat.ChatCompletionsRequest{Stop: json.RawMessage(`"END"`)}},
 		{name: "tools", param: "tools", req: &apicompat.ChatCompletionsRequest{Tools: []apicompat.ChatTool{{Type: "function"}}}},
-		{name: "parallel tools", param: "parallel_tool_calls", req: &apicompat.ChatCompletionsRequest{ParallelToolCalls: &falseValue}},
 		{name: "structured output", param: "response_format", req: &apicompat.ChatCompletionsRequest{ResponseFormat: json.RawMessage(`{"type":"json_object"}`)}},
 		{name: "tool history", param: "messages[0].role", req: &apicompat.ChatCompletionsRequest{Messages: []apicompat.ChatMessage{{Role: "tool", Content: json.RawMessage(`"result"`)}}}},
-		{name: "invalid effort", param: "reasoning_effort", req: &apicompat.ChatCompletionsRequest{ReasoningEffort: "minimal"}},
 	}
 	transport := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{})
 	for _, tc := range tests {
@@ -234,6 +229,63 @@ func TestOpenAIWebTransportRejectsUnsupportedChatParameters(t *testing.T) {
 				tc.req.Messages = []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}}
 			}
 			_, err := transport.BuildConversationPayload(tc.req)
+			var requestErr *OpenAIWebRequestError
+			require.ErrorAs(t, err, &requestErr)
+			require.Equal(t, tc.param, requestErr.Param)
+		})
+	}
+}
+
+func TestOpenAIWebTransportMapsMinimalReasoningEffortToMin(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model:           "auto",
+		ReasoningEffort: "minimal",
+		Messages:        []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(request)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	require.Equal(t, "min", payload["thinking_effort"])
+}
+
+func TestOpenAIWebTransportAcceptsAndDropsChatSamplingParameters(t *testing.T) {
+	temperature := 0.2
+	topP := 0.7
+	request := &apicompat.ChatCompletionsRequest{
+		Model:       "auto",
+		Temperature: &temperature,
+		TopP:        &topP,
+		Messages:    []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(request)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "temperature")
+	require.NotContains(t, string(body), "top_p")
+}
+
+func TestOpenAIWebTransportRejectsInvalidChatSamplingParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		param string
+		value float64
+	}{
+		{name: "temperature below minimum", param: "temperature", value: -0.1},
+		{name: "temperature above maximum", param: "temperature", value: 2.1},
+		{name: "top p below minimum", param: "top_p", value: -0.1},
+		{name: "top p above maximum", param: "top_p", value: 1.1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &apicompat.ChatCompletionsRequest{
+				Model:    "auto",
+				Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+			}
+			if tc.param == "temperature" {
+				req.Temperature = &tc.value
+			} else {
+				req.TopP = &tc.value
+			}
+			err := ValidateOpenAIWebChatCompletionsRequest(req)
 			var requestErr *OpenAIWebRequestError
 			require.ErrorAs(t, err, &requestErr)
 			require.Equal(t, tc.param, requestErr.Param)
@@ -254,6 +306,8 @@ func TestValidateOpenAIWebRequestsAcceptsOnlyEquivalentDefaults(t *testing.T) {
 		Temperature:         &one,
 		TopP:                &one,
 		ParallelToolCalls:   &trueValue,
+		ToolChoice:          json.RawMessage(`"none"`),
+		FunctionCall:        json.RawMessage(`"auto"`),
 		ReasoningEffort:     "none",
 		ServiceTier:         "default",
 		Stop:                json.RawMessage(`[]`),
@@ -264,11 +318,60 @@ func TestValidateOpenAIWebRequestsAcceptsOnlyEquivalentDefaults(t *testing.T) {
 		Temperature:       &one,
 		TopP:              &one,
 		ParallelToolCalls: &trueValue,
+		ToolChoice:        json.RawMessage(`"none"`),
+		Include:           []string{"reasoning.encrypted_content"},
 		Store:             &falseValue,
 		ServiceTier:       "auto",
-		Reasoning:         &apicompat.ResponsesReasoning{Effort: "high"},
-		Text:              &apicompat.ResponsesText{Format: json.RawMessage(`{"type":"text"}`), Verbosity: "medium"},
+		PromptCacheKey:    "cache-hint",
+		Reasoning:         &apicompat.ResponsesReasoning{Effort: "high", Summary: "auto"},
+		Text:              &apicompat.ResponsesText{Format: json.RawMessage(`{"type":"text"}`), Verbosity: "low"},
 	}))
+}
+
+func TestValidateOpenAIWebResponsesRequestAcceptsSamplingAndParallelDefaults(t *testing.T) {
+	temperature := 0.2
+	topP := 0.7
+	parallel := false
+	req := &apicompat.ResponsesRequest{
+		Model:             "auto",
+		Input:             json.RawMessage(`"hello"`),
+		Temperature:       &temperature,
+		TopP:              &topP,
+		ParallelToolCalls: &parallel,
+	}
+	require.NoError(t, ValidateOpenAIWebResponsesRequest(req))
+	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(req)
+	require.NoError(t, err)
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(chatReq)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "temperature")
+	require.NotContains(t, string(body), "top_p")
+}
+
+func TestValidateOpenAIWebResponsesRequestRejectsInvalidSamplingParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		param string
+		value float64
+	}{
+		{name: "temperature below minimum", param: "temperature", value: -0.1},
+		{name: "temperature above maximum", param: "temperature", value: 2.1},
+		{name: "top p below minimum", param: "top_p", value: -0.1},
+		{name: "top p above maximum", param: "top_p", value: 1.1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &apicompat.ResponsesRequest{Model: "auto", Input: json.RawMessage(`"hello"`)}
+			if tc.param == "temperature" {
+				req.Temperature = &tc.value
+			} else {
+				req.TopP = &tc.value
+			}
+			err := ValidateOpenAIWebResponsesRequest(req)
+			var requestErr *OpenAIWebRequestError
+			require.ErrorAs(t, err, &requestErr)
+			require.Equal(t, tc.param, requestErr.Param)
+		})
+	}
 }
 
 func TestValidateOpenAIWebResponsesRequestRejectsLostParameters(t *testing.T) {
@@ -279,8 +382,8 @@ func TestValidateOpenAIWebResponsesRequestRejectsLostParameters(t *testing.T) {
 		req   *apicompat.ResponsesRequest
 	}{
 		{name: "previous response", param: "previous_response_id", req: &apicompat.ResponsesRequest{PreviousResponseID: "resp_previous"}},
-		{name: "reasoning summary", param: "reasoning.summary", req: &apicompat.ResponsesRequest{Reasoning: &apicompat.ResponsesReasoning{Summary: "auto"}}},
-		{name: "verbosity", param: "text.verbosity", req: &apicompat.ResponsesRequest{Text: &apicompat.ResponsesText{Verbosity: "low"}}},
+		{name: "invalid reasoning summary", param: "reasoning.summary", req: &apicompat.ResponsesRequest{Reasoning: &apicompat.ResponsesReasoning{Summary: "verbose"}}},
+		{name: "invalid verbosity", param: "text.verbosity", req: &apicompat.ResponsesRequest{Text: &apicompat.ResponsesText{Verbosity: "tiny"}}},
 		{name: "store", param: "store", req: &apicompat.ResponsesRequest{Store: &store}},
 	}
 	for _, tc := range tests {
@@ -288,6 +391,25 @@ func TestValidateOpenAIWebResponsesRequestRejectsLostParameters(t *testing.T) {
 			err := ValidateOpenAIWebResponsesRequest(tc.req)
 			var requestErr *OpenAIWebRequestError
 			require.ErrorAs(t, err, &requestErr)
+			require.Equal(t, tc.param, requestErr.Param)
+		})
+	}
+}
+
+func TestValidateOpenAIWebRequestsRejectInvalidTokenLimits(t *testing.T) {
+	zero := 0
+	for _, tc := range []struct {
+		name  string
+		param string
+		err   error
+	}{
+		{name: "chat max tokens", param: "max_tokens", err: ValidateOpenAIWebChatCompletionsRequest(&apicompat.ChatCompletionsRequest{MaxTokens: &zero})},
+		{name: "chat max completion tokens", param: "max_completion_tokens", err: ValidateOpenAIWebChatCompletionsRequest(&apicompat.ChatCompletionsRequest{MaxCompletionTokens: &zero})},
+		{name: "responses max output tokens", param: "max_output_tokens", err: ValidateOpenAIWebResponsesRequest(&apicompat.ResponsesRequest{MaxOutputTokens: &zero})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestErr *OpenAIWebRequestError
+			require.ErrorAs(t, tc.err, &requestErr)
 			require.Equal(t, tc.param, requestErr.Param)
 		})
 	}

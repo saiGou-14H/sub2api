@@ -27,7 +27,7 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 		{
 			name:   "chat_non_stream",
 			path:   "/v1/chat/completions",
-			body:   `{"model":"auto","messages":[{"role":"user","content":"hello"}]}`,
+			body:   `{"model":"auto","messages":[{"role":"user","content":"hello"}],"temperature":0.2,"top_p":0.7,"max_tokens":32,"max_completion_tokens":64,"parallel_tool_calls":false,"tool_choice":"none","function_call":"auto","reasoning_effort":"minimal"}`,
 			stream: false,
 			forward: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 				return s.ForwardAsChatCompletions(c.Request.Context(), c, account, body, "", "")
@@ -54,7 +54,7 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 		{
 			name:   "responses_non_stream",
 			path:   "/v1/responses",
-			body:   `{"model":"auto","input":"hello"}`,
+			body:   `{"model":"auto","input":"hello","temperature":0.2,"top_p":0.7,"max_output_tokens":64,"parallel_tool_calls":false,"tool_choice":"none","include":["reasoning.encrypted_content"],"store":false,"service_tier":"auto","prompt_cache_key":"web-test","reasoning":{"effort":"minimal","summary":"auto"},"text":{"verbosity":"low"}}`,
 			stream: false,
 			forward: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 				return s.Forward(c.Request.Context(), c, account, body)
@@ -89,10 +89,10 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 			}
 			proxyID := int64(7)
 			account := &Account{
-				ID:          42,
-				Name:        "web-account",
-				Platform:    PlatformOpenAI,
-				Type:        AccountTypeSetupToken,
+				ID:       42,
+				Name:     "web-account",
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeSetupToken,
 				Credentials: map[string]any{
 					"access_token": "gateway-test-token",
 					"model_mapping": map[string]any{
@@ -132,6 +132,11 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 			require.Contains(t, string(conversationBody), `"action":"next"`)
 			require.Contains(t, string(conversationBody), `"model":"auto"`)
 			require.Contains(t, string(conversationBody), `"parts":["hello"]`)
+			require.NotContains(t, string(conversationBody), `"temperature"`)
+			require.NotContains(t, string(conversationBody), `"top_p"`)
+			require.NotContains(t, string(conversationBody), `"max_tokens"`)
+			require.NotContains(t, string(conversationBody), `"max_completion_tokens"`)
+			require.NotContains(t, string(conversationBody), `"max_output_tokens"`)
 		})
 	}
 }
@@ -146,15 +151,6 @@ func TestOpenAIGatewayWebRoutingRejectsUnsupportedParametersBeforeNetwork(t *tes
 		param   string
 		forward func(*OpenAIGatewayService, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error)
 	}{
-		{
-			name:  "chat max tokens",
-			path:  "/v1/chat/completions",
-			body:  `{"model":"auto","messages":[{"role":"user","content":"hello"}],"max_tokens":32}`,
-			param: "max_tokens",
-			forward: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-				return s.ForwardAsChatCompletions(c.Request.Context(), c, account, body, "", "")
-			},
-		},
 		{
 			name:  "responses previous response",
 			path:  "/v1/responses",
