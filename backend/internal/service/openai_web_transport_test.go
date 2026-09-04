@@ -83,6 +83,49 @@ func TestOpenAIWebTransportBuildConversationPayload(t *testing.T) {
 	require.NotContains(t, string(body), "max_completion_tokens")
 }
 
+func TestOpenAIWebTransportPromptToolsNeverSerializeNativeToolFields(t *testing.T) {
+	parallel := true
+	request := &apicompat.ChatCompletionsRequest{
+		Model:             "auto",
+		ParallelToolCalls: &parallel,
+		ToolChoice:        json.RawMessage(`"required"`),
+		FunctionCall:      json.RawMessage(`"auto"`),
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:        "lookup",
+			Description: "Look up a city",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+		}}},
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromChatRequest(request)
+	require.NoError(t, err)
+	require.NotNil(t, promptTools)
+
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request:     request,
+		PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	_, hasTools := payload["tools"]
+	_, hasFunctions := payload["functions"]
+	_, hasToolChoice := payload["tool_choice"]
+	_, hasFunctionCall := payload["function_call"]
+	_, hasParallelToolCalls := payload["parallel_tool_calls"]
+	require.False(t, hasTools)
+	require.False(t, hasFunctions)
+	require.False(t, hasToolChoice)
+	require.False(t, hasFunctionCall)
+	require.False(t, hasParallelToolCalls)
+	require.Contains(t, string(body), promptTools.Protocol)
+	// The caller's public request remains intact for response conversion and
+	// diagnostics; only the transport-local copy is sanitized.
+	require.Len(t, request.Tools, 1)
+	require.NotEmpty(t, request.ToolChoice)
+}
+
 func TestOpenAIWebTransportAcceptsAndDropsResponsesMaxOutputTokens(t *testing.T) {
 	maxOutputTokens := 128
 	responsesRequest := &apicompat.ResponsesRequest{

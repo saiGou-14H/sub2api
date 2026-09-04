@@ -1308,9 +1308,22 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 	if options.Request == nil {
 		return nil, errors.New("Chat Completions request is nil")
 	}
-	request := options.Request
+	// Work on a request-local copy. Prompt Tools uses the public tool
+	// declaration to build its instruction and response parser, but the classic
+	// Web endpoint rejects native tool parameters outright. Keeping this copy
+	// boundary makes it impossible for future callers to leak tools back into
+	// the private request after the bridge has been selected.
+	requestValue := *options.Request
+	request := &requestValue
 	if err := ValidateOpenAIWebChatCompletionsRequestWithPromptTools(request, options.PromptTools != nil); err != nil {
 		return nil, err
+	}
+	if options.PromptTools != nil {
+		request.Tools = nil
+		request.Functions = nil
+		request.ToolChoice = nil
+		request.FunctionCall = nil
+		request.ParallelToolCalls = nil
 	}
 	model, ok := NormalizeOpenAIWebModel(request.Model)
 	if !ok {

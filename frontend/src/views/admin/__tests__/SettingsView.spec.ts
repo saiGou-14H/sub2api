@@ -771,6 +771,45 @@ describe("admin SettingsView payment visible method controls", () => {
     expect((toggle.element as HTMLInputElement).checked).toBe(true);
   });
 
+  it("can turn off the OpenAI Web Prompt Tool switch and keep it off after reload", async () => {
+    getSettings
+      .mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        enable_openai_web_prompt_tools: true,
+      })
+      .mockResolvedValueOnce({
+        ...baseSettingsResponse,
+        enable_openai_web_prompt_tools: false,
+      });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openFeaturesTab(wrapper);
+    const toggle = wrapper.get(
+      '[data-testid="openai-web-prompt-tools-toggle"]',
+    );
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+
+    await toggle.setValue(false);
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enable_openai_web_prompt_tools: false }),
+    );
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+
+    const reloaded = mountView();
+    await flushPromises();
+    await openFeaturesTab(reloaded);
+    expect(
+      (reloaded.get(
+        '[data-testid="openai-web-prompt-tools-toggle"]',
+      ).element as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+
   it("renders panel rate limit card and saves settings", async () => {
     getPanelRateLimitSettings.mockClear();
     updatePanelRateLimitSettings.mockClear();

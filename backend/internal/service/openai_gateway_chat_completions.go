@@ -1192,13 +1192,6 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 			if promptErr != nil {
 				return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("tools", promptErr.Error()))
 			}
-			if promptTools != nil {
-				chatReq.Tools = make([]apicompat.ChatTool, 0, len(promptTools.Tools))
-				for _, tool := range promptTools.Tools {
-					strict := true
-					chatReq.Tools = append(chatReq.Tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: &strict}})
-				}
-			}
 		}
 	} else if err := json.Unmarshal(body, &chatReq); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")

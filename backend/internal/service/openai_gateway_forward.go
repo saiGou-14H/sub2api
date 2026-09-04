@@ -1332,16 +1332,6 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses request for web transport: %w", err)
 	}
-	if promptTools != nil {
-		strict := true
-		chatReq.Tools = make([]apicompat.ChatTool, 0, len(promptTools.Tools))
-		for _, tool := range promptTools.Tools {
-			chatReq.Tools = append(chatReq.Tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{
-				Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: &strict,
-			}})
-		}
-	}
-
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = "auto"
