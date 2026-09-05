@@ -77,6 +77,35 @@ func TestPrepareOpenAIWebContinuationReusesOnlyLatestUserMessage(t *testing.T) {
 	require.Equal(t, "msg-web-1", continuation.state.ParentMessageID)
 }
 
+func TestPrepareOpenAIWebContinuationReusesLatestAttachmentMessage(t *testing.T) {
+	service := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	account := &Account{ID: 103}
+	c := testOpenAIWebContinuationContext(t, "session-attachment")
+	first := &apicompat.ChatCompletionsRequest{
+		Model:    "auto",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: []byte(`"first"`)}},
+	}
+	_, continuation := service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, first)
+	service.commitOpenAIWebContinuation(context.Background(), c, account, "auto", first, "resp_attachment_1", &testOpenAIWebStateBody{
+		conversationID: "conv-attachment-1",
+		parentID:       "msg-attachment-1",
+		assistantText:  "answer",
+	}, continuation)
+
+	attachment := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Messages: []apicompat.ChatMessage{
+			{Role: "user", Content: []byte(`"first"`)},
+			{Role: "assistant", Content: []byte(`"answer"`)},
+			{Role: "user", Content: []byte(`[{"type":"file","file":{"file_id":"file-1","filename":"report.pdf","mime_type":"application/pdf"}}]`)},
+		},
+	}
+	transportReq, next := service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, attachment)
+	require.True(t, next.reused)
+	require.Len(t, transportReq.Messages, 1)
+	require.Equal(t, attachment.Messages[2], transportReq.Messages[0])
+}
+
 func TestPrepareOpenAIWebContinuationRejectsEditedOrReorderedHistory(t *testing.T) {
 	service := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
 	account := &Account{ID: 101}

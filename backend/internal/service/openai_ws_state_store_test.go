@@ -4,11 +4,64 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type sharedWebConversationCache struct {
+	stubGatewayCache
+	mu         sync.Mutex
+	values     map[string][]byte
+	lockOwner  string
+	lockSerial int
+}
+
+func (c *sharedWebConversationCache) SetOpenAIWebConversationState(_ context.Context, groupID int64, stateKey string, payload []byte, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.values == nil {
+		c.values = make(map[string][]byte)
+	}
+	c.values[fmt.Sprintf("%d:%s", groupID, stateKey)] = append([]byte(nil), payload...)
+	return nil
+}
+
+func (c *sharedWebConversationCache) GetOpenAIWebConversationState(_ context.Context, groupID int64, stateKey string) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	payload := c.values[fmt.Sprintf("%d:%s", groupID, stateKey)]
+	return append([]byte(nil), payload...), nil
+}
+
+func (c *sharedWebConversationCache) DeleteOpenAIWebConversationState(_ context.Context, groupID int64, stateKey string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.values, fmt.Sprintf("%d:%s", groupID, stateKey))
+	return nil
+}
+
+func (c *sharedWebConversationCache) TryAcquireOpenAIWebConversationLock(_ context.Context, _ int64, _ string, _ time.Duration) (string, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lockOwner != "" {
+		return "", false, nil
+	}
+	c.lockSerial++
+	c.lockOwner = fmt.Sprintf("owner-%d", c.lockSerial)
+	return c.lockOwner, true, nil
+}
+
+func (c *sharedWebConversationCache) ReleaseOpenAIWebConversationLock(_ context.Context, _ int64, _ string, owner string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lockOwner == owner {
+		c.lockOwner = ""
+	}
+	return nil
+}
 
 func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	cache := &stubGatewayCache{}
@@ -49,6 +102,58 @@ func TestOpenAIWSStateStore_BindGetDeleteWebConversationState(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Nil(t, loaded)
+}
+
+func TestOpenAIWSStateStore_RedisStateIsAuthoritativeAcrossInstances(t *testing.T) {
+	cache := &sharedWebConversationCache{}
+	writer := NewOpenAIWSStateStore(cache)
+	reader := NewOpenAIWSStateStore(cache)
+	state := OpenAIWebConversationState{
+		ConversationID:  "conv-shared",
+		ParentMessageID: "msg-shared",
+		AccountID:       101,
+		GroupID:         7,
+		Model:           "auto",
+	}
+	require.NoError(t, writer.BindWebConversationState(context.Background(), 7, "state-key", state, time.Minute))
+	loaded, found, err := reader.GetWebConversationState(context.Background(), 7, "state-key")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, state, *loaded)
+
+	require.NoError(t, writer.DeleteWebConversationState(context.Background(), 7, "state-key"))
+	loaded, found, err = reader.GetWebConversationState(context.Background(), 7, "state-key")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Nil(t, loaded)
+}
+
+func TestOpenAIWSStateStore_DistributedConversationLockSerializesInstances(t *testing.T) {
+	cache := &sharedWebConversationCache{}
+	first := NewOpenAIWSStateStore(cache)
+	second := NewOpenAIWSStateStore(cache)
+	releaseFirst, acquired := first.(*defaultOpenAIWSStateStore).AcquireOpenAIWebConversationLock(context.Background(), 7, "lock-key")
+	require.True(t, acquired)
+
+	result := make(chan struct {
+		release  func()
+		acquired bool
+	}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() {
+		release, ok := second.(*defaultOpenAIWSStateStore).AcquireOpenAIWebConversationLock(ctx, 7, "lock-key")
+		result <- struct {
+			release  func()
+			acquired bool
+		}{release: release, acquired: ok}
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	releaseFirst()
+	acquiredResult := <-result
+	require.True(t, acquiredResult.acquired)
+	acquiredResult.release()
 }
 
 func TestOpenAIWSStateStore_WebConversationStateExpires(t *testing.T) {

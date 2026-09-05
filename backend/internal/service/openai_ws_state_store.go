@@ -20,6 +20,8 @@ const (
 	openAIWSStateStoreCleanupMaxPerMap = 512
 	openAIWSStateStoreMaxEntriesPerMap = 65536
 	openAIWSStateStoreRedisTimeout     = 3 * time.Second
+	openAIWebConversationLockTTL       = 15 * time.Minute
+	openAIWebConversationLockRetry     = 100 * time.Millisecond
 )
 
 type openAIWSAccountBinding struct {
@@ -65,9 +67,20 @@ type openAIWebConversationLockProvider interface {
 	AcquireOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey string) (release func(), acquired bool)
 }
 
+// openAIWebConversationDistributedLockProvider is implemented by the Redis
+// gateway cache when the deployment can run more than one gateway instance.
+// The optional surface keeps lightweight test caches and local-only setups
+// compatible while preventing cross-instance parent-cursor races in
+// production.
+type openAIWebConversationDistributedLockProvider interface {
+	TryAcquireOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey string, ttl time.Duration) (owner string, acquired bool, err error)
+	ReleaseOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey, owner string) error
+}
+
 // openAIWebConversationStateCache is implemented by the Redis-backed gateway
 // cache when available. It is deliberately optional so small/test caches keep
-// the existing GatewayCache contract and the local hot cache remains usable.
+// the existing GatewayCache contract. When present, this external cache is
+// authoritative over the process-local hot copy.
 type openAIWebConversationStateCache interface {
 	SetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string, payload []byte, ttl time.Duration) error
 	GetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string) ([]byte, error)
@@ -439,13 +452,6 @@ func (s *defaultOpenAIWSStateStore) BindWebConversationState(ctx context.Context
 		return nil
 	}
 	ttl = normalizeOpenAIWSTTL(ttl)
-	s.maybeCleanup()
-	binding := openAIWebConversationBinding{state: state, expiresAt: time.Now().Add(ttl)}
-	s.webConversationMu.Lock()
-	ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
-	s.webConversations[key] = binding
-	s.webConversationMu.Unlock()
-
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
@@ -453,8 +459,18 @@ func (s *defaultOpenAIWSStateStore) BindWebConversationState(ctx context.Context
 	if cache, ok := s.cache.(openAIWebConversationStateCache); ok && cache != nil {
 		cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 		defer cancel()
-		return cache.SetOpenAIWebConversationState(cacheCtx, groupID, stateKey, payload, ttl)
+		if err := cache.SetOpenAIWebConversationState(cacheCtx, groupID, stateKey, payload, ttl); err != nil {
+			// Redis is authoritative when configured. Do not leave a local
+			// cursor behind after a failed write that other instances cannot see.
+			return err
+		}
 	}
+	s.maybeCleanup()
+	binding := openAIWebConversationBinding{state: state, expiresAt: time.Now().Add(ttl)}
+	s.webConversationMu.Lock()
+	ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
+	s.webConversations[key] = binding
+	s.webConversationMu.Unlock()
 	return nil
 }
 
@@ -462,6 +478,33 @@ func (s *defaultOpenAIWSStateStore) GetWebConversationState(ctx context.Context,
 	key := openAIWSGroupStateKey(groupID, stateKey)
 	if key == "" {
 		return nil, false, nil
+	}
+	if cache, ok := s.cache.(openAIWebConversationStateCache); ok && cache != nil {
+		cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+		defer cancel()
+		payload, err := cache.GetOpenAIWebConversationState(cacheCtx, groupID, stateKey)
+		if err != nil {
+			// A configured external cache is the cross-instance source of
+			// truth. Falling back to a possibly stale local cursor can drift
+			// the caller onto a conversation that another instance invalidated.
+			return nil, false, err
+		}
+		if len(payload) == 0 {
+			s.webConversationMu.Lock()
+			delete(s.webConversations, key)
+			s.webConversationMu.Unlock()
+			return nil, false, nil
+		}
+		var state OpenAIWebConversationState
+		if err := json.Unmarshal(payload, &state); err != nil || strings.TrimSpace(state.ConversationID) == "" || state.AccountID <= 0 {
+			return nil, false, nil
+		}
+		s.maybeCleanup()
+		s.webConversationMu.Lock()
+		ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
+		s.webConversations[key] = openAIWebConversationBinding{state: state, expiresAt: time.Now().Add(time.Minute)}
+		s.webConversationMu.Unlock()
+		return &state, true, nil
 	}
 	s.maybeCleanup()
 	now := time.Now()
@@ -478,28 +521,7 @@ func (s *defaultOpenAIWSStateStore) GetWebConversationState(ctx context.Context,
 		s.webConversationMu.Unlock()
 	}
 
-	cache, ok := s.cache.(openAIWebConversationStateCache)
-	if !ok || cache == nil {
-		return nil, false, nil
-	}
-	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
-	defer cancel()
-	payload, err := cache.GetOpenAIWebConversationState(cacheCtx, groupID, stateKey)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(payload) == 0 {
-		return nil, false, nil
-	}
-	var state OpenAIWebConversationState
-	if err := json.Unmarshal(payload, &state); err != nil || strings.TrimSpace(state.ConversationID) == "" || state.AccountID <= 0 {
-		return nil, false, nil
-	}
-	s.webConversationMu.Lock()
-	ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
-	s.webConversations[key] = openAIWebConversationBinding{state: state, expiresAt: now.Add(time.Minute)}
-	s.webConversationMu.Unlock()
-	return &state, true, nil
+	return nil, false, nil
 }
 
 func (s *defaultOpenAIWSStateStore) DeleteWebConversationState(ctx context.Context, groupID int64, stateKey string) error {
@@ -526,6 +548,29 @@ func (s *defaultOpenAIWSStateStore) AcquireOpenAIWebConversationLock(ctx context
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	distributed, hasDistributed := s.cache.(openAIWebConversationDistributedLockProvider)
+	distributedOwner := ""
+	if hasDistributed && distributed != nil {
+		for {
+			owner, acquired, err := distributed.TryAcquireOpenAIWebConversationLock(ctx, groupID, stateKey, openAIWebConversationLockTTL)
+			if err != nil {
+				return nil, false
+			}
+			if acquired {
+				distributedOwner = owner
+				break
+			}
+			timer := time.NewTimer(openAIWebConversationLockRetry)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return nil, false
+			case <-timer.C:
+			}
+		}
+	}
 	s.webConversationLocksMu.Lock()
 	lock := s.webConversationLocks[key]
 	if lock == nil {
@@ -539,6 +584,11 @@ func (s *defaultOpenAIWSStateStore) AcquireOpenAIWebConversationLock(ctx context
 	select {
 	case <-ctx.Done():
 		s.dropOpenAIWebConversationLockRef(key, lock)
+		if distributedOwner != "" {
+			releaseCtx, cancel := withOpenAIWSStateStoreRedisTimeout(context.Background())
+			_ = distributed.ReleaseOpenAIWebConversationLock(releaseCtx, groupID, stateKey, distributedOwner)
+			cancel()
+		}
 		return nil, false
 	case <-lock.semaphore:
 		var once sync.Once
@@ -546,6 +596,11 @@ func (s *defaultOpenAIWSStateStore) AcquireOpenAIWebConversationLock(ctx context
 			once.Do(func() {
 				lock.semaphore <- struct{}{}
 				s.dropOpenAIWebConversationLockRef(key, lock)
+				if distributedOwner != "" {
+					releaseCtx, cancel := withOpenAIWSStateStoreRedisTimeout(context.Background())
+					_ = distributed.ReleaseOpenAIWebConversationLock(releaseCtx, groupID, stateKey, distributedOwner)
+					cancel()
+				}
 			})
 		}, true
 	}

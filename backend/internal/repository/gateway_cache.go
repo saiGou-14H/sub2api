@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,10 +20,19 @@ const stickySessionPrefix = "sticky_session:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
 const openAIWebConversationStatePrefix = "openai_web_conversation_state:"
+const openAIWebConversationLockPrefix = "openai_web_conversation_lock:"
 
 type gatewayCache struct {
 	rdb *redis.Client
 }
+
+var releaseOpenAIWebConversationLockScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
 
 func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 	return &gatewayCache{rdb: rdb}
@@ -73,6 +84,38 @@ func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64
 
 func buildOpenAIWebConversationStateKey(groupID int64, stateKey string) string {
 	return fmt.Sprintf("%s%d:%s", openAIWebConversationStatePrefix, groupID, strings.TrimSpace(stateKey))
+}
+
+func buildOpenAIWebConversationLockKey(groupID int64, stateKey string) string {
+	return fmt.Sprintf("%s%d:%s", openAIWebConversationLockPrefix, groupID, strings.TrimSpace(stateKey))
+}
+
+// TryAcquireOpenAIWebConversationLock serializes turns that share one private
+// ChatGPT Web parent cursor across gateway instances. The owner token is
+// returned only to the caller that successfully claims the Redis lease.
+func (c *gatewayCache) TryAcquireOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey string, ttl time.Duration) (string, bool, error) {
+	if c == nil || c.rdb == nil || groupID <= 0 || strings.TrimSpace(stateKey) == "" || ttl <= 0 {
+		return "", false, errors.New("invalid OpenAI Web conversation lock")
+	}
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", false, err
+	}
+	owner := base64.RawURLEncoding.EncodeToString(raw)
+	acquired, err := c.rdb.SetNX(ctx, buildOpenAIWebConversationLockKey(groupID, stateKey), owner, ttl).Result()
+	if err != nil || !acquired {
+		return "", acquired, err
+	}
+	return owner, true, nil
+}
+
+// ReleaseOpenAIWebConversationLock releases only the lease owned by token.
+// A late release cannot delete a newer owner's lock after TTL expiry.
+func (c *gatewayCache) ReleaseOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey, owner string) error {
+	if c == nil || c.rdb == nil || groupID <= 0 || strings.TrimSpace(stateKey) == "" || strings.TrimSpace(owner) == "" {
+		return nil
+	}
+	return releaseOpenAIWebConversationLockScript.Run(ctx, c.rdb, []string{buildOpenAIWebConversationLockKey(groupID, stateKey)}, owner).Err()
 }
 
 // SetOpenAIWebConversationState stores the private Web conversation cursor in

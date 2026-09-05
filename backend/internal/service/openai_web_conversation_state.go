@@ -139,7 +139,7 @@ func openAIWebProfileFingerprint(req *apicompat.ChatCompletionsRequest) string {
 	return openAIWebHash("web-profile-v1", string(raw))
 }
 
-func openAIWebMessageHasRichContent(message apicompat.ChatMessage) bool {
+func openAIWebMessageHasToolContent(message apicompat.ChatMessage) bool {
 	if len(message.ToolCalls) > 0 || message.FunctionCall != nil {
 		return true
 	}
@@ -160,7 +160,7 @@ func openAIWebMessageHasRichContent(message apicompat.ChatMessage) bool {
 		case map[string]any:
 			typ := strings.ToLower(strings.TrimSpace(firstString(item, "type")))
 			switch typ {
-			case "image_url", "input_image", "file", "input_file", "image_asset_pointer", "file_asset_pointer":
+			case "tool_use", "tool_result", "function_call", "function_call_output":
 				return true
 			}
 			for _, child := range item {
@@ -194,7 +194,7 @@ func openAIWebRequestRequiresFullReplay(req *apicompat.ChatCompletionsRequest) b
 		return true
 	}
 	for _, message := range req.Messages {
-		if openAIWebMessageHasRichContent(message) {
+		if openAIWebMessageHasToolContent(message) {
 			return true
 		}
 	}

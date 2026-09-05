@@ -870,3 +870,21 @@
 - Same-key turns use a keyed semaphore spanning upstream I/O through commit or
   invalidation. Cancellation before acquisition fails closed; release is
   idempotent and removes idle lock entries.
+
+## 2026-09-06 HAR continuation alignment
+
+- The ordinary HAR includes `partial_query` only on the initial
+  attachment-free prepare. Continuation prepares use the Web conversation
+  cursor; Plus work-mode prepares omit `partial_query` even on the first turn.
+- Attachment continuation requests carry `conversation_id` and
+  `parent_message_id` and contain only the newest attachment-bearing message.
+  The gateway therefore no longer treats ordinary file/image content as an
+  automatic full-replay boundary; tool calls and tool results remain one.
+- When a Redis-backed state cache is configured, local hot state is never used
+  as a fallback after a Redis miss or error. This prevents an instance from
+  resurrecting a cursor another instance invalidated.
+- The Redis lease uses a random owner token and compare-and-delete release, so
+  a late release after lease expiry cannot delete a newer request's lease.
+- The current lease is 15 minutes, matching the default WebSocket read budget;
+  long-running turns beyond that budget are outside the gateway's normal
+  request lifetime and must be retried as a complete replay after expiry.

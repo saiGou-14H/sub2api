@@ -781,6 +781,17 @@ func TestOpenAIWebConversationPreparePayloadCarriesWorkModeFields(t *testing.T) 
 	require.True(t, ok)
 	require.Len(t, contracts, 1)
 	require.Equal(t, "photo_upload_action.v1", contracts[0].(map[string]any)["id"])
+	require.NotContains(t, payload, "partial_query")
+}
+
+func TestOpenAIWebConversationPreparePayloadOmitsPartialQueryOnContinuation(t *testing.T) {
+	body := []byte(`{"action":"next","model":"auto","conversation_id":"conversation-test","parent_message_id":"parent-test","timezone":"Asia/Shanghai","timezone_offset_min":-480,"conversation_mode":{"kind":"primary_assistant"},"system_hints":[],"messages":[{"id":"message","metadata":{}}]}`)
+	prepared, err := openAIWebConversationPreparePayload(body)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(prepared, &payload))
+	require.Equal(t, "conversation-test", payload["conversation_id"])
+	require.NotContains(t, payload, "partial_query")
 }
 
 func TestOpenAIWebTransportRejectsMissingTurnstileProgramWithoutLeakingToken(t *testing.T) {

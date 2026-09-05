@@ -90,6 +90,27 @@ func (s *GatewayCacheSuite) TestDeleteSessionAccountID() {
 	require.True(s.T(), errors.Is(err, service.ErrStickySessionNotFound), "expected ErrStickySessionNotFound after delete")
 }
 
+func (s *GatewayCacheSuite) TestOpenAIWebConversationLockCompareAndDelete() {
+	cache, ok := s.cache.(*gatewayCache)
+	require.True(s.T(), ok)
+	ctx := s.ctx
+	ownerA, acquired, err := cache.TryAcquireOpenAIWebConversationLock(ctx, 7, "state-key", time.Minute)
+	require.NoError(s.T(), err)
+	require.True(s.T(), acquired)
+	ownerB, acquired, err := cache.TryAcquireOpenAIWebConversationLock(ctx, 7, "state-key", time.Minute)
+	require.NoError(s.T(), err)
+	require.False(s.T(), acquired)
+	require.Empty(s.T(), ownerB)
+
+	// A stale owner must not release a newer lease.
+	require.NoError(s.T(), s.rdb.Set(ctx, buildOpenAIWebConversationLockKey(7, "state-key"), "owner-b", time.Minute).Err())
+	require.NoError(s.T(), cache.ReleaseOpenAIWebConversationLock(ctx, 7, "state-key", ownerA))
+	value, err := s.rdb.Get(ctx, buildOpenAIWebConversationLockKey(7, "state-key")).Result()
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "owner-b", value)
+	require.NoError(s.T(), cache.ReleaseOpenAIWebConversationLock(ctx, 7, "state-key", "owner-b"))
+}
+
 func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 	sessionID := "corrupted"
 	groupID := int64(1)

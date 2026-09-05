@@ -203,3 +203,18 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Preserve the canonical session state key when a request also uses `previous_response_id` as an alias.
 - [completed] Add regression coverage for edited/reordered history, alias write-back, lock cancellation, and lock release.
 - [completed] Commit, push, package, deploy only port 9999, and run remote health/log verification.
+
+## 2026-09-06 HAR continuation alignment
+
+- [completed] Match ordinary Web `partial_query` behavior: only an initial,
+  attachment-free, non-work-mode prepare carries it; continuations and Plus
+  work-mode prepares omit it.
+- [completed] Allow attachment follow-up turns to reuse a valid Web cursor and
+  send only the latest attachment-bearing user message; tool turns remain a
+  full-replay boundary.
+- [completed] Make Redis the authoritative cursor source when configured and
+  fail closed on Redis read/write errors instead of using a stale local cursor.
+- [completed] Add compare-and-delete Redis leases and cross-instance
+  serialization for Web parent cursors, with cancellation-aware bounded retry.
+- [completed] Run focused service, repository, and Redis integration tests;
+  publish and deploy verification remain for this release.

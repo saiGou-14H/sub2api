@@ -652,3 +652,20 @@
 - Removed remote build/upload artifacts. Recent 9999 logs contain no panic,
   fatal, Web parameter rejection, WebSocket `not_connected`, model-mode 422,
   or empty-response signatures. No live Web account was changed or used.
+
+# 2026-09-06 HAR continuation alignment
+
+- Updated Web prepare serialization to match both supplied HARs: ordinary
+  first turns may include `partial_query`, while continuation and work-mode
+  prepares omit it; attachment MIME metadata remains present for file turns.
+- Changed continuation replay classification so a valid attachment follow-up
+  sends only its newest message with the stored Web cursor. Tool calls/results
+  still force full replay to preserve deterministic tool history.
+- Made Redis-backed Web cursor state authoritative across instances and added
+  a compare-and-delete Redis lease for cross-instance turn serialization.
+- Focused verification passed:
+  `go test ./internal/service -run 'OpenAIWeb|WebConversation|ConversationState' -count=1`;
+  `go test ./internal/repository -run GatewayCache -count=1`; and
+  `go test -tags integration ./internal/repository -run GatewayCache -count=1`.
+- The working tree contains only this release's source/test changes plus the
+  isolated Go cache; no credentials or HAR contents were added.

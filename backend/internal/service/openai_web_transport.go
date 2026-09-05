@@ -2273,18 +2273,22 @@ func openAIWebConversationPreparePayloadForAccount(conversationBody []byte, acco
 	if len(attachmentMIMEs) > 0 {
 		prepare["attachment_mime_types"] = attachmentMIMEs
 	}
-	if conversationID, ok := conversation["conversation_id"]; ok {
+	conversationID, hasConversationID := conversation["conversation_id"]
+	if hasConversationID {
 		prepare["conversation_id"] = conversationID
-	}
-	if len(attachmentMIMEs) == 0 {
-		if messages, ok := conversation["messages"].([]any); ok && len(messages) > 0 {
-			prepare["partial_query"] = messages[len(messages)-1]
-		}
 	}
 	model, _ := conversation["model"].(string)
 	workMode := (&Account{}).IsOpenAIWebWorkModeModel(model)
 	if account != nil {
 		workMode = account.IsOpenAIWebWorkModeModel(model)
+	}
+	// The browser sends partial_query only for the first ordinary-model
+	// prepare. Continuation prepares rely on conversation_id/parent_message_id,
+	// and Plus work-mode prepares omit partial_query even on the first turn.
+	if !hasConversationID && !workMode && len(attachmentMIMEs) == 0 {
+		if messages, ok := conversation["messages"].([]any); ok && len(messages) > 0 {
+			prepare["partial_query"] = messages[len(messages)-1]
+		}
 	}
 	if workMode {
 		prepare["conversation_origin"] = "tpp"
