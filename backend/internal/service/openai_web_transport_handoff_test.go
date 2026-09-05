@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -119,6 +120,65 @@ func TestOpenAIWebTopicBodyUnwrapsEncodedItemsAndDone(t *testing.T) {
 	require.Contains(t, string(result), `"delta":"OK"`)
 	require.Contains(t, string(result), `"status":"completed"`)
 	require.True(t, conn.closed == false)
+}
+
+func TestOpenAIWebTopicBodyAcceptsObjectFramesAndCamelCaseFields(t *testing.T) {
+	encodedItem := "event: delta_encoding\ndata: \"v1\"\n\nevent: delta\ndata: {\"p\":\"/message/content/parts/0\",\"o\":\"append\",\"v\":\"OK\"}\n\n"
+	streamFrame, err := json.Marshal(map[string]any{
+		"type":    "message",
+		"topicId": "topic",
+		"payload": map[string]any{
+			"type": "conversation-turn-stream",
+			"payload": map[string]any{
+				"type":         "stream-item",
+				"streamItemId": "item-1",
+				"encodedItem":  encodedItem,
+			},
+		},
+	})
+	require.NoError(t, err)
+	doneFrame, err := json.Marshal(map[string]any{
+		"type":    "message",
+		"topicId": "topic",
+		"payload": map[string]any{
+			"type":    "conversation-turn-stream",
+			"payload": map[string]any{"type": "stream_end"},
+		},
+	})
+	require.NoError(t, err)
+	conn := &webHandoffTestConn{frames: [][]byte{streamFrame, doneFrame}}
+	body := &openAIWebTopicBody{ctx: context.Background(), conn: conn, topic: "topic", seen: map[string]struct{}{}}
+	converted := NewOpenAIWebResponsesBody(body, "gpt-6-astra-wm")
+	result, err := io.ReadAll(converted)
+	require.NoError(t, err)
+	require.Contains(t, string(result), `"delta":"OK"`)
+	require.Contains(t, string(result), `"status":"completed"`)
+}
+
+type webBlockingTopicConn struct{}
+
+func (webBlockingTopicConn) WriteJSON(context.Context, any) error { return nil }
+
+func (webBlockingTopicConn) ReadMessage(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (webBlockingTopicConn) Ping(context.Context) error { return nil }
+
+func (webBlockingTopicConn) Close() error { return nil }
+
+func TestOpenAIWebTopicBodyStopsIdleReads(t *testing.T) {
+	body := &openAIWebTopicBody{
+		ctx:         context.Background(),
+		conn:        webBlockingTopicConn{},
+		topic:       "topic",
+		readTimeout: 10 * time.Millisecond,
+		seen:        map[string]struct{}{},
+	}
+	_, err := io.ReadAll(body)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "web websocket read timeout")
 }
 
 func TestOpenAIWebTopicBodyUsesArraySubscribeCommand(t *testing.T) {

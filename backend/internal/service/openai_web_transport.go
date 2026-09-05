@@ -98,10 +98,29 @@ var openAIWebModelSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 // validates the wire-safe slug shape instead of enforcing the fallback catalog.
 func NormalizeOpenAIWebModel(value string) (string, bool) {
 	normalized := strings.TrimSpace(value)
+	if strings.EqualFold(normalized, OpenAIWebTestModel) {
+		return OpenAIWebTestModel, true
+	}
 	if !openAIWebModelSlugRE.MatchString(normalized) {
 		return "", false
 	}
 	return normalized, true
+}
+
+// isOpenAIWebModelCandidate filters obvious cross-provider/legacy aliases
+// while the account has not completed its authenticated model discovery. Once
+// a catalog is known, IsModelSupported uses that exact catalog instead.
+func isOpenAIWebModelCandidate(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "gpt-5.6" {
+		return false
+	}
+	for _, prefix := range []string{"claude-", "deepseek-", "gemini-", "grok-"} {
+		if strings.HasPrefix(model, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // OpenAIWebTransportOptions controls the browser-like identity and endpoint
@@ -118,6 +137,10 @@ type OpenAIWebTransportOptions struct {
 	TimezoneOffsetMin int
 	PowMaxAttempts    int
 	SkipBootstrap     bool
+	// TopicReadTimeout bounds an idle read from the user WebSocket. A Web
+	// model that never emits a topic frame must not hold a gateway request
+	// until the generic stream timeout; zero uses the 60-second default.
+	TopicReadTimeout time.Duration
 }
 
 // OpenAIWebRequirements contains the short-lived sentinel values returned by
@@ -555,6 +578,9 @@ func NewOpenAIWebTransport(service *OpenAIGatewayService, options OpenAIWebTrans
 	}
 	if options.PowMaxAttempts <= 0 {
 		options.PowMaxAttempts = openAIWebDefaultPowAttempts
+	}
+	if options.TopicReadTimeout <= 0 {
+		options.TopicReadTimeout = 60 * time.Second
 	}
 	transport := &OpenAIWebTransport{
 		service:   service,
@@ -2705,14 +2731,18 @@ func (t *OpenAIWebTransport) userWebsocketURL(ctx context.Context, account *Acco
 }
 
 type openAIWebTopicBody struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	conn   openAIWSClientConn
-	topic  string
-	output bytes.Buffer
-	seen   map[string]struct{}
-	done   bool
-	closed bool
+	ctx             context.Context
+	cancel          context.CancelFunc
+	conn            openAIWSClientConn
+	topic           string
+	readTimeout     time.Duration
+	output          bytes.Buffer
+	seen            map[string]struct{}
+	frameCount      int
+	streamItemCount int
+	lastFrameType   string
+	done            bool
+	closed          bool
 }
 
 func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account *Account, token string, handoff openAIWebConversationHandoff, prefix *bytes.Buffer) (io.ReadCloser, error) {
@@ -2758,11 +2788,12 @@ func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account 
 	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	body := &openAIWebTopicBody{
-		ctx:    streamCtx,
-		cancel: cancel,
-		conn:   conn,
-		topic:  handoff.TopicID,
-		seen:   make(map[string]struct{}),
+		ctx:         streamCtx,
+		cancel:      cancel,
+		conn:        conn,
+		topic:       handoff.TopicID,
+		readTimeout: t.options.TopicReadTimeout,
+		seen:        make(map[string]struct{}),
 	}
 	if prefix != nil && prefix.Len() > 0 {
 		body.output.Write(prefix.Bytes())
@@ -2781,11 +2812,27 @@ func (b *openAIWebTopicBody) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 	for b.output.Len() == 0 && !b.done {
-		frame, err := b.conn.ReadMessage(b.ctx)
+		readCtx := b.ctx
+		cancelRead := func() {}
+		if b.readTimeout > 0 {
+			readCtx, cancelRead = context.WithTimeout(b.ctx, b.readTimeout)
+		}
+		frame, err := b.conn.ReadMessage(readCtx)
+		cancelRead()
 		if err != nil {
 			b.done = true
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 0, fmt.Errorf(
+					"ChatGPT web websocket read timeout after %s (frames=%d, stream_items=%d, last_type=%s)",
+					b.readTimeout,
+					b.frameCount,
+					b.streamItemCount,
+					b.lastFrameType,
+				)
+			}
 			return 0, err
 		}
+		b.frameCount++
 		terminal, parseErr := b.consumeFrame(frame)
 		if parseErr != nil {
 			b.done = true
@@ -2803,61 +2850,95 @@ func (b *openAIWebTopicBody) Read(p []byte) (int, error) {
 }
 
 func (b *openAIWebTopicBody) consumeFrame(frame []byte) (bool, error) {
-	var values []any
-	if err := json.Unmarshal(frame, &values); err != nil {
+	var root any
+	if err := json.Unmarshal(frame, &root); err != nil {
 		return false, errors.New("ChatGPT web websocket frame is invalid")
 	}
 	terminal := false
 	var consume func(any) error
 	consume = func(value any) error {
+		if list, ok := value.([]any); ok {
+			for _, item := range list {
+				if err := consume(item); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		item, ok := value.(map[string]any)
 		if !ok {
 			return nil
 		}
 		typ := strings.ToLower(strings.TrimSpace(openAIWebStringValue(item["type"])))
-		switch typ {
-		case "reply":
-			reply, _ := item["reply"].(map[string]any)
-			catchups, _ := reply["catchups"].([]any)
-			for _, catchup := range catchups {
-				if err := consume(catchup); err != nil {
-					return err
+		normalizedType := strings.ReplaceAll(typ, "_", "-")
+		if typ != "" {
+			b.lastFrameType = typ
+		}
+		topicID := openAIWebStringValue(item["topic_id"])
+		if topicID == "" {
+			topicID = openAIWebStringValue(item["topicId"])
+		}
+		if strings.TrimSpace(topicID) != "" && strings.TrimSpace(topicID) != b.topic {
+			return nil
+		}
+		if normalizedType == "error" || normalizedType == "stream-error" || normalizedType == "conversation-turn-error" {
+			message := openAIWebStringValue(item["message"])
+			if message == "" {
+				if errorObject, ok := item["error"].(map[string]any); ok {
+					message = openAIWebStringValue(errorObject["message"])
 				}
 			}
-		case "message":
-			if strings.TrimSpace(openAIWebStringValue(item["topic_id"])) != b.topic {
-				return nil
+			if message == "" {
+				message = openAIWebStringValue(item["error"])
 			}
-			envelope, _ := item["payload"].(map[string]any)
-			if strings.ToLower(strings.TrimSpace(openAIWebStringValue(envelope["type"]))) != "conversation-turn-stream" {
-				return nil
+			if strings.TrimSpace(message) == "" {
+				message = "ChatGPT web websocket stream failed"
 			}
-			payload, _ := envelope["payload"].(map[string]any)
-			switch strings.ToLower(strings.TrimSpace(openAIWebStringValue(payload["type"]))) {
-			case "stream-item":
-				streamItemID := strings.TrimSpace(openAIWebStringValue(payload["stream_item_id"]))
-				encodedItem := openAIWebStringValue(payload["encoded_item"])
-				if streamItemID == "" || encodedItem == "" {
-					return nil
-				}
-				if _, exists := b.seen[streamItemID]; exists {
-					return nil
-				}
+			return fmt.Errorf("ChatGPT web websocket stream error: %s", truncateString(message, 512))
+		}
+		streamItemID := openAIWebStringValue(item["stream_item_id"])
+		if streamItemID == "" {
+			streamItemID = openAIWebStringValue(item["streamItemId"])
+		}
+		encodedItem := openAIWebStringValue(item["encoded_item"])
+		if encodedItem == "" {
+			encodedItem = openAIWebStringValue(item["encodedItem"])
+		}
+		if encodedItem != "" {
+			if strings.TrimSpace(streamItemID) == "" {
+				digest := sha256.Sum256([]byte(encodedItem))
+				streamItemID = "encoded:" + hex.EncodeToString(digest[:])
+			}
+			if b.seen == nil {
+				b.seen = make(map[string]struct{})
+			}
+			if _, exists := b.seen[streamItemID]; !exists {
 				b.seen[streamItemID] = struct{}{}
+				b.streamItemCount++
 				b.output.WriteString(encodedItem)
 				if !strings.HasSuffix(encodedItem, "\n\n") {
 					b.output.WriteString("\n\n")
 				}
-			case "done":
-				terminal = true
+			}
+		}
+		if normalizedType == "done" || normalizedType == "stream-done" || normalizedType == "stream-end" || normalizedType == "conversation-turn-done" || normalizedType == "conversation-turn-completed" || normalizedType == "completed" || normalizedType == "response.completed" {
+			terminal = true
+		}
+		status := strings.ToLower(strings.TrimSpace(openAIWebStringValue(item["status"])))
+		if status == "done" || status == "finished" || status == "completed" {
+			terminal = true
+		}
+		for _, key := range []string{"reply", "catchups", "payload", "data", "body", "event"} {
+			if nested, exists := item[key]; exists {
+				if err := consume(nested); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
 	}
-	for _, value := range values {
-		if err := consume(value); err != nil {
-			return false, err
-		}
+	if err := consume(root); err != nil {
+		return false, err
 	}
 	return terminal, nil
 }

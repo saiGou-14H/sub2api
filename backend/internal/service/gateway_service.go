@@ -1519,7 +1519,28 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 
 func explicitModelMappingClaims(account Account, model string) bool {
 	if account.IsOpenAIWebTransport() {
-		return account.IsModelSupported(model)
+		canonical, supported := NormalizeOpenAIWebModel(model)
+		if !supported {
+			return false
+		}
+		if catalog, known := account.GetOpenAIWebModelCatalog(); known {
+			for _, advertised := range catalog {
+				if advertised == canonical {
+					return true
+				}
+			}
+			return false
+		}
+		// Before the first authenticated discovery, direct Web requests may
+		// use a future slug, but composite routing must not claim ownership of
+		// every syntactically valid model. Only the stable fallback selectors
+		// participate in ownership decisions until the account manifest is known.
+		for _, fallback := range OpenAIWebModels() {
+			if fallback == canonical {
+				return true
+			}
+		}
+		return false
 	}
 	if account.Credentials == nil || model == "" {
 		return false

@@ -855,8 +855,9 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		models, known := a.GetOpenAIWebModelCatalog()
 		if !known {
 			// Before the first authenticated catalog refresh, allow a valid
-			// upstream slug so a direct request can trigger the real Web path.
-			return true
+			// upstream slug so a direct request can trigger the real Web path,
+			// except for obvious cross-provider and legacy aliases.
+			return isOpenAIWebModelCandidate(model)
 		}
 		for _, advertised := range models {
 			if advertised == model {
