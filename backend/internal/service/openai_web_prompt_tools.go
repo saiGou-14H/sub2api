@@ -384,6 +384,14 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 			Type      string          `json:"type,omitempty"`
 			Arguments json.RawMessage `json:"arguments"`
 		} `json:"calls"`
+		// Some Web models emit the same call envelope under tools[]. This is
+		// not the Responses API request field: it is a legacy model output
+		// shape whose entries carry name/type/arguments for selected tools.
+		Tools []struct {
+			Name      string          `json:"name"`
+			Type      string          `json:"type,omitempty"`
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
 		return nil, true, fmt.Errorf("invalid prompt tool envelope: %w", err)
@@ -391,20 +399,32 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 	if envelope.Protocol != p.Protocol || envelope.Nonce != p.Nonce || envelope.SchemaHash != p.SchemaHash {
 		return nil, true, errors.New("prompt tool envelope nonce, protocol, or schema hash mismatch")
 	}
-	if len(envelope.Calls) > openAIWebPromptToolMaxCalls {
+	if len(envelope.Calls) > 0 && len(envelope.Tools) > 0 {
+		return nil, true, errors.New("prompt tool envelope must use either calls or tools, not both")
+	}
+	calls := envelope.Calls
+	if len(calls) == 0 && len(envelope.Tools) > 0 {
+		calls = envelope.Tools
+	}
+	if len(calls) > openAIWebPromptToolMaxCalls {
 		return nil, true, fmt.Errorf("prompt tool envelope contains more than %d calls", openAIWebPromptToolMaxCalls)
 	}
 	byName := make(map[string]OpenAIWebPromptTool, len(p.Tools))
 	for _, tool := range p.Tools {
 		byName[tool.Name] = tool
 	}
-	result := make([]OpenAIWebPromptToolCall, 0, len(envelope.Calls))
-	for _, call := range envelope.Calls {
+	result := make([]OpenAIWebPromptToolCall, 0, len(calls))
+	for _, call := range calls {
 		tool, ok := byName[call.Name]
 		if !ok {
 			return nil, true, fmt.Errorf("prompt tool envelope selected unknown tool %q", call.Name)
 		}
-		args := bytes.TrimSpace(call.Arguments)
+		providedType := strings.ToLower(strings.TrimSpace(call.Type))
+		declaredType := strings.ToLower(strings.TrimSpace(tool.Type))
+		if providedType != "" && providedType != declaredType {
+			return nil, true, fmt.Errorf("tool %q type %q does not match declared type %q", call.Name, call.Type, tool.Type)
+		}
+		args := normalizeOpenAIWebPromptArguments(call.Arguments)
 		if len(args) == 0 {
 			args = []byte(`{}`)
 		}
@@ -423,11 +443,35 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		return nil, true, errors.New("tool_choice required was not respected")
 	}
 	if p.ChoiceName != "" {
-		if len(result) == 0 || result[0].Name != p.ChoiceName {
+		if len(result) == 0 {
 			return nil, true, fmt.Errorf("tool_choice named %q was not respected", p.ChoiceName)
+		}
+		for _, call := range result {
+			if call.Name != p.ChoiceName {
+				return nil, true, fmt.Errorf("tool_choice named %q was not respected", p.ChoiceName)
+			}
 		}
 	}
 	return result, true, nil
+}
+
+// normalizeOpenAIWebPromptArguments accepts both the preferred JSON value
+// form and a JSON-encoded string form emitted by some Web model variants.
+// The returned bytes are always the actual argument JSON validated against
+// the declared schema and later exposed as Responses function_call.arguments.
+func normalizeOpenAIWebPromptArguments(raw json.RawMessage) []byte {
+	args := bytes.TrimSpace(raw)
+	if len(args) == 0 || bytes.Equal(args, []byte("null")) {
+		return nil
+	}
+	if args[0] != '"' {
+		return append([]byte(nil), args...)
+	}
+	var encoded string
+	if json.Unmarshal(args, &encoded) != nil {
+		return append([]byte(nil), args...)
+	}
+	return bytes.TrimSpace([]byte(encoded))
 }
 
 func normalizeOpenAIWebPromptToolChoice(primary, legacy json.RawMessage) (string, string, error) {

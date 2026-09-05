@@ -19,6 +19,7 @@ const openAIWebModelCatalogTTL = 5 * time.Minute
 
 type OpenAIWebModelCatalogSnapshot struct {
 	Models           []string `json:"models"`
+	WorkModeModels   []string `json:"work_mode_models,omitempty"`
 	DefaultModelSlug string   `json:"default_model_slug,omitempty"`
 	SyncedAt         string   `json:"synced_at"`
 }
@@ -45,11 +46,23 @@ func normalizeOpenAIWebModelIDs(values []string) []string {
 	return models
 }
 
+func normalizeOpenAIWebWorkModeModelIDs(values []string) []string {
+	models := normalizeOpenAIWebModelIDs(values)
+	result := make([]string, 0, len(models))
+	for _, model := range models {
+		if model != OpenAIWebTestModel {
+			result = append(result, model)
+		}
+	}
+	return result
+}
+
 func (a *Account) SetOpenAIWebModelCatalogSnapshot(snapshot OpenAIWebModelCatalogSnapshot) {
 	if a == nil {
 		return
 	}
 	snapshot.Models = normalizeOpenAIWebModelIDs(snapshot.Models)
+	snapshot.WorkModeModels = normalizeOpenAIWebWorkModeModelIDs(snapshot.WorkModeModels)
 	if a.Extra == nil {
 		a.Extra = make(map[string]any)
 	}
@@ -98,6 +111,7 @@ func (a *Account) OpenAIWebModelCatalogSnapshot() *OpenAIWebModelCatalogSnapshot
 		return nil
 	}
 	snapshot.Models = normalizeOpenAIWebModelIDs(snapshot.Models)
+	snapshot.WorkModeModels = normalizeOpenAIWebWorkModeModelIDs(snapshot.WorkModeModels)
 	return &snapshot
 }
 
@@ -108,6 +122,31 @@ func (a *Account) OpenAIWebModelCatalogFresh(now time.Time) bool {
 	}
 	syncedAt, err := time.Parse(time.RFC3339, snapshot.SyncedAt)
 	return err == nil && now.Sub(syncedAt) < openAIWebModelCatalogTTL
+}
+
+// IsOpenAIWebWorkModeModel reports whether the selected Web model needs the
+// Plus work-mode request contract. Catalog metadata is authoritative when it
+// identifies the model; the -wm suffix keeps older persisted snapshots and
+// newly introduced work-mode slugs compatible until the next discovery.
+func (a *Account) IsOpenAIWebWorkModeModel(requestedModel string) bool {
+	model, ok := NormalizeOpenAIWebModel(requestedModel)
+	if !ok {
+		return false
+	}
+	snapshot := a.OpenAIWebModelCatalogSnapshot()
+	if model == OpenAIWebTestModel && snapshot != nil {
+		if defaultModel, valid := NormalizeOpenAIWebModel(snapshot.DefaultModelSlug); valid && defaultModel != OpenAIWebTestModel {
+			model = defaultModel
+		}
+	}
+	if snapshot != nil {
+		for _, workModeModel := range snapshot.WorkModeModels {
+			if model == workModeModel {
+				return true
+			}
+		}
+	}
+	return strings.HasSuffix(model, "-wm")
 }
 
 // DiscoverOpenAIWebModelCatalog performs the authenticated browser manifest
@@ -150,7 +189,8 @@ func (t *OpenAIWebTransport) DiscoverOpenAIWebModelCatalog(ctx context.Context, 
 	}
 	var payload struct {
 		Models []struct {
-			Slug string `json:"slug"`
+			Slug            string `json:"slug"`
+			IsWorkModeModel bool   `json:"is_work_mode_model"`
 		} `json:"models"`
 		DefaultModelSlug string `json:"default_model_slug"`
 	}
@@ -158,12 +198,17 @@ func (t *OpenAIWebTransport) DiscoverOpenAIWebModelCatalog(ctx context.Context, 
 		return nil, errors.New("ChatGPT web model list response is invalid")
 	}
 	models := make([]string, 0, len(payload.Models))
+	workModeModels := make([]string, 0)
 	for _, item := range payload.Models {
 		if model := strings.TrimSpace(item.Slug); model != "" {
 			models = append(models, model)
+			if item.IsWorkModeModel {
+				workModeModels = append(workModeModels, model)
+			}
 		}
 	}
 	models = normalizeOpenAIWebModelIDs(models)
+	workModeModels = normalizeOpenAIWebWorkModeModelIDs(workModeModels)
 	if len(models) == 0 {
 		return nil, errors.New("ChatGPT web model list returned no supported models")
 	}
@@ -173,6 +218,7 @@ func (t *OpenAIWebTransport) DiscoverOpenAIWebModelCatalog(ctx context.Context, 
 	}
 	return &OpenAIWebModelCatalogSnapshot{
 		Models:           models,
+		WorkModeModels:   workModeModels,
 		DefaultModelSlug: defaultModel,
 		SyncedAt:         time.Now().UTC().Format(time.RFC3339),
 	}, nil

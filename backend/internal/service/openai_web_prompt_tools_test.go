@@ -146,6 +146,43 @@ func TestOpenAIWebPromptToolsParseResponseValidatesNonceChoiceAndArguments(t *te
 	require.Error(t, err)
 }
 
+func TestOpenAIWebPromptToolsParseResponseAcceptsLegacyToolsEnvelope(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "lookup", Parameters: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+		}}},
+	})
+	require.NoError(t, err)
+	good, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"tools": []any{map[string]any{"name": "lookup", "type": "function", "arguments": `{"city":"Shanghai"}`}},
+	})
+	calls, recognized, err := prompt.ParseResponse(string(good))
+	require.NoError(t, err)
+	require.True(t, recognized)
+	require.Len(t, calls, 1)
+	require.Equal(t, "function", calls[0].Type)
+	require.JSONEq(t, `{"city":"Shanghai"}`, string(calls[0].Arguments))
+
+	badType, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"tools": []any{map[string]any{"name": "lookup", "type": "web_search", "arguments": map[string]any{"city": "Shanghai"}}},
+	})
+	_, recognized, err = prompt.ParseResponse(string(badType))
+	require.True(t, recognized)
+	require.Error(t, err)
+
+	both, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"calls": []any{map[string]any{"name": "lookup", "arguments": map[string]any{"city": "Shanghai"}}},
+		"tools": []any{map[string]any{"name": "lookup", "arguments": map[string]any{"city": "Shanghai"}}},
+	})
+	_, recognized, err = prompt.ParseResponse(string(both))
+	require.True(t, recognized)
+	require.Error(t, err)
+}
+
 func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
 		Model: "auto",
@@ -168,6 +205,58 @@ func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T)
 	require.NotContains(t, string(raw), prompt.Nonce)
 }
 
+func TestOpenAIWebPromptToolsReaderEmitsOfficialFunctionCallLifecycle(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"tools": []any{map[string]any{"name": "lookup", "arguments": map[string]any{}}},
+	})
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":" + mustPromptJSONString(string(envelope)) + "}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	raw, err := io.ReadAll(newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "auto", nil, prompt))
+	require.NoError(t, err)
+
+	types := make([]string, 0, 5)
+	lines := strings.Split(string(raw), "\n")
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "data: {") {
+			continue
+		}
+		var event apicompat.ResponsesStreamEvent
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil {
+			types = append(types, event.Type)
+		}
+	}
+	require.Equal(t, []string{
+		"response.created",
+		"response.output_item.added",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.done",
+		"response.completed",
+	}, types)
+	var completed apicompat.ResponsesStreamEvent
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "data: {") {
+			continue
+		}
+		var event apicompat.ResponsesStreamEvent
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && event.Type == "response.completed" {
+			completed = event
+		}
+	}
+	require.NotNil(t, completed.Response)
+	require.Len(t, completed.Response.Output, 1)
+	require.Equal(t, "function_call", completed.Response.Output[0].Type)
+	require.Equal(t, "lookup", completed.Response.Output[0].Name)
+	require.Equal(t, "{}", completed.Response.Output[0].Arguments)
+}
+
 func TestOpenAIWebPromptToolsReaderRejectsPlainTextForRequiredChoice(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
 		Model:      "auto",
@@ -184,6 +273,26 @@ func TestOpenAIWebPromptToolsReaderRejectsPlainTextForRequiredChoice(t *testing.
 	require.Contains(t, string(raw), `"type":"response.failed"`)
 	require.Contains(t, string(raw), `"code":"tool_protocol_error"`)
 	require.NotContains(t, string(raw), `"type":"response.completed"`)
+}
+
+func TestOpenAIWebPromptToolsReaderRejectsEmptyRecognizedEnvelope(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+	})
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":" + mustPromptJSONString(string(envelope)) + "}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	raw, err := io.ReadAll(newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "auto", nil, prompt))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"type":"response.failed"`)
+	require.Contains(t, string(raw), `"code":"tool_protocol_error"`)
+	require.NotContains(t, string(raw), `"type":"response.completed"`)
+	require.NotContains(t, string(raw), prompt.Nonce)
 }
 
 func TestOpenAIWebPromptToolsReaderCarriesParallelToolMetadata(t *testing.T) {

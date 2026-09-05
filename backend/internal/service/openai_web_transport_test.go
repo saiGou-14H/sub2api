@@ -75,9 +75,10 @@ func TestOpenAIWebTransportBuildConversationPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, string(body), `"action":"next"`)
-	require.Contains(t, string(body), `"history_and_training_disabled":true`)
 	require.Contains(t, string(body), `"conversation_id":"conversation-test"`)
-	require.Contains(t, string(body), `"thinking_effort":"extended"`)
+	require.NotContains(t, string(body), `"conversation_origin"`)
+	require.NotContains(t, string(body), `"model_response_contracts"`)
+	require.NotContains(t, string(body), `"thinking_effort"`)
 	require.NotContains(t, string(body), "access_token")
 	require.NotContains(t, string(body), "max_tokens")
 	require.NotContains(t, string(body), "max_completion_tokens")
@@ -221,15 +222,37 @@ func TestNormalizeOpenAIWebModelCatalog(t *testing.T) {
 
 func TestOpenAIWebTransportDiscoversVerbatimModelSlugs(t *testing.T) {
 	upstream := &openAIWebTestUpstream{responses: []*http.Response{
-		openAIWebTestResponse(http.StatusOK, "application/json", `{"default_model_slug":"gpt-5-6","models":[{"slug":"gpt-5-6"},{"slug":"gpt-5.6-sol-wm"},{"slug":"gpt-5-6"},{"slug":""}]}`),
+		openAIWebTestResponse(http.StatusOK, "application/json", `{"default_model_slug":"gpt-5-6","models":[{"slug":"gpt-5-6"},{"slug":"gpt-5.6-sol-wm","is_work_mode_model":true},{"slug":"gpt-5-6"},{"slug":""}]}`),
 	}}
 	transport := NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{SkipBootstrap: true})
 	snapshot, err := transport.DiscoverOpenAIWebModelCatalog(context.Background(), &Account{ID: 7}, "token")
 	require.NoError(t, err)
 	require.Equal(t, []string{"auto", "gpt-5-6", "gpt-5.6-sol-wm"}, snapshot.Models)
+	require.Equal(t, []string{"gpt-5.6-sol-wm"}, snapshot.WorkModeModels)
 	require.Equal(t, "gpt-5-6", snapshot.DefaultModelSlug)
 	require.Equal(t, "/backend-api/models", upstream.requests[0].URL.Path)
 	require.Equal(t, "iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true", upstream.requests[0].URL.RawQuery)
+}
+
+func TestAccountOpenAIWebWorkModeClassificationUsesCatalogAndSuffix(t *testing.T) {
+	account := &Account{Extra: map[string]any{}}
+	require.False(t, account.IsOpenAIWebWorkModeModel("auto"))
+	require.True(t, account.IsOpenAIWebWorkModeModel("gpt-5.6-sol-wm"))
+	account.SetOpenAIWebModelCatalogSnapshot(OpenAIWebModelCatalogSnapshot{
+		Models:           []string{"auto", "gpt-5.6-sol"},
+		WorkModeModels:   []string{"gpt-5.6-sol"},
+		DefaultModelSlug: "auto",
+		SyncedAt:         time.Now().UTC().Format(time.RFC3339),
+	})
+	require.True(t, account.IsOpenAIWebWorkModeModel("gpt-5.6-sol"))
+	require.False(t, account.IsOpenAIWebWorkModeModel("auto"))
+	account.SetOpenAIWebModelCatalogSnapshot(OpenAIWebModelCatalogSnapshot{
+		Models:           []string{"auto", "gpt-5.6-sol"},
+		WorkModeModels:   []string{"gpt-5.6-sol"},
+		DefaultModelSlug: "gpt-5.6-sol",
+		SyncedAt:         time.Now().UTC().Format(time.RFC3339),
+	})
+	require.True(t, account.IsOpenAIWebWorkModeModel("auto"))
 }
 
 func TestAccountOpenAIWebModelCatalogSnapshotControlsSupport(t *testing.T) {
@@ -308,7 +331,7 @@ func TestOpenAIWebTransportRejectsUnsupportedChatParameters(t *testing.T) {
 
 func TestOpenAIWebTransportMapsMinimalReasoningEffortToMin(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
-		Model:           "auto",
+		Model:           "gpt-5.6-sol-wm",
 		ReasoningEffort: "minimal",
 		Messages:        []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
 	}
@@ -713,12 +736,23 @@ func TestOpenAIWebConversationPreparePayloadCarriesAttachmentMIMEs(t *testing.T)
 	require.Equal(t, "immediate", payload["client_prepare_dispatch"])
 	require.Equal(t, "file_picker", payload["client_prepare_source"])
 	require.Equal(t, []any{"application/pdf", "text/plain"}, payload["attachment_mime_types"])
+	require.NotContains(t, string(prepared), "conversation_origin")
+	require.NotContains(t, string(prepared), "model_response_contracts")
+	require.NotContains(t, string(prepared), "partial_query")
+}
+
+func TestOpenAIWebConversationPreparePayloadCarriesWorkModeFields(t *testing.T) {
+	body := []byte(`{"action":"next","model":"gpt-5.6-sol-wm","parent_message_id":"root","timezone":"Asia/Shanghai","timezone_offset_min":-480,"conversation_mode":{"kind":"primary_assistant"},"system_hints":[],"thinking_effort":"min","messages":[{"id":"message","metadata":{}}]}`)
+	prepared, err := openAIWebConversationPreparePayload(body)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(prepared, &payload))
 	require.Equal(t, "tpp", payload["conversation_origin"])
+	require.Equal(t, "min", payload["thinking_effort"])
 	contracts, ok := payload["model_response_contracts"].([]any)
 	require.True(t, ok)
 	require.Len(t, contracts, 1)
 	require.Equal(t, "photo_upload_action.v1", contracts[0].(map[string]any)["id"])
-	require.NotContains(t, string(prepared), "partial_query")
 }
 
 func TestOpenAIWebTransportRejectsMissingTurnstileProgramWithoutLeakingToken(t *testing.T) {

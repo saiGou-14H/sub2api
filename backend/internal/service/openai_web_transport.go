@@ -1391,23 +1391,18 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 	if parentID == "" {
 		parentID = uuid.NewString()
 	}
+	workMode := (&Account{}).IsOpenAIWebWorkModeModel(model)
+	if account != nil {
+		workMode = account.IsOpenAIWebWorkModeModel(model)
+	}
 	payload := map[string]any{
 		"action":                               "next",
 		"messages":                             messages,
 		"model":                                model,
 		"parent_message_id":                    parentID,
 		"conversation_mode":                    map[string]any{"kind": "primary_assistant"},
-		"conversation_origin":                  "tpp",
-		"force_paragen":                        false,
-		"force_paragen_model_slug":             "",
-		"force_rate_limit":                     false,
-		"force_use_sse":                        true,
-		"history_and_training_disabled":        true,
-		"reset_rate_limits":                    false,
-		"suggestions":                          []any{},
 		"supported_encodings":                  []string{"v1"},
 		"system_hints":                         []any{},
-		"model_response_contracts":             openAIWebModelResponseContracts(),
 		"client_prepare_state":                 "success",
 		"enable_message_followups":             true,
 		"supports_buffering":                   true,
@@ -1416,8 +1411,6 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		"force_parallel_switch":                "auto",
 		"timezone":                             timezone,
 		"timezone_offset_min":                  offset,
-		"variant_purpose":                      "comparison_implicit",
-		"websocket_request_id":                 uuid.NewString(),
 		"client_contextual_info": map[string]any{
 			"is_dark_mode":                     false,
 			"time_since_loaded":                120,
@@ -1434,7 +1427,13 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 	if conversationID := strings.TrimSpace(options.ConversationID); conversationID != "" {
 		payload["conversation_id"] = conversationID
 	}
-	if effort := normalizeOpenAIWebThinkingEffort(request.ReasoningEffort); effort != "" {
+	if workMode {
+		payload["conversation_origin"] = "tpp"
+		payload["model_response_contracts"] = openAIWebModelResponseContracts()
+		effort := normalizeOpenAIWebThinkingEffort(request.ReasoningEffort)
+		if effort == "" {
+			effort = "min"
+		}
 		payload["thinking_effort"] = effort
 	}
 	return json.Marshal(payload)
@@ -2227,6 +2226,10 @@ func parseOpenAIWebUploadProcessStream(body []byte, expectedFileID string) (stri
 }
 
 func openAIWebConversationPreparePayload(conversationBody []byte) ([]byte, error) {
+	return openAIWebConversationPreparePayloadForAccount(conversationBody, nil)
+}
+
+func openAIWebConversationPreparePayloadForAccount(conversationBody []byte, account *Account) ([]byte, error) {
 	var conversation map[string]any
 	if err := json.Unmarshal(conversationBody, &conversation); err != nil {
 		return nil, errors.New("ChatGPT web conversation payload is invalid")
@@ -2241,20 +2244,18 @@ func openAIWebConversationPreparePayload(conversationBody []byte) ([]byte, error
 		prepareSource = "file_picker"
 	}
 	prepare := map[string]any{
-		"action":                   conversation["action"],
-		"parent_message_id":        conversation["parent_message_id"],
-		"model":                    conversation["model"],
-		"client_prepare_state":     prepareState,
-		"client_prepare_dispatch":  prepareDispatch,
-		"client_prepare_source":    prepareSource,
-		"timezone_offset_min":      conversation["timezone_offset_min"],
-		"timezone":                 conversation["timezone"],
-		"conversation_mode":        conversation["conversation_mode"],
-		"conversation_origin":      "tpp",
-		"system_hints":             conversation["system_hints"],
-		"model_response_contracts": openAIWebModelResponseContracts(),
-		"supports_buffering":       true,
-		"supported_encodings":      []string{"v1"},
+		"action":                  conversation["action"],
+		"parent_message_id":       conversation["parent_message_id"],
+		"model":                   conversation["model"],
+		"client_prepare_state":    prepareState,
+		"client_prepare_dispatch": prepareDispatch,
+		"client_prepare_source":   prepareSource,
+		"timezone_offset_min":     conversation["timezone_offset_min"],
+		"timezone":                conversation["timezone"],
+		"conversation_mode":       conversation["conversation_mode"],
+		"system_hints":            conversation["system_hints"],
+		"supports_buffering":      true,
+		"supported_encodings":     []string{"v1"},
 		"client_contextual_info": map[string]any{
 			"app_name":                         "chatgpt.com",
 			"has_web_push_capabilities":        true,
@@ -2273,8 +2274,17 @@ func openAIWebConversationPreparePayload(conversationBody []byte) ([]byte, error
 			prepare["partial_query"] = messages[len(messages)-1]
 		}
 	}
-	if effort, ok := conversation["thinking_effort"]; ok {
-		prepare["thinking_effort"] = effort
+	model, _ := conversation["model"].(string)
+	workMode := (&Account{}).IsOpenAIWebWorkModeModel(model)
+	if account != nil {
+		workMode = account.IsOpenAIWebWorkModeModel(model)
+	}
+	if workMode {
+		prepare["conversation_origin"] = "tpp"
+		prepare["model_response_contracts"] = openAIWebModelResponseContracts()
+		if effort, ok := conversation["thinking_effort"]; ok {
+			prepare["thinking_effort"] = effort
+		}
 	}
 	return json.Marshal(prepare)
 }
@@ -2315,7 +2325,7 @@ func openAIWebTurnTraceID(value string) string {
 }
 
 func (t *OpenAIWebTransport) prepareConversation(ctx context.Context, account *Account, token string, conversationBody []byte, turnTraceID string) (string, error) {
-	body, err := openAIWebConversationPreparePayload(conversationBody)
+	body, err := openAIWebConversationPreparePayloadForAccount(conversationBody, account)
 	if err != nil {
 		return "", err
 	}
@@ -3381,7 +3391,16 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 			_, _ = r.output.WriteString("data: [DONE]\n\n")
 			return
 		}
-		if recognized && len(calls) > 0 {
+		if recognized {
+			if len(calls) == 0 {
+				r.failed = true
+				response := r.responseObject("failed", nil)
+				response["error"] = map[string]any{"code": "tool_protocol_error", "message": "prompt tool envelope contained no calls"}
+				r.emit("response.failed", map[string]any{"response": response})
+				r.finished = true
+				_, _ = r.output.WriteString("data: [DONE]\n\n")
+				return
+			}
 			r.finishPromptToolCalls(calls)
 			return
 		}
