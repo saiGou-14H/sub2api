@@ -83,6 +83,10 @@ func TestParseOpenAIWebConversationHandoff(t *testing.T) {
 	require.Equal(t, openAIWebConversationHandoff{ConversationID: "conv", TurnExchangeID: "turn", TopicID: "topic"}, handoff)
 }
 
+func TestOpenAIWebDirectStreamFrameTreatsBareV1AsProtocolPrelude(t *testing.T) {
+	require.False(t, openAIWebDirectStreamFrame(openAIWebSSEFrame{data: `"v1"`}))
+}
+
 func TestOpenAIWebTopicBodyUnwrapsEncodedItemsAndDone(t *testing.T) {
 	encodedItem := "event: delta_encoding\ndata: \"v1\"\n\nevent: delta\ndata: {\"p\":\"/message/content/parts/0\",\"o\":\"append\",\"v\":\"OK\"}\n\n"
 	frame, err := json.Marshal([]any{map[string]any{

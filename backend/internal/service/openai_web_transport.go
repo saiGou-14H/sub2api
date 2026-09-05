@@ -2635,7 +2635,7 @@ func (t *OpenAIWebTransport) prepareConversationResponseBody(ctx context.Context
 
 func openAIWebDirectStreamFrame(frame openAIWebSSEFrame) bool {
 	data := strings.TrimSpace(frame.data)
-	if data == "" || data == "[DONE]" || strings.EqualFold(strings.TrimSpace(frame.event), "delta_encoding") {
+	if data == "" || data == "[DONE]" || data == `"v1"` || strings.EqualFold(strings.TrimSpace(frame.event), "delta_encoding") {
 		return false
 	}
 	var payload map[string]any
