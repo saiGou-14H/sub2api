@@ -2775,13 +2775,29 @@ func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account 
 	if err != nil {
 		return nil, fmt.Errorf("ChatGPT web websocket connect failed: %w", err)
 	}
-	command := []map[string]any{{
-		"id": 1,
-		"command": map[string]any{
-			"type":     "subscribe",
-			"topic_id": handoff.TopicID,
+	// The Celsius user socket requires the browser's connection lifecycle:
+	// connect/presence must be accepted before a topic subscription is valid.
+	// Sending both commands in one frame matches the current ChatGPT Web client
+	// and avoids a race where an immediate subscribe is rejected as not_connected.
+	command := []map[string]any{
+		{
+			"id": 1,
+			"command": map[string]any{
+				"type": "connect",
+				"presence": map[string]any{
+					"type":  "presence",
+					"state": "background",
+				},
+			},
 		},
-	}}
+		{
+			"id": 2,
+			"command": map[string]any{
+				"type":     "subscribe",
+				"topic_id": handoff.TopicID,
+			},
+		},
+	}
 	if err := conn.WriteJSON(ctx, command); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("ChatGPT web websocket subscribe failed: %w", err)

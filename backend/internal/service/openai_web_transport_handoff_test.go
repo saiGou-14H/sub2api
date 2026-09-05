@@ -197,9 +197,22 @@ func TestOpenAIWebTopicBodyUsesArraySubscribeCommand(t *testing.T) {
 	require.Len(t, dialer.conn.writes, 1)
 	command, ok := dialer.conn.writes[0].([]map[string]any)
 	require.True(t, ok)
+	require.Len(t, command, 2)
 	require.Equal(t, 1, command[0]["id"])
-	require.Equal(t, "subscribe", command[0]["command"].(map[string]any)["type"])
-	require.Equal(t, "conversation-turn-topic", command[0]["command"].(map[string]any)["topic_id"])
+	connectCommand := command[0]["command"].(map[string]any)
+	require.Equal(t, "connect", connectCommand["type"])
+	require.Equal(t, map[string]any{"type": "presence", "state": "background"}, connectCommand["presence"])
+	require.Equal(t, 2, command[1]["id"])
+	subscribeCommand := command[1]["command"].(map[string]any)
+	require.Equal(t, "subscribe", subscribeCommand["type"])
+	require.Equal(t, "conversation-turn-topic", subscribeCommand["topic_id"])
+}
+
+func TestOpenAIWebTopicBodyRejectsNestedReplyError(t *testing.T) {
+	conn := &webHandoffTestConn{frames: [][]byte{[]byte(`[{"id":2,"type":"reply","reply":{"type":"error","error":"not_connected"}}]`)}}
+	body := &openAIWebTopicBody{ctx: context.Background(), conn: conn, topic: "topic", seen: map[string]struct{}{}}
+	_, err := io.ReadAll(body)
+	require.EqualError(t, err, "ChatGPT web websocket stream error: not_connected")
 }
 
 func TestOpenAIWebTransportDoSwitchesHandoffToUserTopic(t *testing.T) {
