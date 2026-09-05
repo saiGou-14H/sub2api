@@ -7032,7 +7032,9 @@
               </p>
             </div>
             <Toggle
-              v-model="form.enable_openai_web_prompt_tools"
+              :model-value="form.enable_openai_web_prompt_tools"
+              :disabled="webPromptToolsSaving"
+              @update:model-value="toggleOpenAIWebPromptTools"
               data-testid="openai-web-prompt-tools-toggle"
             />
           </div>
@@ -8965,6 +8967,7 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(true);
 const loadFailed = ref(false);
 const saving = ref(false);
+const webPromptToolsSaving = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
@@ -11027,6 +11030,30 @@ function findDuplicateDefaultSubscription(
     seenGroupIDs.add(item.group_id);
     return false;
   });
+}
+
+async function toggleOpenAIWebPromptTools(enabled: boolean) {
+  if (webPromptToolsSaving.value || form.enable_openai_web_prompt_tools === enabled) {
+    return;
+  }
+
+  const previous = form.enable_openai_web_prompt_tools;
+  form.enable_openai_web_prompt_tools = enabled;
+  webPromptToolsSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateSettings({
+      enable_openai_web_prompt_tools: enabled,
+    });
+    if (typeof updated.enable_openai_web_prompt_tools === "boolean") {
+      form.enable_openai_web_prompt_tools = updated.enable_openai_web_prompt_tools;
+    }
+    appStore.showSuccess(t("common.saved"));
+  } catch (error: unknown) {
+    form.enable_openai_web_prompt_tools = previous;
+    appStore.showError(extractApiErrorMessage(error, t("common.error")));
+  } finally {
+    webPromptToolsSaving.value = false;
+  }
 }
 
 async function saveSettings() {

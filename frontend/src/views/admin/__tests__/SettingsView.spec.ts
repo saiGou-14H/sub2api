@@ -810,6 +810,32 @@ describe("admin SettingsView payment visible method controls", () => {
     ).toBe(false);
   });
 
+  it("persists the OpenAI Web Prompt Tool switch immediately", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_openai_web_prompt_tools: true,
+    });
+    updateSettings.mockImplementationOnce(async (payload) => ({
+      ...baseSettingsResponse,
+      ...payload,
+    }));
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openFeaturesTab(wrapper);
+    const toggle = wrapper.get(
+      '[data-testid="openai-web-prompt-tools-toggle"]',
+    );
+
+    await toggle.setValue(false);
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith({
+      enable_openai_web_prompt_tools: false,
+    });
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+  });
+
   it("renders panel rate limit card and saves settings", async () => {
     getPanelRateLimitSettings.mockClear();
     updatePanelRateLimitSettings.mockClear();
