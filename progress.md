@@ -610,3 +610,6 @@
   into the private ChatGPT Web payload.
 - Added direct SSE/WS cursor extraction and state-store/cursor/expiry tests.
   Focused service tests and GatewayCache tests pass; `git diff --check` passes.
+- Added an end-to-end continuation unit test proving that the first stable
+  session turn stores a Web cursor and the next compatible turn sends only the
+  latest user message. The focused continuation/state tests pass.
