@@ -840,3 +840,33 @@
   `/v1/chat/completions` and `/v1/responses` returned 401 as expected. Recent
   container logs contained no panic/fatal or known Web parameter/stream error
   signatures.
+
+## 2026-09-06 context-drift audit
+
+- The first continuity implementation only compared the newest user-message
+  fingerprint. A caller could send a modified assistant answer or reorder an
+  older turn while retaining the same latest user message; the gateway could
+  then send only the new user message against the old Web cursor.
+- The state must retain a digest of the exact prior transcript plus the Web
+  assistant output. A full-history follow-up may be reduced only when the
+  messages before its newest user message match that stored digest exactly.
+  A one-message follow-up remains valid because it explicitly delegates prior
+  context to the server-side Web cursor.
+- Concurrent requests sharing one Web session must be serialized across the
+  upstream request and state commit. Otherwise two turns can reuse the same
+  parent message ID and fork or overwrite the upstream conversation. The
+  local state store will provide a keyed lock; callers that cannot acquire it
+  will fail closed instead of sending an unsafe continuation.
+
+## 2026-09-06 context-drift hardening result
+
+- The stored digest now covers the exact prior request transcript plus the
+  assistant text emitted by the Web response. Edited assistant history and
+  reordered turns therefore invalidate the private Web cursor and force a
+  complete replay.
+- A request carrying both a stable session identity and `previous_response_id`
+  now locks and writes through the canonical session key while retaining the
+  response alias. This keeps both continuation forms on the same cursor.
+- Same-key turns use a keyed semaphore spanning upstream I/O through commit or
+  invalidation. Cancellation before acquisition fails closed; release is
+  idempotent and removes idle lock entries.

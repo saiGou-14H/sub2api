@@ -19,15 +19,17 @@ import (
 // The identifiers are private upstream values and are never exposed as the
 // public Responses response ID.
 type OpenAIWebConversationState struct {
-	ConversationID      string `json:"conversation_id"`
-	ParentMessageID     string `json:"parent_message_id"`
-	AccountID           int64  `json:"account_id"`
-	GroupID             int64  `json:"group_id"`
-	Model               string `json:"model"`
-	SessionKeyHash      string `json:"session_key_hash"`
-	ProfileFingerprint  string `json:"profile_fingerprint,omitempty"`
-	LastUserFingerprint string `json:"last_user_fingerprint,omitempty"`
-	RequiresFullReplay  bool   `json:"requires_full_replay,omitempty"`
+	ConversationID         string `json:"conversation_id"`
+	ParentMessageID        string `json:"parent_message_id"`
+	AccountID              int64  `json:"account_id"`
+	GroupID                int64  `json:"group_id"`
+	Model                  string `json:"model"`
+	SessionKeyHash         string `json:"session_key_hash"`
+	ProfileFingerprint     string `json:"profile_fingerprint,omitempty"`
+	LastUserFingerprint    string `json:"last_user_fingerprint,omitempty"`
+	TranscriptFingerprint  string `json:"transcript_fingerprint,omitempty"`
+	TranscriptMessageCount int    `json:"transcript_message_count,omitempty"`
+	RequiresFullReplay     bool   `json:"requires_full_replay,omitempty"`
 }
 
 type openAIWebContinuationContext struct {
@@ -39,6 +41,7 @@ type openAIWebContinuationContext struct {
 	state              *OpenAIWebConversationState
 	reused             bool
 	eligible           bool
+	lockRelease        func()
 }
 
 func openAIWebStableSessionID(c *gin.Context, body []byte) string {
@@ -227,6 +230,72 @@ func openAIWebCountUserMessagesAfter(req *apicompat.ChatCompletionsRequest, inde
 	return count
 }
 
+func openAIWebMessageSequenceFingerprint(messages []apicompat.ChatMessage) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		return ""
+	}
+	return openAIWebHash("web-transcript-v1", string(raw))
+}
+
+func openAIWebTranscriptFingerprint(messages []apicompat.ChatMessage, assistantText string) (string, int) {
+	transcript := append([]apicompat.ChatMessage(nil), messages...)
+	if strings.TrimSpace(assistantText) != "" {
+		encoded, err := json.Marshal(assistantText)
+		if err == nil {
+			transcript = append(transcript, apicompat.ChatMessage{
+				Role:    "assistant",
+				Content: encoded,
+			})
+		}
+	}
+	return openAIWebMessageSequenceFingerprint(transcript), len(transcript)
+}
+
+func openAIWebHistoryPrefixMatches(req *apicompat.ChatCompletionsRequest, latestUserIndex int, state *OpenAIWebConversationState) bool {
+	if req == nil || state == nil || latestUserIndex <= 0 || strings.TrimSpace(state.TranscriptFingerprint) == "" {
+		return false
+	}
+	if state.TranscriptMessageCount > 0 && latestUserIndex != state.TranscriptMessageCount {
+		return false
+	}
+	return openAIWebMessageSequenceFingerprint(req.Messages[:latestUserIndex]) == state.TranscriptFingerprint
+}
+
+func (s *OpenAIGatewayService) resetOpenAIWebContinuationState(ctx context.Context, c *gin.Context, continuation *openAIWebContinuationContext) {
+	if s == nil || continuation == nil || continuation.state == nil {
+		return
+	}
+	groupID := getOpenAIGroupIDFromContext(c)
+	store := s.getOpenAIWSStateStore()
+	if store != nil && groupID > 0 && continuation.stateKey != "" {
+		_ = store.DeleteWebConversationState(ctx, groupID, continuation.stateKey)
+	}
+	if store != nil && groupID > 0 && continuation.responseAliasKey != "" && continuation.responseAliasKey != continuation.stateKey {
+		_ = store.DeleteWebConversationState(ctx, groupID, continuation.responseAliasKey)
+	}
+	continuation.state = nil
+	continuation.responseAliasKey = ""
+	if strings.TrimSpace(continuation.sessionKeyHash) == "" {
+		// Without a stable caller session, an old previous_response_id alias
+		// must never be rebound to a newly replayed conversation.
+		continuation.stateKey = ""
+		continuation.eligible = false
+	}
+}
+
+func (s *OpenAIGatewayService) releaseOpenAIWebContinuation(continuation *openAIWebContinuationContext) {
+	if continuation == nil || continuation.lockRelease == nil {
+		return
+	}
+	release := continuation.lockRelease
+	continuation.lockRelease = nil
+	release()
+}
+
 func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context, c *gin.Context, account *Account, model string, body []byte, req *apicompat.ChatCompletionsRequest) (*apicompat.ChatCompletionsRequest, *openAIWebContinuationContext) {
 	transportReq := req
 	continuation := &openAIWebContinuationContext{}
@@ -264,6 +333,24 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 		continuation.stateKey = openAIWebStorageKey(c, account.ID, model, sessionHash)
 		continuation.eligible = continuation.stateKey != ""
 	}
+	lookupStateKey := continuation.stateKey
+	if previousResponseID != "" {
+		// A stable caller session remains the canonical lock/write key even
+		// when the request also supplies a Responses response alias. This
+		// prevents alias-based requests from racing a normal session turn or
+		// leaving the canonical cursor stale after a successful continuation.
+		if sessionHash == "" {
+			lookupStateKey = openAIWebResponseAliasKey(c, account.ID, model, previousResponseID)
+		}
+	}
+	if locker, ok := store.(openAIWebConversationLockProvider); ok && lookupStateKey != "" {
+		release, acquired := locker.AcquireOpenAIWebConversationLock(ctx, groupID, lookupStateKey)
+		if !acquired {
+			continuation.eligible = false
+			return transportReq, continuation
+		}
+		continuation.lockRelease = release
+	}
 	var state *OpenAIWebConversationState
 	stateKey := continuation.stateKey
 	if previousResponseID != "" {
@@ -271,7 +358,10 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 		if alias != "" {
 			loaded, found, _ := store.GetWebConversationState(ctx, groupID, alias)
 			if found {
-				state, stateKey = loaded, alias
+				state = loaded
+				if sessionHash == "" {
+					stateKey = alias
+				}
 			}
 		}
 	}
@@ -290,15 +380,23 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 	continuation.stateKey = stateKey
 	continuation.responseAliasKey = openAIWebResponseAliasKey(c, account.ID, model, previousResponseID)
 	if state.AccountID != account.ID || state.GroupID != groupID || strings.TrimSpace(state.Model) != strings.TrimSpace(model) || strings.TrimSpace(state.ConversationID) == "" || strings.TrimSpace(state.ParentMessageID) == "" {
-		_ = store.DeleteWebConversationState(ctx, groupID, stateKey)
+		s.resetOpenAIWebContinuationState(ctx, c, continuation)
 		return transportReq, continuation
 	}
 	if profile != "" && state.ProfileFingerprint != "" && profile != state.ProfileFingerprint {
-		_ = store.DeleteWebConversationState(ctx, groupID, stateKey)
+		s.resetOpenAIWebContinuationState(ctx, c, continuation)
 		return transportReq, continuation
 	}
 	lastUserFingerprint, lastUserIndex := openAIWebLastUserFingerprint(req)
-	if lastUserFingerprint == "" || lastUserFingerprint == state.LastUserFingerprint {
+	if lastUserFingerprint == "" {
+		return transportReq, continuation
+	}
+	if lastUserIndex > 0 && !openAIWebHistoryPrefixMatches(req, lastUserIndex, state) {
+		s.resetOpenAIWebContinuationState(ctx, c, continuation)
+		continuation.eligible = continuation.stateKey != ""
+		return transportReq, continuation
+	}
+	if lastUserFingerprint == state.LastUserFingerprint {
 		return transportReq, continuation
 	}
 	if state.RequiresFullReplay {
@@ -327,7 +425,8 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 		}
 	}
 	if priorIndex < 0 || openAIWebCountUserMessagesAfter(req, priorIndex) != 1 || lastUserIndex <= priorIndex {
-		continuation.eligible = true
+		s.resetOpenAIWebContinuationState(ctx, c, continuation)
+		continuation.eligible = continuation.stateKey != ""
 		return transportReq, continuation
 	}
 	transportCopy := *req
@@ -338,7 +437,11 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 }
 
 func (s *OpenAIGatewayService) invalidateOpenAIWebContinuation(ctx context.Context, c *gin.Context, account *Account, model string, continuation *openAIWebContinuationContext) {
-	if s == nil || account == nil || continuation == nil || continuation.state == nil {
+	if continuation == nil {
+		return
+	}
+	defer s.releaseOpenAIWebContinuation(continuation)
+	if s == nil || account == nil || continuation.state == nil {
 		return
 	}
 	groupID := getOpenAIGroupIDFromContext(c)
@@ -355,6 +458,7 @@ func (s *OpenAIGatewayService) invalidateOpenAIWebContinuation(ctx context.Conte
 }
 
 func (s *OpenAIGatewayService) commitOpenAIWebContinuation(ctx context.Context, c *gin.Context, account *Account, model string, req *apicompat.ChatCompletionsRequest, responseID string, body io.Reader, continuation *openAIWebContinuationContext) {
+	defer s.releaseOpenAIWebContinuation(continuation)
 	if s == nil || account == nil || req == nil || continuation == nil || !continuation.eligible {
 		return
 	}
@@ -381,6 +485,9 @@ func (s *OpenAIGatewayService) commitOpenAIWebContinuation(ctx context.Context, 
 		RequiresFullReplay: openAIWebRequestRequiresFullReplay(req),
 	}
 	state.LastUserFingerprint, _ = openAIWebLastUserFingerprint(req)
+	if transcriptProvider, ok := body.(OpenAIWebConversationTranscriptProvider); ok {
+		state.TranscriptFingerprint, state.TranscriptMessageCount = openAIWebTranscriptFingerprint(req.Messages, transcriptProvider.OpenAIWebAssistantText())
+	}
 	store := s.getOpenAIWSStateStore()
 	if store == nil {
 		return

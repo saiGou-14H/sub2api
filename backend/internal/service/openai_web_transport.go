@@ -3160,11 +3160,26 @@ type OpenAIWebConversationStateProvider interface {
 	OpenAIWebConversationState() (conversationID, parentMessageID string)
 }
 
+// OpenAIWebConversationTranscriptProvider exposes the assistant text that was
+// actually emitted by the Web upstream. It is used only for a compact
+// transcript-prefix digest; the text is never stored as a public response
+// identifier or forwarded back to ChatGPT Web.
+type OpenAIWebConversationTranscriptProvider interface {
+	OpenAIWebAssistantText() string
+}
+
 func (r *openAIWebResponsesReader) OpenAIWebConversationState() (string, string) {
 	if r == nil {
 		return "", ""
 	}
 	return strings.TrimSpace(r.conversationID), strings.TrimSpace(r.lastMessageID)
+}
+
+func (r *openAIWebResponsesReader) OpenAIWebAssistantText() string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.text)
 }
 
 func (r *openAIWebResponsesReader) Close() error {

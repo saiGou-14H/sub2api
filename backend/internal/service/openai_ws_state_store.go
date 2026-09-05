@@ -53,6 +53,18 @@ type openAIWebConversationBinding struct {
 	expiresAt time.Time
 }
 
+type openAIWebConversationLock struct {
+	semaphore chan struct{}
+	refs      int
+}
+
+// openAIWebConversationLockProvider serializes turns that share one private
+// Web parent cursor. It is optional so alternate/test state stores retain the
+// existing OpenAIWSStateStore contract.
+type openAIWebConversationLockProvider interface {
+	AcquireOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey string) (release func(), acquired bool)
+}
+
 // openAIWebConversationStateCache is implemented by the Redis-backed gateway
 // cache when available. It is deliberately optional so small/test caches keep
 // the existing GatewayCache contract and the local hot cache remains usable.
@@ -95,18 +107,20 @@ type OpenAIWSStateStore interface {
 type defaultOpenAIWSStateStore struct {
 	cache GatewayCache
 
-	responseToAccountMu  sync.RWMutex
-	responseToAccount    map[string]openAIWSAccountBinding
-	responseOwnerMu      sync.RWMutex
-	responseOwners       map[string]openAIHTTPResponseOwnerBinding
-	responseToConnMu     sync.RWMutex
-	responseToConn       map[string]openAIWSConnBinding
-	sessionToTurnStateMu sync.RWMutex
-	sessionToTurnState   map[string]openAIWSTurnStateBinding
-	sessionToConnMu      sync.RWMutex
-	sessionToConn        map[string]openAIWSSessionConnBinding
-	webConversationMu    sync.RWMutex
-	webConversations     map[string]openAIWebConversationBinding
+	responseToAccountMu    sync.RWMutex
+	responseToAccount      map[string]openAIWSAccountBinding
+	responseOwnerMu        sync.RWMutex
+	responseOwners         map[string]openAIHTTPResponseOwnerBinding
+	responseToConnMu       sync.RWMutex
+	responseToConn         map[string]openAIWSConnBinding
+	sessionToTurnStateMu   sync.RWMutex
+	sessionToTurnState     map[string]openAIWSTurnStateBinding
+	sessionToConnMu        sync.RWMutex
+	sessionToConn          map[string]openAIWSSessionConnBinding
+	webConversationMu      sync.RWMutex
+	webConversations       map[string]openAIWebConversationBinding
+	webConversationLocksMu sync.Mutex
+	webConversationLocks   map[string]*openAIWebConversationLock
 
 	lastCleanupUnixNano atomic.Int64
 }
@@ -114,13 +128,14 @@ type defaultOpenAIWSStateStore struct {
 // NewOpenAIWSStateStore 创建默认 WS 状态存储。
 func NewOpenAIWSStateStore(cache GatewayCache) OpenAIWSStateStore {
 	store := &defaultOpenAIWSStateStore{
-		cache:              cache,
-		responseToAccount:  make(map[string]openAIWSAccountBinding, 256),
-		responseOwners:     make(map[string]openAIHTTPResponseOwnerBinding, 256),
-		responseToConn:     make(map[string]openAIWSConnBinding, 256),
-		sessionToTurnState: make(map[string]openAIWSTurnStateBinding, 256),
-		sessionToConn:      make(map[string]openAIWSSessionConnBinding, 256),
-		webConversations:   make(map[string]openAIWebConversationBinding, 256),
+		cache:                cache,
+		responseToAccount:    make(map[string]openAIWSAccountBinding, 256),
+		responseOwners:       make(map[string]openAIHTTPResponseOwnerBinding, 256),
+		responseToConn:       make(map[string]openAIWSConnBinding, 256),
+		sessionToTurnState:   make(map[string]openAIWSTurnStateBinding, 256),
+		sessionToConn:        make(map[string]openAIWSSessionConnBinding, 256),
+		webConversations:     make(map[string]openAIWebConversationBinding, 256),
+		webConversationLocks: make(map[string]*openAIWebConversationLock, 256),
 	}
 	store.lastCleanupUnixNano.Store(time.Now().UnixNano())
 	return store
@@ -501,6 +516,53 @@ func (s *defaultOpenAIWSStateStore) DeleteWebConversationState(ctx context.Conte
 		return cache.DeleteOpenAIWebConversationState(cacheCtx, groupID, stateKey)
 	}
 	return nil
+}
+
+func (s *defaultOpenAIWSStateStore) AcquireOpenAIWebConversationLock(ctx context.Context, groupID int64, stateKey string) (func(), bool) {
+	key := openAIWSGroupStateKey(groupID, stateKey)
+	if key == "" {
+		return nil, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.webConversationLocksMu.Lock()
+	lock := s.webConversationLocks[key]
+	if lock == nil {
+		lock = &openAIWebConversationLock{semaphore: make(chan struct{}, 1)}
+		lock.semaphore <- struct{}{}
+		s.webConversationLocks[key] = lock
+	}
+	lock.refs++
+	s.webConversationLocksMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		s.dropOpenAIWebConversationLockRef(key, lock)
+		return nil, false
+	case <-lock.semaphore:
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				lock.semaphore <- struct{}{}
+				s.dropOpenAIWebConversationLockRef(key, lock)
+			})
+		}, true
+	}
+}
+
+func (s *defaultOpenAIWSStateStore) dropOpenAIWebConversationLockRef(key string, lock *openAIWebConversationLock) {
+	if s == nil || lock == nil {
+		return
+	}
+	s.webConversationLocksMu.Lock()
+	if lock.refs > 0 {
+		lock.refs--
+	}
+	if lock.refs == 0 && s.webConversationLocks[key] == lock {
+		delete(s.webConversationLocks, key)
+	}
+	s.webConversationLocksMu.Unlock()
 }
 
 func (s *defaultOpenAIWSStateStore) maybeCleanup() {

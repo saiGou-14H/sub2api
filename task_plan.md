@@ -195,3 +195,11 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Add account/model/protocol/TTL invalidation and failover safeguards so a Web conversation ID is never sent to a different account or incompatible model.
 - [completed] Add focused tests for state storage, expiry, cursor capture, previous-response bridging, and both public forwarding paths.
 - [completed] Run the remote Docker release gate and deploy only port 9999; the implementation and regression tests are committed and pushed.
+
+## 2026-09-06 Web conversation context-drift hardening
+
+- [completed] Bind continuation reuse to the exact prior transcript prefix and captured Web assistant text.
+- [completed] Serialize same-session Web turns with a keyed lock held through upstream completion and state commit/invalidation.
+- [completed] Preserve the canonical session state key when a request also uses `previous_response_id` as an alias.
+- [completed] Add regression coverage for edited/reordered history, alias write-back, lock cancellation, and lock release.
+- [pending] Commit, push, package, deploy only port 9999, and run remote health/log verification.

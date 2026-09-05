@@ -622,3 +622,19 @@
 - A local Go cache cleanup initially tried to move a 576 MB cache across drives
   into a full C: volume. The exact destination and source cache directories
   created by this run were then removed; no unrelated files were touched.
+
+# 2026-09-06 context-drift hardening
+
+- Audit found that latest-user matching alone is insufficient when a client
+  sends a full history containing edited assistant text or reordered turns.
+- Audit also found no serialization around a shared Web parent cursor, so
+  concurrent same-session requests could race. The next patch adds transcript
+  prefix validation and a keyed in-process lock held until commit/invalidation.
+- Added transcript-prefix validation against the captured Web assistant text;
+  edited or reordered history now falls back to full replay and clears the old
+  cursor.
+- Added canonical-session locking/write-back for requests that also carry
+  `previous_response_id`, plus idempotent keyed lock release.
+- Added regression tests for edited/reordered history, alias write-back, lock
+  cancellation, and lock release. Focused service tests and GatewayCache tests
+  pass; `git diff --check` passes.
