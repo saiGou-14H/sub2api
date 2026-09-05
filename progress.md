@@ -613,3 +613,12 @@
 - Added an end-to-end continuation unit test proving that the first stable
   session turn stores a Web cursor and the next compatible turn sends only the
   latest user message. The focused continuation/state tests pass.
+- Built and deployed commit `99c0e94` as
+  `local/sub2api:web-attachments-9999-99c0e94` on the isolated `9999` app.
+  Only `sub2api-9999` was recreated; `10000` and `10001` remained healthy.
+  Root/health checks passed, protected Chat Completions and Responses routes
+  returned 401 without a key, and recent logs had no fatal/panic or known Web
+  transport rejection signatures. Remote build/upload artifacts were removed.
+- A local Go cache cleanup initially tried to move a 576 MB cache across drives
+  into a full C: volume. The exact destination and source cache directories
+  created by this run were then removed; no unrelated files were touched.

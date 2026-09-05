@@ -828,3 +828,15 @@
 - The public OpenAI response ID remains a gateway identifier. It is stored only
   as an internal alias for `previous_response_id`; it is never sent upstream to
   ChatGPT Web.
+
+## 2026-09-06 deployment verification
+
+- Remote Docker compiled the committed backend successfully and produced image
+  `local/sub2api:web-attachments-9999-99c0e94`.
+- Only the isolated `sub2api-9999` application container was recreated. The
+  existing `10000` and `10001` application containers were left running and
+  returned healthy responses alongside `9999`.
+- `9999` root and health endpoints returned 200; unauthenticated
+  `/v1/chat/completions` and `/v1/responses` returned 401 as expected. Recent
+  container logs contained no panic/fatal or known Web parameter/stream error
+  signatures.

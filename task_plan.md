@@ -193,4 +193,4 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Reuse the Web conversation only when the supplied history matches the stored turn fingerprint; otherwise replay the complete history and start a new Web conversation.
 - [completed] Add account/model/protocol/TTL invalidation and failover safeguards so a Web conversation ID is never sent to a different account or incompatible model.
 - [completed] Add focused tests for state storage, expiry, cursor capture, previous-response bridging, and both public forwarding paths.
-- [pending] Run the remote Docker release gate and deploy only port 9999; the implementation and regression tests are committed and pushed.
+- [completed] Run the remote Docker release gate and deploy only port 9999; the implementation and regression tests are committed and pushed.
