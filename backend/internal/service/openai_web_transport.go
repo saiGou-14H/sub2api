@@ -383,9 +383,10 @@ func ValidateOpenAIWebResponsesRequestWithPromptTools(req *apicompat.ResponsesRe
 	if !openAIWebDefaultServiceTier(req.ServiceTier) {
 		return openAIWebUnsupportedParam("service_tier")
 	}
-	if strings.TrimSpace(req.PreviousResponseID) != "" {
-		return openAIWebUnsupportedParam("previous_response_id")
-	}
+	// Responses previous_response_id is consumed by the gateway's Web
+	// conversation state bridge. It is deliberately not serialized into the
+	// private ChatGPT Web payload; the bridge maps it to the stored
+	// conversation_id/parent_message_id pair instead.
 	if req.Reasoning != nil {
 		if !openAIWebReasoningEffortSupported(req.Reasoning.Effort) {
 			return openAIWebInvalidParam("reasoning.effort", "reasoning.effort is not supported by ChatGPT web transport")
@@ -3132,6 +3133,7 @@ type openAIWebResponsesReader struct {
 	responseID       string
 	itemID           string
 	conversationID   string
+	lastMessageID    string
 	createdAt        int64
 	sequenceNumber   int
 	rawText          string
@@ -3147,6 +3149,22 @@ type openAIWebResponsesReader struct {
 	failed           bool
 	finished         bool
 	closed           bool
+}
+
+// OpenAIWebConversationStateProvider exposes the private Web cursor captured
+// while the response body is consumed. It is intentionally separate from the
+// public Responses response ID: Web conversation IDs and message IDs are
+// account-bound upstream state and must never be sent to API clients as if
+// they were portable OpenAI response IDs.
+type OpenAIWebConversationStateProvider interface {
+	OpenAIWebConversationState() (conversationID, parentMessageID string)
+}
+
+func (r *openAIWebResponsesReader) OpenAIWebConversationState() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(r.conversationID), strings.TrimSpace(r.lastMessageID)
 }
 
 func (r *openAIWebResponsesReader) Close() error {
@@ -3255,6 +3273,9 @@ func (r *openAIWebResponsesReader) convertFrame(frame openAIWebSSEFrame) {
 	r.start()
 	if conversationID := findStringRecursive(payload, "conversation_id", "conversationId"); conversationID != "" {
 		r.conversationID = conversationID
+	}
+	if messageID := openAIWebAssistantMessageID(payload); messageID != "" {
+		r.lastMessageID = messageID
 	}
 	if usage, ok := openAIWebUsage(payload); ok {
 		mergeOpenAIWebUsage(&r.usage, usage)
@@ -3898,6 +3919,44 @@ func findStringRecursive(value any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// openAIWebAssistantMessageID finds the upstream assistant message cursor
+// without treating public response/item IDs or arbitrary nested IDs as a Web
+// parent message. ChatGPT Web frames normally carry author.role=assistant and
+// message.id, but the handoff/topic envelopes vary between direct SSE and WS.
+func openAIWebAssistantMessageID(value any) string {
+	var visit func(any) string
+	visit = func(current any) string {
+		switch item := current.(type) {
+		case map[string]any:
+			if openAIWebMessageRole(item) == "assistant" {
+				if id, ok := item["id"].(string); ok && strings.TrimSpace(id) != "" {
+					return strings.TrimSpace(id)
+				}
+				if nested, ok := item["message"]; ok {
+					if id := visit(nested); id != "" {
+						return id
+					}
+				}
+			}
+			for _, key := range []string{"message", "messages", "item", "items", "data", "payload", "body", "event", "v"} {
+				if nested, ok := item[key]; ok {
+					if id := visit(nested); id != "" {
+						return id
+					}
+				}
+			}
+		case []any:
+			for _, nested := range item {
+				if id := visit(nested); id != "" {
+					return id
+				}
+			}
+		}
+		return ""
+	}
+	return visit(value)
 }
 
 func findBoolRecursive(value any, keys ...string) (bool, bool) {

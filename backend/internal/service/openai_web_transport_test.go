@@ -498,7 +498,6 @@ func TestValidateOpenAIWebResponsesRequestRejectsLostParameters(t *testing.T) {
 		param string
 		req   *apicompat.ResponsesRequest
 	}{
-		{name: "previous response", param: "previous_response_id", req: &apicompat.ResponsesRequest{PreviousResponseID: "resp_previous"}},
 		{name: "invalid reasoning summary", param: "reasoning.summary", req: &apicompat.ResponsesRequest{Reasoning: &apicompat.ResponsesReasoning{Summary: "verbose"}}},
 		{name: "invalid verbosity", param: "text.verbosity", req: &apicompat.ResponsesRequest{Text: &apicompat.ResponsesText{Verbosity: "tiny"}}},
 		{name: "store", param: "store", req: &apicompat.ResponsesRequest{Store: &store}},
@@ -511,6 +510,11 @@ func TestValidateOpenAIWebResponsesRequestRejectsLostParameters(t *testing.T) {
 			require.Equal(t, tc.param, requestErr.Param)
 		})
 	}
+}
+
+func TestValidateOpenAIWebResponsesRequestAcceptsPreviousResponseForGatewayStateBridge(t *testing.T) {
+	err := ValidateOpenAIWebResponsesRequest(&apicompat.ResponsesRequest{PreviousResponseID: "resp_previous"})
+	require.NoError(t, err)
 }
 
 func TestValidateOpenAIWebRequestsRejectInvalidTokenLimits(t *testing.T) {
@@ -1254,4 +1258,20 @@ func TestOpenAIWebAttachmentRejectsRemoteURL(t *testing.T) {
 	}
 	_, err := transport.BuildConversationRequest(context.Background(), nil, "test-access-token", OpenAIWebRequirements{Token: "requirements-test"}, OpenAIWebConversationOptions{Request: req})
 	require.EqualError(t, err, "ChatGPT web transport does not support remote attachment URLs")
+}
+
+func TestOpenAIWebResponsesBodyCapturesPrivateConversationCursor(t *testing.T) {
+	source := io.NopCloser(strings.NewReader(strings.Join([]string{
+		`data: {"conversation_id":"conv-web-1","message":{"id":"msg-web-1","author":{"role":"assistant"},"content":{"parts":["hello"]}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")))
+	body := NewOpenAIWebResponsesBody(source, "auto")
+	_, err := io.ReadAll(body)
+	require.NoError(t, err)
+	provider, ok := body.(OpenAIWebConversationStateProvider)
+	require.True(t, ok)
+	conversationID, parentMessageID := provider.OpenAIWebConversationState()
+	require.Equal(t, "conv-web-1", conversationID)
+	require.Equal(t, "msg-web-1", parentMessageID)
 }

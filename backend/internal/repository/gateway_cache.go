@@ -17,6 +17,7 @@ import (
 const stickySessionPrefix = "sticky_session:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
 const liveCallPrefix = "live:call:"
+const openAIWebConversationStatePrefix = "openai_web_conversation_state:"
 
 type gatewayCache struct {
 	rdb *redis.Client
@@ -68,6 +69,48 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func buildOpenAIWebConversationStateKey(groupID int64, stateKey string) string {
+	return fmt.Sprintf("%s%d:%s", openAIWebConversationStatePrefix, groupID, strings.TrimSpace(stateKey))
+}
+
+// SetOpenAIWebConversationState stores the private Web conversation cursor in
+// a separate namespace from account sticky-session bindings. The service uses
+// this optional cache surface through type assertion so existing test caches
+// and lightweight deployments keep the GatewayCache contract unchanged.
+func (c *gatewayCache) SetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string, payload []byte, ttl time.Duration) error {
+	if c == nil || c.rdb == nil {
+		return errors.New("gateway cache unavailable")
+	}
+	if groupID <= 0 || strings.TrimSpace(stateKey) == "" || len(payload) == 0 || ttl <= 0 {
+		return errors.New("invalid OpenAI Web conversation state")
+	}
+	return c.rdb.Set(ctx, buildOpenAIWebConversationStateKey(groupID, stateKey), payload, ttl).Err()
+}
+
+func (c *gatewayCache) GetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string) ([]byte, error) {
+	if c == nil || c.rdb == nil {
+		return nil, errors.New("gateway cache unavailable")
+	}
+	if groupID <= 0 || strings.TrimSpace(stateKey) == "" {
+		return nil, nil
+	}
+	payload, err := c.rdb.Get(ctx, buildOpenAIWebConversationStateKey(groupID, stateKey)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	return payload, err
+}
+
+func (c *gatewayCache) DeleteOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string) error {
+	if c == nil || c.rdb == nil {
+		return errors.New("gateway cache unavailable")
+	}
+	if groupID <= 0 || strings.TrimSpace(stateKey) == "" {
+		return nil
+	}
+	return c.rdb.Del(ctx, buildOpenAIWebConversationStateKey(groupID, stateKey)).Err()
 }
 
 var claimOpenAIResponsesSessionWindowScript = redis.NewScript(`

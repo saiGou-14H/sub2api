@@ -1229,18 +1229,26 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 	if err != nil {
 		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
 	}
+	transportReq, continuation := s.prepareOpenAIWebContinuation(ctx, c, account, upstreamModel, body, &chatReq)
+	conversationOptions := OpenAIWebConversationOptions{Request: transportReq, PromptTools: promptTools}
+	if continuation != nil && continuation.state != nil {
+		conversationOptions.ConversationID = continuation.state.ConversationID
+		conversationOptions.ParentMessageID = continuation.state.ParentMessageID
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 	resp, err := s.newOpenAIWebTransport().Do(
 		upstreamCtx,
 		account,
 		token,
-		OpenAIWebConversationOptions{Request: &chatReq, PromptTools: promptTools},
+		conversationOptions,
 	)
 	if err != nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, true)
 	}
 	if resp == nil || resp.Body == nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebForwardError(ctx, c, account, errors.New("ChatGPT web transport returned no response body"), body, upstreamModel, true)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1248,6 +1256,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 		resp.Header = make(http.Header)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebHTTPResponseError(ctx, c, account, resp, body, upstreamModel, true)
 	}
 
@@ -1258,11 +1267,14 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 		result, err = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
 	if err != nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return result, err
 	}
 	if result == nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return nil, errors.New("ChatGPT web transport produced no forwarding result")
 	}
+	s.commitOpenAIWebContinuation(ctx, c, account, upstreamModel, &chatReq, result.ResponseID, resp.Body, continuation)
 	result.UpstreamEndpoint = OpenAIWebConversationPath
 	if result.ReasoningEffort == nil && strings.TrimSpace(chatReq.ReasoningEffort) != "" {
 		effort := strings.TrimSpace(chatReq.ReasoningEffort)

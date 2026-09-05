@@ -1351,18 +1351,26 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	if err != nil {
 		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
 	}
+	transportReq, continuation := s.prepareOpenAIWebContinuation(ctx, c, account, upstreamModel, body, chatReq)
+	conversationOptions := OpenAIWebConversationOptions{Request: transportReq, PromptTools: promptTools}
+	if continuation != nil && continuation.state != nil {
+		conversationOptions.ConversationID = continuation.state.ConversationID
+		conversationOptions.ParentMessageID = continuation.state.ParentMessageID
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 	resp, err := s.newOpenAIWebTransport().Do(
 		upstreamCtx,
 		account,
 		token,
-		OpenAIWebConversationOptions{Request: chatReq, PromptTools: promptTools},
+		conversationOptions,
 	)
 	if err != nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, false)
 	}
 	if resp == nil || resp.Body == nil {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebForwardError(ctx, c, account, errors.New("ChatGPT web transport returned no response body"), body, upstreamModel, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1370,6 +1378,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		resp.Header = make(http.Header)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 		return s.handleOpenAIWebHTTPResponseError(ctx, c, account, resp, body, upstreamModel, false)
 	}
 
@@ -1379,6 +1388,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	if responsesReq.Stream {
 		streamResult, handleErr := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 		if handleErr != nil {
+			s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 			return nil, handleErr
 		}
 		usage = streamResult.usage
@@ -1387,11 +1397,13 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	} else {
 		nonStreamResult, handleErr := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
 		if handleErr != nil {
+			s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
 			return nil, handleErr
 		}
 		usage = nonStreamResult.usage
 		responseID = strings.TrimSpace(nonStreamResult.responseID)
 	}
+	s.commitOpenAIWebContinuation(ctx, c, account, upstreamModel, chatReq, responseID, resp.Body, continuation)
 	s.bindHTTPResponseAccount(ctx, c, account, responseID)
 	if usage == nil {
 		usage = &OpenAIUsage{}

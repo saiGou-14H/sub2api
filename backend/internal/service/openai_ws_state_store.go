@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -47,6 +48,20 @@ type openAIWSSessionConnBinding struct {
 	expiresAt time.Time
 }
 
+type openAIWebConversationBinding struct {
+	state     OpenAIWebConversationState
+	expiresAt time.Time
+}
+
+// openAIWebConversationStateCache is implemented by the Redis-backed gateway
+// cache when available. It is deliberately optional so small/test caches keep
+// the existing GatewayCache contract and the local hot cache remains usable.
+type openAIWebConversationStateCache interface {
+	SetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string, payload []byte, ttl time.Duration) error
+	GetOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string) ([]byte, error)
+	DeleteOpenAIWebConversationState(ctx context.Context, groupID int64, stateKey string) error
+}
+
 // OpenAIWSStateStore 管理 WSv2 的粘连状态。
 // - response_id -> account_id 用于续链路由
 // - response_id -> conn_id 用于连接内上下文复用
@@ -71,6 +86,10 @@ type OpenAIWSStateStore interface {
 	BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration)
 	GetSessionConn(groupID int64, sessionHash string) (string, bool)
 	DeleteSessionConn(groupID int64, sessionHash string)
+
+	BindWebConversationState(ctx context.Context, groupID int64, stateKey string, state OpenAIWebConversationState, ttl time.Duration) error
+	GetWebConversationState(ctx context.Context, groupID int64, stateKey string) (*OpenAIWebConversationState, bool, error)
+	DeleteWebConversationState(ctx context.Context, groupID int64, stateKey string) error
 }
 
 type defaultOpenAIWSStateStore struct {
@@ -86,6 +105,8 @@ type defaultOpenAIWSStateStore struct {
 	sessionToTurnState   map[string]openAIWSTurnStateBinding
 	sessionToConnMu      sync.RWMutex
 	sessionToConn        map[string]openAIWSSessionConnBinding
+	webConversationMu    sync.RWMutex
+	webConversations     map[string]openAIWebConversationBinding
 
 	lastCleanupUnixNano atomic.Int64
 }
@@ -99,6 +120,7 @@ func NewOpenAIWSStateStore(cache GatewayCache) OpenAIWSStateStore {
 		responseToConn:     make(map[string]openAIWSConnBinding, 256),
 		sessionToTurnState: make(map[string]openAIWSTurnStateBinding, 256),
 		sessionToConn:      make(map[string]openAIWSSessionConnBinding, 256),
+		webConversations:   make(map[string]openAIWebConversationBinding, 256),
 	}
 	store.lastCleanupUnixNano.Store(time.Now().UnixNano())
 	return store
@@ -396,6 +418,91 @@ func (s *defaultOpenAIWSStateStore) DeleteSessionConn(groupID int64, sessionHash
 	s.sessionToConnMu.Unlock()
 }
 
+func (s *defaultOpenAIWSStateStore) BindWebConversationState(ctx context.Context, groupID int64, stateKey string, state OpenAIWebConversationState, ttl time.Duration) error {
+	key := openAIWSGroupStateKey(groupID, stateKey)
+	if key == "" || strings.TrimSpace(state.ConversationID) == "" || state.AccountID <= 0 {
+		return nil
+	}
+	ttl = normalizeOpenAIWSTTL(ttl)
+	s.maybeCleanup()
+	binding := openAIWebConversationBinding{state: state, expiresAt: time.Now().Add(ttl)}
+	s.webConversationMu.Lock()
+	ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
+	s.webConversations[key] = binding
+	s.webConversationMu.Unlock()
+
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if cache, ok := s.cache.(openAIWebConversationStateCache); ok && cache != nil {
+		cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+		defer cancel()
+		return cache.SetOpenAIWebConversationState(cacheCtx, groupID, stateKey, payload, ttl)
+	}
+	return nil
+}
+
+func (s *defaultOpenAIWSStateStore) GetWebConversationState(ctx context.Context, groupID int64, stateKey string) (*OpenAIWebConversationState, bool, error) {
+	key := openAIWSGroupStateKey(groupID, stateKey)
+	if key == "" {
+		return nil, false, nil
+	}
+	s.maybeCleanup()
+	now := time.Now()
+	s.webConversationMu.RLock()
+	binding, ok := s.webConversations[key]
+	s.webConversationMu.RUnlock()
+	if ok && now.Before(binding.expiresAt) && strings.TrimSpace(binding.state.ConversationID) != "" {
+		state := binding.state
+		return &state, true, nil
+	}
+	if ok {
+		s.webConversationMu.Lock()
+		delete(s.webConversations, key)
+		s.webConversationMu.Unlock()
+	}
+
+	cache, ok := s.cache.(openAIWebConversationStateCache)
+	if !ok || cache == nil {
+		return nil, false, nil
+	}
+	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+	defer cancel()
+	payload, err := cache.GetOpenAIWebConversationState(cacheCtx, groupID, stateKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(payload) == 0 {
+		return nil, false, nil
+	}
+	var state OpenAIWebConversationState
+	if err := json.Unmarshal(payload, &state); err != nil || strings.TrimSpace(state.ConversationID) == "" || state.AccountID <= 0 {
+		return nil, false, nil
+	}
+	s.webConversationMu.Lock()
+	ensureBindingCapacity(s.webConversations, key, openAIWSStateStoreMaxEntriesPerMap)
+	s.webConversations[key] = openAIWebConversationBinding{state: state, expiresAt: now.Add(time.Minute)}
+	s.webConversationMu.Unlock()
+	return &state, true, nil
+}
+
+func (s *defaultOpenAIWSStateStore) DeleteWebConversationState(ctx context.Context, groupID int64, stateKey string) error {
+	key := openAIWSGroupStateKey(groupID, stateKey)
+	if key == "" {
+		return nil
+	}
+	s.webConversationMu.Lock()
+	delete(s.webConversations, key)
+	s.webConversationMu.Unlock()
+	if cache, ok := s.cache.(openAIWebConversationStateCache); ok && cache != nil {
+		cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
+		defer cancel()
+		return cache.DeleteOpenAIWebConversationState(cacheCtx, groupID, stateKey)
+	}
+	return nil
+}
+
 func (s *defaultOpenAIWSStateStore) maybeCleanup() {
 	if s == nil {
 		return
@@ -429,6 +536,10 @@ func (s *defaultOpenAIWSStateStore) maybeCleanup() {
 	s.sessionToConnMu.Lock()
 	cleanupExpiredSessionConnBindings(s.sessionToConn, now, openAIWSStateStoreCleanupMaxPerMap)
 	s.sessionToConnMu.Unlock()
+
+	s.webConversationMu.Lock()
+	cleanupExpiredWebConversationBindings(s.webConversations, now, openAIWSStateStoreCleanupMaxPerMap)
+	s.webConversationMu.Unlock()
 }
 
 func cleanupExpiredAccountBindings(bindings map[string]openAIWSAccountBinding, now time.Time, maxScan int) {
@@ -495,6 +606,22 @@ func cleanupExpiredSessionConnBindings(bindings map[string]openAIWSSessionConnBi
 	}
 }
 
+func cleanupExpiredWebConversationBindings(bindings map[string]openAIWebConversationBinding, now time.Time, maxScan int) {
+	if len(bindings) == 0 || maxScan <= 0 {
+		return
+	}
+	scanned := 0
+	for key, binding := range bindings {
+		if now.After(binding.expiresAt) {
+			delete(bindings, key)
+		}
+		scanned++
+		if scanned >= maxScan {
+			break
+		}
+	}
+}
+
 func ensureBindingCapacity[T any](bindings map[string]T, incomingKey string, maxEntries int) {
 	if len(bindings) < maxEntries || maxEntries <= 0 {
 		return
@@ -541,6 +668,14 @@ func openAIWSSessionTurnStateKey(groupID int64, sessionHash string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%s", groupID, hash)
+}
+
+func openAIWSGroupStateKey(groupID int64, stateKey string) string {
+	stateKey = strings.TrimSpace(stateKey)
+	if stateKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("%d:%s", groupID, stateKey)
 }
 
 func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, context.CancelFunc) {

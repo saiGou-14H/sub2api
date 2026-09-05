@@ -28,6 +28,39 @@ func TestOpenAIWSStateStore_BindGetDeleteResponseAccount(t *testing.T) {
 	require.Zero(t, accountID)
 }
 
+func TestOpenAIWSStateStore_BindGetDeleteWebConversationState(t *testing.T) {
+	store := NewOpenAIWSStateStore(&stubGatewayCache{})
+	ctx := context.Background()
+	state := OpenAIWebConversationState{
+		ConversationID:  "conv-web",
+		ParentMessageID: "msg-web",
+		AccountID:       101,
+		GroupID:         7,
+		Model:           "auto",
+	}
+	require.NoError(t, store.BindWebConversationState(ctx, 7, "state-key", state, time.Minute))
+	loaded, found, err := store.GetWebConversationState(ctx, 7, "state-key")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, state, *loaded)
+
+	require.NoError(t, store.DeleteWebConversationState(ctx, 7, "state-key"))
+	loaded, found, err = store.GetWebConversationState(ctx, 7, "state-key")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Nil(t, loaded)
+}
+
+func TestOpenAIWSStateStore_WebConversationStateExpires(t *testing.T) {
+	store := NewOpenAIWSStateStore(&stubGatewayCache{})
+	state := OpenAIWebConversationState{ConversationID: "conv-expiring", AccountID: 1}
+	require.NoError(t, store.BindWebConversationState(context.Background(), 1, "expiring", state, time.Nanosecond))
+	time.Sleep(2 * time.Millisecond)
+	_, found, err := store.GetWebConversationState(context.Background(), 1, "expiring")
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
 func TestOpenAIWSStateStore_HTTPResponseOwnerPersistsAcrossStoreInstances(t *testing.T) {
 	cache := &stubGatewayCache{}
 	ctx := context.Background()
