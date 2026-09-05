@@ -47,6 +47,7 @@ const (
 	OpenAIWebTestModel                = "auto"
 	OpenAIWebConversationPath         = "/backend-api/f/conversation"
 	OpenAIWebConversationPreparePath  = OpenAIWebConversationPath + "/prepare"
+	OpenAIWebUserWebsocketPath        = "/backend-api/celsius/ws/user"
 	OpenAIWebModelsPath               = "/backend-api/models?history_and_training_disabled=false"
 	OpenAIWebModelsRoute              = "/backend-api/models"
 	OpenAIWebRequirementsPath         = "/backend-api/sentinel/chat-requirements"
@@ -502,6 +503,7 @@ type OpenAIWebTransport struct {
 	mu        sync.Mutex
 	bootstrap map[string]OpenAIWebBootstrap
 	clients   map[string]*req.Client
+	wsDialer  openAIWSClientDialer
 }
 
 // UsesOpenAIWebProtocol reports whether an account explicitly opts into the
@@ -555,6 +557,7 @@ func NewOpenAIWebTransport(service *OpenAIGatewayService, options OpenAIWebTrans
 		options:   options,
 		bootstrap: make(map[string]OpenAIWebBootstrap),
 		clients:   make(map[string]*req.Client),
+		wsDialer:  newDefaultOpenAIWSClientDialer(),
 	}
 	transport.jar, _ = cookiejar.New(nil)
 	if service != nil {
@@ -2460,6 +2463,398 @@ func (t *OpenAIWebTransport) buildConversationRequestWithBody(ctx context.Contex
 	return req, nil
 }
 
+type openAIWebConversationHandoff struct {
+	ConversationID string
+	TurnExchangeID string
+	TopicID        string
+}
+
+// parseOpenAIWebConversationHandoff extracts the topic handoff emitted by the
+// newer Web models. The initial HTTP stream is intentionally short and ends
+// with [DONE]; the answer is delivered on the shared user WebSocket instead.
+func parseOpenAIWebConversationHandoff(frames []openAIWebSSEFrame) (openAIWebConversationHandoff, bool, error) {
+	var handoff openAIWebConversationHandoff
+	resumeConversationID := ""
+	resumeTopicID := ""
+	websocketTopicID := ""
+	for _, frame := range frames {
+		data := strings.TrimSpace(frame.data)
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(data), &payload) != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(openAIWebStringValue(payload["type"]))) {
+		case "resume_conversation_token":
+			resumeConversationID = strings.TrimSpace(openAIWebStringValue(payload["conversation_id"]))
+		case "stream_handoff":
+			handoff.ConversationID = strings.TrimSpace(openAIWebStringValue(payload["conversation_id"]))
+			handoff.TurnExchangeID = strings.TrimSpace(openAIWebStringValue(payload["turn_exchange_id"]))
+			options, _ := payload["options"].([]any)
+			for _, rawOption := range options {
+				option, _ := rawOption.(map[string]any)
+				topicID := strings.TrimSpace(openAIWebStringValue(option["topic_id"]))
+				switch strings.ToLower(strings.TrimSpace(openAIWebStringValue(option["type"]))) {
+				case "resume_sse_endpoint":
+					resumeTopicID = topicID
+				case "subscribe_ws_topic":
+					websocketTopicID = topicID
+				}
+			}
+		}
+	}
+	if handoff.ConversationID == "" && handoff.TurnExchangeID == "" && websocketTopicID == "" && resumeTopicID == "" {
+		return openAIWebConversationHandoff{}, false, nil
+	}
+	if handoff.ConversationID == "" || handoff.TurnExchangeID == "" || websocketTopicID == "" {
+		return openAIWebConversationHandoff{}, false, errors.New("ChatGPT web stream handoff is incomplete")
+	}
+	if resumeConversationID != "" && resumeConversationID != handoff.ConversationID {
+		return openAIWebConversationHandoff{}, false, errors.New("ChatGPT web handoff conversation mismatch")
+	}
+	if resumeTopicID != "" && resumeTopicID != websocketTopicID {
+		return openAIWebConversationHandoff{}, false, errors.New("ChatGPT web handoff topic mismatch")
+	}
+	handoff.TopicID = websocketTopicID
+	return handoff, true, nil
+}
+
+func openAIWebStringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func encodeOpenAIWebSSEFrame(frame openAIWebSSEFrame) []byte {
+	var builder strings.Builder
+	if strings.TrimSpace(frame.event) != "" {
+		builder.WriteString("event: ")
+		builder.WriteString(strings.TrimSpace(frame.event))
+		builder.WriteString("\n")
+	}
+	data := strings.Split(frame.data, "\n")
+	for _, line := range data {
+		builder.WriteString("data: ")
+		builder.WriteString(line)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("\n")
+	return []byte(builder.String())
+}
+
+// openAIWebPrefetchedBody preserves frames consumed while deciding whether
+// the response is a direct SSE stream or a WebSocket handoff.
+type openAIWebPrefetchedBody struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+func (b *openAIWebPrefetchedBody) Read(p []byte) (int, error) {
+	if b == nil || b.reader == nil {
+		return 0, io.EOF
+	}
+	return b.reader.Read(p)
+}
+
+func (b *openAIWebPrefetchedBody) Close() error {
+	if b == nil || b.closer == nil {
+		return nil
+	}
+	return b.closer.Close()
+}
+
+// prepareConversationResponseBody consumes only the short protocol prelude.
+// Direct/legacy streams are replayed byte-for-byte through a buffered reader;
+// handoff streams are switched to a topic reader before [DONE] can terminate
+// the public Responses stream.
+func (t *OpenAIWebTransport) prepareConversationResponseBody(ctx context.Context, account *Account, token string, source io.ReadCloser) (io.ReadCloser, error) {
+	if source == nil {
+		return nil, errors.New("ChatGPT web conversation returned no response body")
+	}
+	buffered := bufio.NewReaderSize(source, 64*1024)
+	frames := make([]openAIWebSSEFrame, 0, 8)
+	for len(frames) < 128 {
+		frame, err := readOpenAIWebSSEFrame(buffered)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			_ = source.Close()
+			return nil, err
+		}
+		frames = append(frames, frame)
+		handoff, found, handoffErr := parseOpenAIWebConversationHandoff(frames)
+		if handoffErr != nil {
+			_ = source.Close()
+			return nil, handoffErr
+		}
+		if found {
+			for len(frames) < 128 {
+				next, nextErr := readOpenAIWebSSEFrame(buffered)
+				if nextErr != nil {
+					if errors.Is(nextErr, io.EOF) {
+						break
+					}
+					_ = source.Close()
+					return nil, nextErr
+				}
+				frames = append(frames, next)
+				if strings.TrimSpace(next.data) == "[DONE]" {
+					break
+				}
+			}
+			prefix := bytes.Buffer{}
+			for _, frame := range frames {
+				if strings.TrimSpace(frame.data) == "[DONE]" {
+					continue
+				}
+				_, _ = prefix.Write(encodeOpenAIWebSSEFrame(frame))
+			}
+			body, wsErr := t.newOpenAIWebTopicBody(ctx, account, token, handoff, &prefix)
+			if wsErr != nil {
+				_ = source.Close()
+				return nil, wsErr
+			}
+			_ = source.Close()
+			return body, nil
+		}
+		if openAIWebDirectStreamFrame(frame) || strings.TrimSpace(frame.data) == "[DONE]" {
+			break
+		}
+	}
+	prefix := bytes.Buffer{}
+	for _, frame := range frames {
+		_, _ = prefix.Write(encodeOpenAIWebSSEFrame(frame))
+	}
+	return &openAIWebPrefetchedBody{
+		reader: io.MultiReader(bytes.NewReader(prefix.Bytes()), buffered),
+		closer: source,
+	}, nil
+}
+
+func openAIWebDirectStreamFrame(frame openAIWebSSEFrame) bool {
+	data := strings.TrimSpace(frame.data)
+	if data == "" || data == "[DONE]" || strings.EqualFold(strings.TrimSpace(frame.event), "delta_encoding") {
+		return false
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(data), &payload) != nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(openAIWebStringValue(payload["type"]))) {
+	case "resume_conversation_token", "stream_handoff":
+		return false
+	default:
+		return true
+	}
+}
+
+func (t *OpenAIWebTransport) userWebsocketURL(ctx context.Context, account *Account, token string) (string, error) {
+	headers, err := t.commonHeaders(ctx, account, token, OpenAIWebUserWebsocketPath)
+	if err != nil {
+		return "", err
+	}
+	headers.Set("Accept", "application/json")
+	resp, err := t.request(ctx, http.MethodGet, OpenAIWebUserWebsocketPath, token, account, nil, headers)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", errors.New("ChatGPT web websocket endpoint returned no response")
+	}
+	raw, readErr := readAndCloseWebBody(resp, openAIWebMaxResponseErrorBytes)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", webHTTPError(OpenAIWebUserWebsocketPath, resp.StatusCode, raw, token)
+	}
+	if readErr != nil {
+		return "", fmt.Errorf("ChatGPT web websocket endpoint response: %w", readErr)
+	}
+	var payload struct {
+		WebsocketURL string `json:"websocket_url"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || strings.TrimSpace(payload.WebsocketURL) == "" {
+		return "", errors.New("ChatGPT web websocket endpoint omitted websocket_url")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(payload.WebsocketURL))
+	if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" {
+		return "", errors.New("ChatGPT web websocket_url is invalid")
+	}
+	return parsed.String(), nil
+}
+
+type openAIWebTopicBody struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	conn   openAIWSClientConn
+	topic  string
+	output bytes.Buffer
+	seen   map[string]struct{}
+	done   bool
+	closed bool
+}
+
+func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account *Account, token string, handoff openAIWebConversationHandoff, prefix *bytes.Buffer) (io.ReadCloser, error) {
+	wsURL, err := t.userWebsocketURL(ctx, account, token)
+	if err != nil {
+		return nil, err
+	}
+	headers, err := t.commonHeaders(ctx, account, token, OpenAIWebUserWebsocketPath)
+	if err != nil {
+		return nil, err
+	}
+	headers.Set("Origin", t.baseURL())
+	headers.Set("Accept", "*/*")
+	if parsed, parseErr := url.Parse(wsURL); parseErr == nil && t.jar != nil {
+		cookieURL := *parsed
+		if cookieURL.Scheme == "ws" {
+			cookieURL.Scheme = "http"
+		} else if cookieURL.Scheme == "wss" {
+			cookieURL.Scheme = "https"
+		}
+		for _, cookie := range t.jar.Cookies(&cookieURL) {
+			headers.Add("Cookie", cookie.String())
+		}
+	}
+	dialer := t.wsDialer
+	if dialer == nil {
+		dialer = newDefaultOpenAIWSClientDialer()
+	}
+	conn, _, _, err := dialer.Dial(ctx, wsURL, headers, t.proxyFor(account))
+	if err != nil {
+		return nil, fmt.Errorf("ChatGPT web websocket connect failed: %w", err)
+	}
+	command := []map[string]any{{
+		"id": 1,
+		"command": map[string]any{
+			"type":     "subscribe",
+			"topic_id": handoff.TopicID,
+		},
+	}}
+	if err := conn.WriteJSON(ctx, command); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("ChatGPT web websocket subscribe failed: %w", err)
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	body := &openAIWebTopicBody{
+		ctx:    streamCtx,
+		cancel: cancel,
+		conn:   conn,
+		topic:  handoff.TopicID,
+		seen:   make(map[string]struct{}),
+	}
+	if prefix != nil && prefix.Len() > 0 {
+		body.output.Write(prefix.Bytes())
+	}
+	return body, nil
+}
+
+func (b *openAIWebTopicBody) Read(p []byte) (int, error) {
+	if b == nil || b.closed {
+		return 0, io.EOF
+	}
+	if b.output.Len() > 0 {
+		return b.output.Read(p)
+	}
+	if b.done {
+		return 0, io.EOF
+	}
+	for b.output.Len() == 0 && !b.done {
+		frame, err := b.conn.ReadMessage(b.ctx)
+		if err != nil {
+			b.done = true
+			return 0, err
+		}
+		terminal, parseErr := b.consumeFrame(frame)
+		if parseErr != nil {
+			b.done = true
+			return 0, parseErr
+		}
+		if terminal {
+			b.output.WriteString("data: [DONE]\n\n")
+			b.done = true
+		}
+	}
+	if b.output.Len() > 0 {
+		return b.output.Read(p)
+	}
+	return 0, io.EOF
+}
+
+func (b *openAIWebTopicBody) consumeFrame(frame []byte) (bool, error) {
+	var values []any
+	if err := json.Unmarshal(frame, &values); err != nil {
+		return false, errors.New("ChatGPT web websocket frame is invalid")
+	}
+	terminal := false
+	var consume func(any) error
+	consume = func(value any) error {
+		item, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		typ := strings.ToLower(strings.TrimSpace(openAIWebStringValue(item["type"])))
+		switch typ {
+		case "reply":
+			reply, _ := item["reply"].(map[string]any)
+			catchups, _ := reply["catchups"].([]any)
+			for _, catchup := range catchups {
+				if err := consume(catchup); err != nil {
+					return err
+				}
+			}
+		case "message":
+			if strings.TrimSpace(openAIWebStringValue(item["topic_id"])) != b.topic {
+				return nil
+			}
+			envelope, _ := item["payload"].(map[string]any)
+			if strings.ToLower(strings.TrimSpace(openAIWebStringValue(envelope["type"]))) != "conversation-turn-stream" {
+				return nil
+			}
+			payload, _ := envelope["payload"].(map[string]any)
+			switch strings.ToLower(strings.TrimSpace(openAIWebStringValue(payload["type"]))) {
+			case "stream-item":
+				streamItemID := strings.TrimSpace(openAIWebStringValue(payload["stream_item_id"]))
+				encodedItem := openAIWebStringValue(payload["encoded_item"])
+				if streamItemID == "" || encodedItem == "" {
+					return nil
+				}
+				if _, exists := b.seen[streamItemID]; exists {
+					return nil
+				}
+				b.seen[streamItemID] = struct{}{}
+				b.output.WriteString(encodedItem)
+				if !strings.HasSuffix(encodedItem, "\n\n") {
+					b.output.WriteString("\n\n")
+				}
+			case "done":
+				terminal = true
+			}
+		}
+		return nil
+	}
+	for _, value := range values {
+		if err := consume(value); err != nil {
+			return false, err
+		}
+	}
+	return terminal, nil
+}
+
+func (b *openAIWebTopicBody) Close() error {
+	if b == nil || b.closed {
+		return nil
+	}
+	b.closed = true
+	if b.cancel != nil {
+		b.cancel()
+	}
+	if b.conn != nil {
+		return b.conn.Close()
+	}
+	return nil
+}
+
 // Do performs the complete web handshake and returns a Responses-shaped SSE
 // response suitable for the existing gateway response handlers.
 func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token string, options OpenAIWebConversationOptions) (*http.Response, error) {
@@ -2513,6 +2908,10 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	if resp.Body == nil {
 		return nil, errors.New("ChatGPT web conversation returned no response body")
 	}
+	conversationBody, bodyErr := t.prepareConversationResponseBody(ctx, account, token, resp.Body)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
 	model := OpenAIWebTestModel
 	if options.Request != nil {
 		// buildConversationPayload already validated this selector. Reuse the
@@ -2528,7 +2927,7 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	if options.Request != nil {
 		history = options.Request.Messages
 	}
-	resp.Body = newOpenAIWebResponsesBodyWithPromptTools(resp.Body, model, history, options.PromptTools)
+	resp.Body = newOpenAIWebResponsesBodyWithPromptTools(conversationBody, model, history, options.PromptTools)
 	resp.Header.Set("Content-Type", "text/event-stream")
 	return resp, nil
 }
@@ -2888,6 +3287,18 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 		}
 	}
 	if r.failed {
+		r.finished = true
+		_, _ = r.output.WriteString("data: [DONE]\n\n")
+		return
+	}
+	if strings.TrimSpace(r.text) == "" {
+		r.failed = true
+		response := r.responseObject("failed", nil)
+		response["error"] = map[string]any{
+			"code":    "upstream_empty_response",
+			"message": "ChatGPT web upstream completed without assistant text",
+		}
+		r.emit("response.failed", map[string]any{"response": response})
 		r.finished = true
 		_, _ = r.output.WriteString("data: [DONE]\n\n")
 		return

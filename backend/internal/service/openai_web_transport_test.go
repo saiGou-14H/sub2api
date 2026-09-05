@@ -910,6 +910,15 @@ func TestConvertOpenAIWebConversationSSEFailureDoesNotEmitCompleted(t *testing.T
 	require.True(t, strings.HasSuffix(output, "data: [DONE]\n\n"))
 }
 
+func TestConvertOpenAIWebConversationSSEEmptyResponseFails(t *testing.T) {
+	converted, err := ConvertOpenAIWebConversationSSE([]byte("data: [DONE]\n\n"), "auto")
+	require.NoError(t, err)
+	output := string(converted)
+	require.Contains(t, output, `"code":"upstream_empty_response"`)
+	require.Contains(t, output, `"type":"response.failed"`)
+	require.NotContains(t, output, `"type":"response.completed"`)
+}
+
 func TestConvertOpenAIWebConversationSSEEOFIsIncomplete(t *testing.T) {
 	// No blank line or [DONE] follows this delta. The adapter must not claim a
 	// completed turn merely because partial text was received.
