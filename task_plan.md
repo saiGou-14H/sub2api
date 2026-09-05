@@ -202,4 +202,4 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Serialize same-session Web turns with a keyed lock held through upstream completion and state commit/invalidation.
 - [completed] Preserve the canonical session state key when a request also uses `previous_response_id` as an alias.
 - [completed] Add regression coverage for edited/reordered history, alias write-back, lock cancellation, and lock release.
-- [pending] Commit, push, package, deploy only port 9999, and run remote health/log verification.
+- [completed] Commit, push, package, deploy only port 9999, and run remote health/log verification.

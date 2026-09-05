@@ -638,3 +638,17 @@
 - Added regression tests for edited/reordered history, alias write-back, lock
   cancellation, and lock release. Focused service tests and GatewayCache tests
   pass; `git diff --check` passes.
+- Committed and pushed `6769254` (`fix: harden web conversation cursor reuse`).
+- Built a secret-free remote context with SHA-256
+  `7792C969D47C650548C896852DBB0E2982AA11DC196CB102CCC0E39E51485206`.
+- Remote Docker built image
+  `local/sub2api:web-attachments-9999-6769254` with image ID
+  `sha256:9917a3825d321a88adae413f0411d2c25d78957b6d08bb98320d3d8581934eaa`.
+- Recreated only `sub2api-9999`; `10000` and `10001` remained running and
+  healthy. All three health checks returned 200 and protected 9999 Chat/
+  Responses routes returned 401.
+- Applied the configured image retention policy to the 9999 family: current
+  `6769254` and rollback `99c0e94` remain; older 9999 images were removed.
+- Removed remote build/upload artifacts. Recent 9999 logs contain no panic,
+  fatal, Web parameter rejection, WebSocket `not_connected`, model-mode 422,
+  or empty-response signatures. No live Web account was changed or used.
