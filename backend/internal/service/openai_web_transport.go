@@ -44,11 +44,15 @@ const (
 	OpenAIWebDefaultBaseURL = "https://chatgpt.com"
 	// OpenAIWebTestModel is kept as the compatibility name used by the
 	// account-test path. It is also the Web UI's Default selector.
-	OpenAIWebTestModel                = "auto"
-	OpenAIWebConversationPath         = "/backend-api/f/conversation"
-	OpenAIWebConversationPreparePath  = OpenAIWebConversationPath + "/prepare"
-	OpenAIWebUserWebsocketPath        = "/backend-api/celsius/ws/user"
-	OpenAIWebModelsPath               = "/backend-api/models?history_and_training_disabled=false"
+	OpenAIWebTestModel               = "auto"
+	OpenAIWebConversationPath        = "/backend-api/f/conversation"
+	OpenAIWebConversationPreparePath = OpenAIWebConversationPath + "/prepare"
+	OpenAIWebUserWebsocketPath       = "/backend-api/celsius/ws/user"
+	// The Plus web picker requests this manifest with the feature flags below.
+	// It returns the authenticated Web entitlement slugs (including future
+	// entries), whereas the older history-only query can return a different
+	// general-purpose catalog.
+	OpenAIWebModelsPath               = "/backend-api/models?iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true"
 	OpenAIWebModelsRoute              = "/backend-api/models"
 	OpenAIWebRequirementsPath         = "/backend-api/sentinel/chat-requirements"
 	OpenAIWebSentinelPingPath         = "/backend-api/sentinel/ping"
@@ -1367,7 +1371,7 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		"model":                                model,
 		"parent_message_id":                    parentID,
 		"conversation_mode":                    map[string]any{"kind": "primary_assistant"},
-		"conversation_origin":                  nil,
+		"conversation_origin":                  "tpp",
 		"force_paragen":                        false,
 		"force_paragen_model_slug":             "",
 		"force_rate_limit":                     false,
@@ -1377,6 +1381,7 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		"suggestions":                          []any{},
 		"supported_encodings":                  []string{"v1"},
 		"system_hints":                         []any{},
+		"model_response_contracts":             openAIWebModelResponseContracts(),
 		"client_prepare_state":                 "success",
 		"enable_message_followups":             true,
 		"supports_buffering":                   true,
@@ -1581,14 +1586,28 @@ func openAIWebMultimodalMessage(role, text string, attachments []openAIWebAttach
 }
 
 func openAIWebMessageMetadata(metadata map[string]any) map[string]any {
-	result := make(map[string]any, len(metadata)+1)
+	result := make(map[string]any, len(metadata)+2)
 	for key, value := range metadata {
 		result[key] = value
+	}
+	if _, exists := result["selected_sources"]; !exists {
+		result["selected_sources"] = []any{}
 	}
 	if _, exists := result["serialization_metadata"]; !exists {
 		result["serialization_metadata"] = map[string]any{"custom_symbol_offsets": []any{}}
 	}
 	return result
+}
+
+// openAIWebModelResponseContracts mirrors the contract advertised by the
+// Plus composer. Keep the value request-scoped so callers cannot mutate a
+// shared map between concurrent conversations.
+func openAIWebModelResponseContracts() []map[string]any {
+	return []map[string]any{{
+		"id":               "photo_upload_action.v1",
+		"protocol_version": 1,
+		"presets":          []string{"cap:image", "cap:file", "placement:end"},
+	}}
 }
 
 func openAIWebAttachmentPointer(attachment openAIWebAttachment) string {
@@ -2196,18 +2215,20 @@ func openAIWebConversationPreparePayload(conversationBody []byte) ([]byte, error
 		prepareSource = "file_picker"
 	}
 	prepare := map[string]any{
-		"action":                  conversation["action"],
-		"parent_message_id":       conversation["parent_message_id"],
-		"model":                   conversation["model"],
-		"client_prepare_state":    prepareState,
-		"client_prepare_dispatch": prepareDispatch,
-		"client_prepare_source":   prepareSource,
-		"timezone_offset_min":     conversation["timezone_offset_min"],
-		"timezone":                conversation["timezone"],
-		"conversation_mode":       conversation["conversation_mode"],
-		"system_hints":            conversation["system_hints"],
-		"supports_buffering":      true,
-		"supported_encodings":     []string{"v1"},
+		"action":                   conversation["action"],
+		"parent_message_id":        conversation["parent_message_id"],
+		"model":                    conversation["model"],
+		"client_prepare_state":     prepareState,
+		"client_prepare_dispatch":  prepareDispatch,
+		"client_prepare_source":    prepareSource,
+		"timezone_offset_min":      conversation["timezone_offset_min"],
+		"timezone":                 conversation["timezone"],
+		"conversation_mode":        conversation["conversation_mode"],
+		"conversation_origin":      "tpp",
+		"system_hints":             conversation["system_hints"],
+		"model_response_contracts": openAIWebModelResponseContracts(),
+		"supports_buffering":       true,
+		"supported_encodings":      []string{"v1"},
 		"client_contextual_info": map[string]any{
 			"app_name":                         "chatgpt.com",
 			"has_web_push_capabilities":        true,

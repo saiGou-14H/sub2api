@@ -83,6 +83,32 @@ func TestOpenAIWebTransportBuildConversationPayload(t *testing.T) {
 	require.NotContains(t, string(body), "max_completion_tokens")
 }
 
+func TestOpenAIWebConversationPayloadMatchesPlusHarContract(t *testing.T) {
+	transport := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{})
+	body, err := transport.BuildConversationPayload(&apicompat.ChatCompletionsRequest{
+		Model: "gpt-5.6-sol-wm",
+		Messages: []apicompat.ChatMessage{{
+			Role:    "user",
+			Content: json.RawMessage(`"hello"`),
+		}},
+	})
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	require.Equal(t, "tpp", payload["conversation_origin"])
+	require.Equal(t, []any{"v1"}, payload["supported_encodings"])
+	contracts, ok := payload["model_response_contracts"].([]any)
+	require.True(t, ok)
+	require.Len(t, contracts, 1)
+	contract := contracts[0].(map[string]any)
+	require.Equal(t, "photo_upload_action.v1", contract["id"])
+	require.Equal(t, float64(1), contract["protocol_version"])
+	require.Equal(t, []any{"cap:image", "cap:file", "placement:end"}, contract["presets"])
+	message := payload["messages"].([]any)[0].(map[string]any)
+	metadata := message["metadata"].(map[string]any)
+	require.Equal(t, []any{}, metadata["selected_sources"])
+}
+
 func TestOpenAIWebTransportPromptToolsNeverSerializeNativeToolFields(t *testing.T) {
 	parallel := true
 	request := &apicompat.ChatCompletionsRequest{
@@ -203,6 +229,7 @@ func TestOpenAIWebTransportDiscoversVerbatimModelSlugs(t *testing.T) {
 	require.Equal(t, []string{"auto", "gpt-5-6", "gpt-5.6-sol-wm"}, snapshot.Models)
 	require.Equal(t, "gpt-5-6", snapshot.DefaultModelSlug)
 	require.Equal(t, "/backend-api/models", upstream.requests[0].URL.Path)
+	require.Equal(t, "iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true", upstream.requests[0].URL.RawQuery)
 }
 
 func TestAccountOpenAIWebModelCatalogSnapshotControlsSupport(t *testing.T) {
@@ -686,6 +713,11 @@ func TestOpenAIWebConversationPreparePayloadCarriesAttachmentMIMEs(t *testing.T)
 	require.Equal(t, "immediate", payload["client_prepare_dispatch"])
 	require.Equal(t, "file_picker", payload["client_prepare_source"])
 	require.Equal(t, []any{"application/pdf", "text/plain"}, payload["attachment_mime_types"])
+	require.Equal(t, "tpp", payload["conversation_origin"])
+	contracts, ok := payload["model_response_contracts"].([]any)
+	require.True(t, ok)
+	require.Len(t, contracts, 1)
+	require.Equal(t, "photo_upload_action.v1", contracts[0].(map[string]any)["id"])
 	require.NotContains(t, string(prepared), "partial_query")
 }
 
