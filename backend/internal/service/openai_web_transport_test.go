@@ -153,6 +153,30 @@ func TestOpenAIWebTransportPromptToolsNeverSerializeNativeToolFields(t *testing.
 	require.NotEmpty(t, request.ToolChoice)
 }
 
+func TestOpenAIWebTransportPromptToolsSanitizeToolHistoryMetadata(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "lookup",
+			Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		}}},
+		Messages: []apicompat.ChatMessage{
+			{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: "call_1", Type: "function", Function: apicompat.ChatFunctionCall{Name: "lookup", Arguments: `{}`}}}},
+			{Role: "tool", ToolCallID: "call_1", Content: json.RawMessage(`"{}"`)},
+		},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromChatRequest(request)
+	require.NoError(t, err)
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request: request, PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+	require.NotContains(t, string(body), `"tool_calls"`)
+	require.NotContains(t, string(body), `"tool_call_id"`)
+	require.Contains(t, string(body), "Previous assistant tool calls")
+	require.Contains(t, string(body), "Previous tool result (call_id=call_1)")
+}
+
 func TestOpenAIWebTransportAcceptsAndDropsResponsesMaxOutputTokens(t *testing.T) {
 	maxOutputTokens := 128
 	responsesRequest := &apicompat.ResponsesRequest{

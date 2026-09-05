@@ -16,11 +16,16 @@ import (
 )
 
 const (
-	openAIWebPromptToolProtocol = "sub2api.prompt_tool.v1"
-	openAIWebPromptToolMaxCount = 64
-	openAIWebPromptToolMaxBytes = 128 << 10
-	openAIWebPromptToolMaxCalls = 16
-	openAIWebPromptToolMaxDepth = 32
+	openAIWebPromptToolProtocol        = "sub2api.prompt_tool.v1"
+	openAIWebPromptToolMaxCount        = 64
+	openAIWebPromptToolMaxBytes        = 128 << 10
+	openAIWebPromptToolMaxCalls        = 16
+	openAIWebPromptToolMaxDepth        = 32
+	openAIWebPromptDescriptionMaxBytes = 4096
+	// Keep the generated system instruction below the practical ChatGPT Web
+	// conversation-body threshold. Requests above this bound fail locally with
+	// a useful parameter error instead of an opaque upstream 422.
+	openAIWebPromptInstructionMaxBytes = 512 << 10
 )
 
 var openAIWebPromptToolNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -234,7 +239,11 @@ func newOpenAIWebPromptTools(tools []apicompat.ChatTool, choice, choiceName stri
 		if typ == "custom" || (typ != "function" && len(bytes.TrimSpace(parameters)) == 0) {
 			parameters = openAIWebPromptNativeSchema(typ)
 		}
-		normalized, err := normalizeOpenAIWebPromptSchema(parameters, name)
+		if len(description) > openAIWebPromptDescriptionMaxBytes {
+			description = truncateString(description, openAIWebPromptDescriptionMaxBytes)
+		}
+		strict := raw.Function != nil && raw.Function.Strict != nil && *raw.Function.Strict
+		normalized, err := normalizeOpenAIWebPromptSchema(parameters, name, strict)
 		if err != nil {
 			return nil, err
 		}
@@ -260,6 +269,9 @@ func newOpenAIWebPromptTools(tools []apicompat.ChatTool, choice, choiceName stri
 		return nil, fmt.Errorf("generate prompt tool nonce: %w", err)
 	}
 	result.Nonce = hex.EncodeToString(nonceBytes[:])
+	if size := len([]byte(result.Instruction())); size > openAIWebPromptInstructionMaxBytes {
+		return nil, fmt.Errorf("prompt tool instruction exceeds ChatGPT web limit of %d bytes (got %d)", openAIWebPromptInstructionMaxBytes, size)
+	}
 	return result, nil
 }
 
@@ -365,12 +377,23 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		return nil, false, nil
 	}
 	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+	if trimmed == "" {
 		return nil, false, nil
 	}
+	// Web models occasionally add a short natural-language preamble or wrap
+	// the protocol object in a markdown fence. Only extract a candidate when
+	// it is a JSON object carrying the protocol marker; all nonce/schema checks
+	// below still apply before the candidate can become a tool call.
 	var probe map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
-		return nil, false, nil
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil || probe == nil {
+		candidate, found := extractOpenAIWebPromptEnvelope(trimmed)
+		if !found {
+			return nil, false, nil
+		}
+		trimmed = candidate
+		if err := json.Unmarshal([]byte(trimmed), &probe); err != nil || probe == nil {
+			return nil, false, nil
+		}
 	}
 	if _, hasProtocol := probe["protocol"]; !hasProtocol {
 		return nil, false, nil
@@ -455,6 +478,35 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 	return result, true, nil
 }
 
+// extractOpenAIWebPromptEnvelope finds a complete JSON object embedded in a
+// model response. The decoder is used instead of brace counting so nested
+// objects, escaped braces, and arrays remain valid. A protocol marker is
+// required before the caller treats the response as a tool envelope.
+func extractOpenAIWebPromptEnvelope(text string) (string, bool) {
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	for offset := 0; offset < len(text); offset++ {
+		if text[offset] != '{' {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(text[offset:]))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil || len(raw) == 0 || raw[0] != '{' {
+			continue
+		}
+		var probe map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			continue
+		}
+		if _, ok := probe["protocol"]; !ok {
+			continue
+		}
+		return string(raw), true
+	}
+	return "", false
+}
+
 // normalizeOpenAIWebPromptArguments accepts both the preferred JSON value
 // form and a JSON-encoded string form emitted by some Web model variants.
 // The returned bytes are always the actual argument JSON validated against
@@ -515,7 +567,7 @@ func normalizeOpenAIWebPromptToolChoice(primary, legacy json.RawMessage) (string
 	return "", "", errors.New("unsupported tool_choice type")
 }
 
-func normalizeOpenAIWebPromptSchema(raw json.RawMessage, toolName string) (json.RawMessage, error) {
+func normalizeOpenAIWebPromptSchema(raw json.RawMessage, toolName string, strict bool) (json.RawMessage, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		raw = openAIWebPromptNativeSchema("function")
 	}
@@ -528,7 +580,7 @@ func normalizeOpenAIWebPromptSchema(raw json.RawMessage, toolName string) (json.
 	if err := decoder.Decode(&value); err != nil {
 		return nil, fmt.Errorf("tool %q schema is invalid JSON: %w", toolName, err)
 	}
-	if err := validateOpenAIWebPromptSchemaNode(value, "$", 0, true); err != nil {
+	if err := validateOpenAIWebPromptSchemaNode(value, "$", 0, true, strict); err != nil {
 		return nil, fmt.Errorf("tool %q schema: %w", toolName, err)
 	}
 	root, ok := value.(map[string]any)
@@ -539,15 +591,37 @@ func normalizeOpenAIWebPromptSchema(raw json.RawMessage, toolName string) (json.
 		root["type"] = "object"
 	}
 	if _, ok := root["additionalProperties"]; !ok {
-		root["additionalProperties"] = false
+		if strict {
+			root["additionalProperties"] = false
+		} else {
+			root["additionalProperties"] = true
+		}
 	}
-	if ap, ok := root["additionalProperties"].(bool); ok && ap {
-		return nil, errors.New("strict prompt tool schemas cannot allow additionalProperties")
-	}
+	compactOpenAIWebPromptSchemaNode(root)
 	return json.Marshal(root)
 }
 
-func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root bool) error {
+// compactOpenAIWebPromptSchemaNode removes annotation-only JSON Schema fields
+// before embedding a schema in the model instruction. Validation keywords are
+// retained, so argument checking remains equivalent while large tool catalogs
+// no longer inflate the ChatGPT Web conversation body.
+func compactOpenAIWebPromptSchemaNode(value any) {
+	switch current := value.(type) {
+	case []any:
+		for _, child := range current {
+			compactOpenAIWebPromptSchemaNode(child)
+		}
+	case map[string]any:
+		for _, key := range []string{"title", "description", "examples", "example", "default", "deprecated", "readOnly", "writeOnly", "$comment"} {
+			delete(current, key)
+		}
+		for _, child := range current {
+			compactOpenAIWebPromptSchemaNode(child)
+		}
+	}
+}
+
+func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root, strict bool) error {
 	if depth > openAIWebPromptToolMaxDepth {
 		return errors.New("schema nesting exceeds limit")
 	}
@@ -586,8 +660,19 @@ func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root b
 			return fmt.Errorf("%s.properties must be an object", path)
 		}
 		for name, child := range members {
-			if err := validateOpenAIWebPromptSchemaNode(child, path+".properties["+name+"]", depth+1, false); err != nil {
+			if err := validateOpenAIWebPromptSchemaNode(child, path+".properties["+name+"]", depth+1, false, strict); err != nil {
 				return err
+			}
+		}
+		if strict {
+			required := make(map[string]struct{})
+			for _, item := range stringSlice(obj["required"]) {
+				required[item] = struct{}{}
+			}
+			for name := range members {
+				if _, ok := required[name]; !ok {
+					return fmt.Errorf("%s property %q must be listed in required for strict mode", path, name)
+				}
 			}
 		}
 	}
@@ -610,11 +695,11 @@ func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root b
 	if ap, exists := obj["additionalProperties"]; exists {
 		switch current := ap.(type) {
 		case bool:
-			if current && root {
+			if current && strict {
 				return fmt.Errorf("%s.additionalProperties=true is not allowed in strict mode", path)
 			}
 		case map[string]any:
-			if err := validateOpenAIWebPromptSchemaNode(current, path+".additionalProperties", depth+1, false); err != nil {
+			if err := validateOpenAIWebPromptSchemaNode(current, path+".additionalProperties", depth+1, false, strict); err != nil {
 				return err
 			}
 		default:
@@ -623,7 +708,7 @@ func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root b
 	}
 	for _, keyword := range []string{"items", "contains", "propertyNames", "not", "if", "then", "else", "unevaluatedProperties", "unevaluatedItems"} {
 		if child, exists := obj[keyword]; exists {
-			if err := validateOpenAIWebPromptSchemaNode(child, path+"."+keyword, depth+1, false); err != nil {
+			if err := validateOpenAIWebPromptSchemaNode(child, path+"."+keyword, depth+1, false, strict); err != nil {
 				return err
 			}
 		}
@@ -635,7 +720,7 @@ func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root b
 				return fmt.Errorf("%s.%s must be an array", path, keyword)
 			}
 			for index, child := range items {
-				if err := validateOpenAIWebPromptSchemaNode(child, fmt.Sprintf("%s.%s[%d]", path, keyword, index), depth+1, false); err != nil {
+				if err := validateOpenAIWebPromptSchemaNode(child, fmt.Sprintf("%s.%s[%d]", path, keyword, index), depth+1, false, strict); err != nil {
 					return err
 				}
 			}
@@ -647,7 +732,7 @@ func validateOpenAIWebPromptSchemaNode(value any, path string, depth int, root b
 			return fmt.Errorf("%s.$defs must be an object", path)
 		}
 		for name, child := range members {
-			if err := validateOpenAIWebPromptSchemaNode(child, path+".$defs["+name+"]", depth+1, false); err != nil {
+			if err := validateOpenAIWebPromptSchemaNode(child, path+".$defs["+name+"]", depth+1, false, strict); err != nil {
 				return err
 			}
 		}

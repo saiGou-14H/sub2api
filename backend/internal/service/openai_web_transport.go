@@ -1532,11 +1532,17 @@ func openAIWebMessagesFromChatRequestWithPromptTools(ctx context.Context, accoun
 		if message.Name != "" {
 			metadata["name"] = message.Name
 		}
-		if message.ToolCallID != "" {
-			metadata["tool_call_id"] = message.ToolCallID
-		}
-		if len(message.ToolCalls) > 0 {
-			metadata["tool_calls"] = message.ToolCalls
+		// The classic Web conversation schema has no native tool metadata.
+		// Prompt Tool history is encoded in the message text above; forwarding
+		// these public OpenAI fields as metadata can make the upstream reject the
+		// conversation body even when top-level native fields were removed.
+		if promptTools == nil {
+			if message.ToolCallID != "" {
+				metadata["tool_call_id"] = message.ToolCallID
+			}
+			if len(message.ToolCalls) > 0 {
+				metadata["tool_calls"] = message.ToolCalls
+			}
 		}
 		if len(content.Attachments) == 0 {
 			messages = append(messages, openAIWebMessage(role, content.Text, metadata))

@@ -15,11 +15,13 @@ import (
 )
 
 func TestOpenAIWebPromptToolsNormalizesStrictFunctionSchema(t *testing.T) {
+	strict := true
 	req := &apicompat.ChatCompletionsRequest{
 		Model: "auto",
 		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
 			Name:       "lookup",
 			Parameters: json.RawMessage(`{"properties":{"city":{"type":"string"}},"required":["city"]}`),
+			Strict:     &strict,
 		}}},
 	}
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(req)
@@ -36,10 +38,9 @@ func TestOpenAIWebPromptToolsNormalizesStrictFunctionSchema(t *testing.T) {
 
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
 	for name, schema := range map[string]string{
-		"additional properties": `{"type":"object","additionalProperties":true}`,
-		"unknown required":      `{"type":"object","properties":{},"required":["missing"]}`,
-		"non object root":       `{"type":"string"}`,
-		"invalid pattern":       `{"type":"object","properties":{"x":{"type":"string","pattern":"(?=x)"}}}`,
+		"unknown required": `{"type":"object","properties":{},"required":["missing"]}`,
+		"non object root":  `{"type":"string"}`,
+		"invalid pattern":  `{"type":"object","properties":{"x":{"type":"string","pattern":"(?=x)"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
@@ -49,6 +50,28 @@ func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestOpenAIWebPromptToolsAllowsNonStrictAdditionalProperties(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "create_workflow", Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"additionalProperties":true}`),
+		}}},
+	})
+	require.NoError(t, err)
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(prompt.Tools[0].Parameters, &schema))
+	require.Equal(t, true, schema["additionalProperties"])
+
+	strict := true
+	_, err = NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "create_workflow", Strict: &strict, Parameters: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"additionalProperties":true}`),
+		}}},
+	})
+	require.Error(t, err)
 }
 
 func TestOpenAIWebPromptToolsSupportsNativeToolFamilies(t *testing.T) {
@@ -181,6 +204,75 @@ func TestOpenAIWebPromptToolsParseResponseAcceptsLegacyToolsEnvelope(t *testing.
 	_, recognized, err = prompt.ParseResponse(string(both))
 	require.True(t, recognized)
 	require.Error(t, err)
+}
+
+func TestOpenAIWebPromptToolsParseResponseAcceptsEnvelopeAfterPreamble(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "list_directories", Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"tools": []any{map[string]any{"name": "list_directories", "type": "function", "arguments": map[string]any{}}},
+	})
+	text := "我先列出当前运行环境的项目目录，以及当前工作目录下的所有子目录。\n\n```json\n" + string(envelope) + "\n```"
+	calls, recognized, err := prompt.ParseResponse(text)
+	require.NoError(t, err)
+	require.True(t, recognized)
+	require.Len(t, calls, 1)
+	require.Equal(t, "list_directories", calls[0].Name)
+	require.JSONEq(t, `{}`, string(calls[0].Arguments))
+}
+
+func TestOpenAIWebPromptToolsParseResponseAcceptsEnvelopeWithTrailingText(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "list_directories", Parameters: json.RawMessage(`{"type":"object","properties":{}}`),
+		}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"calls": []any{map[string]any{"name": "list_directories", "arguments": map[string]any{}}},
+	})
+	calls, recognized, err := prompt.ParseResponse(string(envelope) + "\n\n已完成。")
+	require.NoError(t, err)
+	require.True(t, recognized)
+	require.Len(t, calls, 1)
+	require.Equal(t, "list_directories", calls[0].Name)
+}
+
+func TestOpenAIWebPromptToolsCompactsSchemaAnnotations(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "lookup",
+			Parameters: json.RawMessage(`{"type":"object","title":"Large","description":"omit me","properties":{"city":{"type":"string","description":"also omit"}},"required":["city"]}`),
+		}}},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, string(prompt.Tools[0].Parameters), "omit me")
+	require.Contains(t, string(prompt.Tools[0].Parameters), `"properties"`)
+}
+
+func TestOpenAIWebPromptToolsRejectsOversizedInstruction(t *testing.T) {
+	largeSchema := `{"type":"object","properties":{"payload":{"type":"string","minLength":` + strings.Repeat("1", 120000) + `}}}`
+	_, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "one", Parameters: json.RawMessage(largeSchema)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "two", Parameters: json.RawMessage(largeSchema)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "three", Parameters: json.RawMessage(largeSchema)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "four", Parameters: json.RawMessage(largeSchema)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "five", Parameters: json.RawMessage(largeSchema)}},
+		},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "prompt tool instruction exceeds ChatGPT web limit")
 }
 
 func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T) {
