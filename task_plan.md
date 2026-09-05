@@ -119,6 +119,7 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 | Local Go handler test exhausted D: drive space while compiling dependencies | 1 | Treat the local run as inconclusive; use the remote Docker build/test gate and remove only the temporary directory created by this run. |
 | Remote test shell used `sh -lc`, whose login PATH hid the Go toolchain | 1 | Re-run with `sh -c` and the absolute `/usr/local/go/bin/go` path; the image and source are intact. |
 | Local focused Prompt Tool rerun exhausted the D: drive while compiling uncached Go dependencies | 1 | Removed only the exact `.tmp-go-cache-check` and `.tmp-go-tmp-check` directories; use the successful remote Docker regression as the release gate. |
+| Moving the 576 MB repository-local Go cache to C: exhausted the destination drive | 1 | Removed only the exact source and partial destination directories created by this run; no unrelated files were touched. |
 
 ## 2026-09-05 final verification
 
