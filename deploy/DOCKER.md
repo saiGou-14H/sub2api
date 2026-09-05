@@ -49,6 +49,27 @@ volumes:
   redis_data:
 ```
 
+## Local Image Builds
+
+`deploy/build_image.sh` prunes stale images before every build. It preserves the
+image used by the configured running container and one previous image for
+rollback. The cleanup is limited to the configured image reference pattern.
+
+```bash
+# Default image family: sub2api:*
+./deploy/build_image.sh
+
+# Versioned isolated deployment family (for example, port 9999)
+IMAGE_TAG=local/sub2api:web-attachments-9999-<commit> \
+IMAGE_REF_PATTERN='local/sub2api:web-attachments-9999-*' \
+SUB2API_RUNNING_CONTAINER=sub2api-9999 \
+./deploy/build_image.sh
+```
+
+Set `SUB2API_IMAGE_HISTORY=0` only when no rollback image should be retained.
+Do not use a broad pattern such as `local/sub2api:*` when multiple deployment
+instances share the host; use one pattern per deployment family.
+
 ## Startup and Database Recovery
 
 Sub2API runs database migrations while starting. PostgreSQL may still be
