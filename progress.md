@@ -669,3 +669,20 @@
   `go test -tags integration ./internal/repository -run GatewayCache -count=1`.
 - The working tree contains only this release's source/test changes plus the
   isolated Go cache; no credentials or HAR contents were added.
+
+# 2026-09-06 HAR continuation release
+
+- Committed and pushed `01abd36` (`fix: align web conversation continuation
+  with HAR`) to `origin/main`.
+- Built the secret-free remote context with SHA-256
+  `cc4efe704c71c829c5afe8bbbc0aa096345259e29eab9f67e11c18b1fbb28495`.
+- Remote Docker built image
+  `local/sub2api:web-attachments-9999-01abd36` with image ID prefix
+  `f359b40ed1fd`; container-local Web service and repository tests passed.
+- Recreated only `sub2api-9999`; `10000` and `10001` were not recreated.
+  Health checks for all three ports returned 200, while unauthenticated 9999
+  Chat Completions and Responses requests returned 401.
+- Recent 9999 logs contain no panic/fatal, Web native-parameter rejection,
+  WebSocket `not_connected`, model-mode 422, or empty-response signatures.
+- Applied the image retention policy: current `01abd36` and rollback
+  `6769254` remain. Remote build context, archive, and build log were removed.

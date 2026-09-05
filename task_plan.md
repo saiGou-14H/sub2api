@@ -217,4 +217,4 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Add compare-and-delete Redis leases and cross-instance
   serialization for Web parent cursors, with cancellation-aware bounded retry.
 - [completed] Run focused service, repository, and Redis integration tests;
-  publish and deploy verification remain for this release.
+  publish and deploy verification completed for this release.
