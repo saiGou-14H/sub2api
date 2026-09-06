@@ -950,3 +950,21 @@
   as `function_call_output` or `custom_tool_call_output`. If the client sees
   only `output_text`/`message.content`, no local tool was executed and a
   Linux path in the prose is not evidence of Windows access.
+
+## 2026-09-07 Web text.format compatibility
+
+- Remote 9999 `ops_error_logs` showed HTTP 400 `parameter "text.format" is not
+  supported by ChatGPT web transport` on `/v1/responses`; this is the gateway's
+  Web validator, not a ChatGPT upstream rejection.
+- Responses conversion copies `ResponsesText.Format` into Chat
+  `response_format`, so validating only the Responses object still allowed the
+  incompatible field to reach the Web transport.
+- The Web adapter now accepts client-only fields alongside `{"type":"text"}`
+  and removes the whole format object from the private payload.
+- `json_schema` and `json_object` remain rejected without Prompt Tool. With a
+  request-scoped Prompt Tool declaration they are accepted as a public
+  contract, then removed before Web dispatch because the generated
+  nonce/schema envelope is the private contract.
+- The same normalization is applied to direct Chat Completions and
+  Responses-shaped Chat Completions paths, preventing regressions in either
+  public endpoint.

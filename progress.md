@@ -785,3 +785,17 @@
   `/v1` base path, then reached `/v1/responses`; the remaining 502s were
   upstream test-account failures, with no Prompt Tool parser or native Web
   parameter error in recent logs.
+
+# 2026-09-07 Web text.format compatibility
+
+- Diagnosed the 400 as the Web validator rejecting `text.format` after the
+  Responses-to-Chat bridge copied it into `response_format`.
+- Added request-local format normalization: plain text (including harmless
+  client extensions) is dropped; structured formats are dropped only when a
+  Prompt Tool bridge exists, otherwise they still return `invalid_request_error`.
+- Added regression tests for both public request shapes and verified the
+  focused Web/Prompt Tool/Responses service suite passes.
+- A broader parallel test invocation returned `ok` but Windows failed while
+  unlinking a concurrently-used `service.test.exe`; this is an environment
+  cleanup race, not a test assertion failure. The next verification uses a
+  unique Go temp directory.

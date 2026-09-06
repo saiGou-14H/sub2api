@@ -487,6 +487,63 @@ func TestValidateOpenAIWebRequestsAcceptsOnlyEquivalentDefaults(t *testing.T) {
 	}))
 }
 
+func TestOpenAIWebTextFormatDropsClientOnlyFields(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model:          "auto",
+		ResponseFormat: json.RawMessage(`{"type":"text","name":"plain_text","description":"client hint"}`),
+		Messages:       []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(request)
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "response_format")
+	require.NotContains(t, string(body), "plain_text")
+}
+
+func TestOpenAIWebStructuredTextFormatRequiresPromptTools(t *testing.T) {
+	responsesRequest := &apicompat.ResponsesRequest{
+		Model: "auto",
+		Input: json.RawMessage(`"hello"`),
+		Text:  &apicompat.ResponsesText{Format: json.RawMessage(`{"type":"json_schema","name":"answer","schema":{"type":"object"}}`)},
+	}
+	err := ValidateOpenAIWebResponsesRequestWithPromptTools(responsesRequest, true)
+	var requestErr *OpenAIWebRequestError
+	require.ErrorAs(t, err, &requestErr)
+	require.Equal(t, "text.format", requestErr.Param)
+}
+
+func TestOpenAIWebPromptToolsDropStructuredTextFormat(t *testing.T) {
+	strict := true
+	request := &apicompat.ResponsesRequest{
+		Model: "auto",
+		Input: json.RawMessage(`"hello"`),
+		Text:  &apicompat.ResponsesText{Format: json.RawMessage(`{"type":"json_schema","name":"answer","schema":{"type":"object"}}`)},
+		Tools: []apicompat.ResponsesTool{{
+			Type:        "function",
+			Name:        "lookup",
+			Description: "Look up a value",
+			Strict:      &strict,
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"key":{"type":"string"}},"required":["key"],"additionalProperties":false}`),
+		}},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromResponsesRequest(request)
+	require.NoError(t, err)
+	require.NotNil(t, promptTools)
+	require.NoError(t, ValidateOpenAIWebResponsesRequestWithPromptTools(request, true))
+	normalizeOpenAIWebResponsesTextFormat(request, promptTools)
+	require.Empty(t, request.Text.Format)
+
+	chatRequest, err := apicompat.ResponsesToChatCompletionsRequest(request)
+	require.NoError(t, err)
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request:     chatRequest,
+		PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "response_format")
+	require.NotContains(t, string(body), "text.format")
+	require.Contains(t, string(body), promptTools.Protocol)
+}
+
 func TestValidateOpenAIWebResponsesRequestAcceptsSamplingAndParallelDefaults(t *testing.T) {
 	temperature := 0.2
 	topP := 0.7

@@ -292,7 +292,11 @@ func ValidateOpenAIWebChatCompletionsRequestWithPromptTools(req *apicompat.ChatC
 		}
 	}
 	if !openAIWebPlainTextFormat(req.ResponseFormat) {
-		return openAIWebUnsupportedParam("response_format")
+		// Structured output can be represented by the request-scoped Prompt
+		// Tool envelope, but must never reach the private Web payload.
+		if !(promptToolsEnabled && openAIWebChatRequestHasPromptTools(req)) {
+			return openAIWebUnsupportedParam("response_format")
+		}
 	}
 	if !openAIWebDefaultServiceTier(req.ServiceTier) {
 		return openAIWebUnsupportedParam("service_tier")
@@ -396,7 +400,8 @@ func ValidateOpenAIWebResponsesRequestWithPromptTools(req *apicompat.ResponsesRe
 		}
 	}
 	if req.Text != nil {
-		if !openAIWebPlainTextFormat(req.Text.Format) {
+		if !openAIWebPlainTextFormat(req.Text.Format) &&
+			!(promptToolsEnabled && len(effectiveTools) > 0 && openAIWebStructuredTextFormat(req.Text.Format)) {
 			return openAIWebUnsupportedParam("text.format")
 		}
 		if !openAIWebTextVerbositySupported(req.Text.Verbosity) {
@@ -456,14 +461,73 @@ func openAIWebPlainTextFormat(raw json.RawMessage) bool {
 		return true
 	}
 	var value map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &value); err != nil || len(value) != 1 {
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	var formatType string
+	typeRaw, ok := value["type"]
+	if !ok {
+		return false
+	}
+	if err := json.Unmarshal(typeRaw, &formatType); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(formatType), "text")
+}
+
+func openAIWebStructuredTextFormat(raw json.RawMessage) bool {
+	if !openAIWebRawJSONHasValue(raw) {
+		return false
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
 		return false
 	}
 	var formatType string
 	if err := json.Unmarshal(value["type"], &formatType); err != nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(formatType), "text")
+	switch strings.ToLower(strings.TrimSpace(formatType)) {
+	case "json_schema", "json_object":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIWebChatRequestHasPromptTools(req *apicompat.ChatCompletionsRequest) bool {
+	return req != nil && (len(req.Tools) > 0 || len(req.Functions) > 0)
+}
+
+// normalizeOpenAIWebResponseFormat removes response-format fields that the
+// classic Web endpoint cannot consume. Prompt Tool requests carry their
+// structured result contract in the generated instruction instead.
+func normalizeOpenAIWebResponseFormat(req *apicompat.ChatCompletionsRequest, promptTools *OpenAIWebPromptTools) {
+	if req == nil {
+		return
+	}
+	if openAIWebPlainTextFormat(req.ResponseFormat) {
+		// The Web endpoint is plain text by construction. Dropping even an
+		// extended {type:"text", ...} object avoids leaking client-only fields.
+		req.ResponseFormat = nil
+		return
+	}
+	if promptTools != nil && openAIWebStructuredTextFormat(req.ResponseFormat) {
+		req.ResponseFormat = nil
+	}
+}
+
+func normalizeOpenAIWebResponsesTextFormat(req *apicompat.ResponsesRequest, promptTools *OpenAIWebPromptTools) {
+	if req == nil || req.Text == nil {
+		return
+	}
+	if openAIWebPlainTextFormat(req.Text.Format) {
+		req.Text.Format = nil
+		return
+	}
+	if promptTools != nil && openAIWebStructuredTextFormat(req.Text.Format) {
+		req.Text.Format = nil
+	}
 }
 
 func openAIWebDefaultServiceTier(value string) bool {
@@ -1352,6 +1416,7 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 	if err := ValidateOpenAIWebChatCompletionsRequestWithPromptTools(request, options.PromptTools != nil); err != nil {
 		return nil, err
 	}
+	normalizeOpenAIWebResponseFormat(request, options.PromptTools)
 	if options.PromptTools != nil {
 		request.Tools = nil
 		request.Functions = nil

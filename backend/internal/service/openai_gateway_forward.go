@@ -1323,6 +1323,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	if err := ValidateOpenAIWebResponsesRequestWithPromptTools(&responsesReq, promptToolsEnabled); err != nil {
 		return nil, writeOpenAIWebRequestError(c, err)
 	}
+	normalizeOpenAIWebResponsesTextFormat(&responsesReq, promptTools)
 
 	s.recacheReasoningItemsFromInput(responsesReq.Input)
 	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
