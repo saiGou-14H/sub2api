@@ -815,3 +815,35 @@
   directory after deployment so it is not left in the workspace.
 - Removed the exact historical build targets from C: and D: after confirming
   no audit task was using the Go cache; all six paths now report absent.
+
+# 2026-09-07 Test-group live verification
+
+- Used the existing 9999 test group `测试` (group 2), without creating or
+  importing any account. Accounts 36 (`oauth`) and 37 (`setup-token`) are
+  active, schedulable Web accounts with access-token presence.
+- Direct administrator Web tests for both accounts returned HTTP 200 and
+  complete SSE sequences. With `auto`, account 36 returned `OK`; account 37
+  returned `思考了一秒OK`.
+- The group public model catalog returned 19 dynamic model IDs, including
+  `auto`, `gpt-5.5-wm`, `gpt-5.6-luna-wm`, `gpt-5.6-sol-wm`,
+  `gpt-5.6-terra-wm`, and `gpt-6-astra-wm`.
+- Public group-key smoke tests returned HTTP 200 for Responses non-streaming,
+  Chat Completions non-streaming, and Responses SSE streaming. The SSE
+  sequence contained `response.created`, output-item/content events,
+  `response.output_text.delta`, and `response.completed`.
+- Prompt Tool function-call tests returned HTTP 200 for Responses,
+  Chat Completions, and Responses SSE. The streaming path emitted the
+  standard `response.function_call_arguments.delta` and `.done` events, and
+  the call arguments were a valid `write_file` JSON payload.
+- Direct `gpt-6-astra-wm` tests for accounts 36 and 37 both completed with
+  non-empty text. A public group request first received one upstream 502 from
+  account 78, then failover selected account 36 and completed; the subsequent
+  stream also completed on account 36. No empty response or gateway timeout
+  was observed in the successful requests.
+- Temporary API keys created for this verification were deleted. A follow-up
+  key listing confirmed no names matching the temporary test prefixes remain.
+- The Codex CLI auto-tool probe itself timed out after a 502 response while
+  the scheduler exhausted several invalid/revoked group accounts; its stderr
+  also reports that PowerShell shell snapshots are not supported by the local
+  CLI version. This is distinct from the successful direct Web and Prompt Tool
+  protocol tests.

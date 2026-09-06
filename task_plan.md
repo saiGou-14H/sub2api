@@ -13,6 +13,19 @@ keeps only this image and rollback `136cf0f`; 10000/10001 were not recreated.
 Local C:/D: historical release contexts and the isolated Go review cache were
 removed after deployment; no untracked build artifacts remain in the repo.
 
+## 2026-09-07 Test-group live verification
+
+- [completed] Test the existing Web accounts 36 and 37 through the server-side
+  administrator Web connectivity endpoint.
+- [completed] Test group 2 public `/v1/models`, Responses, Chat Completions,
+  and Responses SSE behavior with a temporary group key.
+- [completed] Test Prompt Tool function calls in non-streaming Responses,
+  Chat Completions, and streaming Responses forms.
+- [completed] Re-test `gpt-6-astra-wm` on both direct Web accounts and through
+  group scheduling, then remove all temporary API keys.
+- [completed] Confirm the 9999 container remains healthy and record the
+  observed upstream failover behavior.
+
 ## Previous: 2026-09-06 Incremental Prompt Tool SSE
 
 - [in_progress] Inspect sanitized HAR event structures and current stream converters.

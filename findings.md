@@ -987,3 +987,28 @@
 - Local cleanup removed the exact D-drive Go review cache, three old release
   context directories, the empty C-drive stage directory, and the deployed
   release archive; no project build artifact remains outside the repository.
+
+## 2026-09-07 Test-group live verification
+
+- The isolated 9999 test group is group 2 (`测试`) and currently contains 104
+  Web accounts in the filtered listing. The two original test accounts remain
+  account 36 (`oauth`) and account 37 (`setup-token`), both active and
+  schedulable with access-token presence.
+- `POST /api/v1/admin/accounts/36/test` and `/37/test` with
+  `model_id=auto` returned `test_start`, `content`, and `test_complete` SSE
+  events with non-empty text. The same endpoint with `gpt-6-astra-wm` also
+  completed for both accounts.
+- `/v1/models` returned an OpenAI list object with 19 dynamic model entries;
+  the earlier empty-ID observation was a test-harness parsing bug caused by
+  unwrapping the outer `data` object too early, not an API response defect.
+- Public Prompt Tool calls on group 2 prove the private Web bridge is active:
+  Responses returned a `function_call` output item, Chat Completions returned
+  a `tool_calls` message, and streaming Responses returned the official
+  function-call argument delta/done lifecycle.
+- The public `gpt-6-astra-wm` request showed expected scheduler behavior:
+  account 78 returned upstream 502, then the gateway failed over to account 36
+  and returned HTTP 200. The stream completed on account 36 as well. This is
+  an account-health/failover event, not a model-parameter or empty-text bug.
+- A temporary key list audit after cleanup returned no remaining keys with the
+  prefixes used by this and earlier Codex CLI probes. The user-owned group-2
+  key was not modified.
