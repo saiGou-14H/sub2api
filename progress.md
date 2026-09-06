@@ -712,3 +712,17 @@
 - Added regression tests for custom input variants, custom output continuation,
   namespace restoration, additional tools, and mixed function/custom calls.
 - Focused service and apicompat tests passed; `git diff --check` passed.
+- Committed and pushed `a8f51b3` (`fix: align web prompt tools with codex
+  protocol`).
+- Built the secret-free release context from that commit and deployed
+  `local/sub2api:web-attachments-9999-a8f51b3` to the isolated `9999` app.
+- Recreated only `sub2api-9999` with `--no-deps --force-recreate`; the 9999
+  PostgreSQL/Redis containers and ports `10000/10001` were not recreated.
+- Health checks for `9999`, `10000`, and `10001` returned 200; unauthenticated
+  `/v1/chat/completions` and `/v1/responses` on 9999 returned 401.
+- Server-local authenticated smoke testing completed a normal Web Responses
+  turn and a standard `custom_tool_call` response. The function-call probe hit
+  upstream 502/401 failover across exhausted test accounts, with no native Web
+  parameter rejection or Prompt Tool parser error in logs.
+- Applied image retention for the 9999 family: current `a8f51b3` and rollback
+  `01abd36` remain; older image tags and remote build artifacts were removed.

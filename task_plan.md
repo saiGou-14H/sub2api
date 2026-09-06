@@ -227,5 +227,5 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
   namespace metadata while retaining function-call compatibility.
 - [completed] Encode custom tool history/results for the next Web turn and add
   mixed function/custom/namespace regression coverage.
-- [in_progress] Run focused verification, commit/push, deploy only `9999`, and
+- [completed] Run focused verification, commit/push, deploy only `9999`, and
   run server-side smoke checks.
