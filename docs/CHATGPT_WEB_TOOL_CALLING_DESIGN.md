@@ -2,7 +2,7 @@
 
 Status: Implemented compatibility bridge
 
-Last updated: 2026-09-04
+Last updated: 2026-09-06
 
 ## 1. Purpose
 
