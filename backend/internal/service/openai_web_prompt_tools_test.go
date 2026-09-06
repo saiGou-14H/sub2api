@@ -51,6 +51,37 @@ func TestOpenAIWebPromptToolsInstructionRequiresClientToolForExplicitLocalOperat
 	require.Contains(t, instruction, "Normal prose is allowed only when no declared tool can satisfy the request")
 }
 
+func TestOpenAIWebPromptToolsSelectionHintChoosesExplicitLocalTool(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "request_user_input", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "auto", prompt.Choice)
+
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"Create exactly D:\\test.py and read it back"`)}},
+	})
+	require.Equal(t, "named", prompt.Choice)
+	require.Equal(t, "exec_command", prompt.ChoiceName)
+}
+
+func TestOpenAIWebPromptToolsSelectionHintLeavesOrdinaryQuestionAuto(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+	})
+	require.NoError(t, err)
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"Explain why the sky is blue"`)}},
+	})
+	require.Equal(t, "auto", prompt.Choice)
+	require.Empty(t, prompt.ChoiceName)
+}
+
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
 	for name, schema := range map[string]string{
 		"unknown required": `{"type":"object","properties":{},"required":["missing"]}`,

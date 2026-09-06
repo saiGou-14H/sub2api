@@ -1353,6 +1353,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses request for web transport: %w", err)
 	}
+	applyOpenAIWebPromptToolSelectionHint(promptTools, chatReq)
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = "auto"

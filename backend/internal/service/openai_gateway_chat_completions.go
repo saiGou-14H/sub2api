@@ -1216,6 +1216,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 			return nil, writeOpenAIWebRequestError(c, openAIWebInvalidParam("tools", promptErr.Error()))
 		}
 	}
+	applyOpenAIWebPromptToolSelectionHint(promptTools, &chatReq)
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
 	if strings.TrimSpace(upstreamModel) == "" {
 		upstreamModel = OpenAIWebTestModel

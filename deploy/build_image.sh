@@ -14,7 +14,7 @@ RUNNING_CONTAINER="${SUB2API_RUNNING_CONTAINER:-sub2api}"
 # Keep the running image and one rollback image before creating the next build.
 # For a versioned deployment, set IMAGE_REF_PATTERN to the deployment family,
 # for example: local/sub2api:web-attachments-9999-*.
-"${SCRIPT_DIR}/prune_image_history.sh" \
+bash "${SCRIPT_DIR}/prune_image_history.sh" \
     "$IMAGE_REF_PATTERN" \
     "$IMAGE_HISTORY" \
     "$RUNNING_CONTAINER"

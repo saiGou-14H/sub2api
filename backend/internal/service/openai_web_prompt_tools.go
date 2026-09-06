@@ -68,6 +68,57 @@ type OpenAIWebPromptTools struct {
 	Parallel   bool
 }
 
+// applyOpenAIWebPromptToolSelectionHint makes explicit local operations
+// deterministic for Web models. Native Codex clients normally let the model
+// select a shell/file tool from structured declarations; after those fields
+// are converted to prompt text, Web models can otherwise answer that the
+// caller has no local tool even when the request clearly asks for one.
+// Keep ordinary questions on the public `auto` behavior.
+func applyOpenAIWebPromptToolSelectionHint(prompt *OpenAIWebPromptTools, request *apicompat.ChatCompletionsRequest) {
+	if prompt == nil || request == nil || !strings.EqualFold(strings.TrimSpace(prompt.Choice), "auto") {
+		return
+	}
+	var text strings.Builder
+	text.WriteString(strings.ToLower(strings.TrimSpace(request.Instructions)))
+	for _, message := range request.Messages {
+		text.WriteByte('\n')
+		text.WriteString(strings.ToLower(string(message.Content)))
+	}
+	content := text.String()
+	hasAny := func(values ...string) bool {
+		for _, value := range values {
+			if strings.Contains(content, value) {
+				return true
+			}
+		}
+		return false
+	}
+	selectNamed := func(name string) bool {
+		if _, ok := prompt.toolByName(name); !ok {
+			return false
+		}
+		prompt.Choice = "named"
+		prompt.ChoiceName = name
+		return true
+	}
+	if hasAny("apply patch", "apply_patch", "patch file") && selectNamed("apply_patch") {
+		return
+	}
+	if hasAny("view image", "open image", "screenshot") && selectNamed("view_image") {
+		return
+	}
+	if hasAny("write_stdin", "continue the command", "poll the command", "read the running command") && selectNamed("write_stdin") {
+		return
+	}
+	if hasAny(
+		"create ", "write ", "append ", "edit ", "modify ", "read ", "inspect ", "list ",
+		"file", "directory", "folder", "workspace", "shell", "command", "powershell",
+		"terminal", "run ", "execute ", "d:\\", "c:\\",
+	) {
+		selectNamed("exec_command")
+	}
+}
+
 func openAIWebPromptToolsEnabledForRequest(req *apicompat.ChatCompletionsRequest) bool {
 	return req != nil && (len(req.Tools) > 0 || len(req.Functions) > 0)
 }
