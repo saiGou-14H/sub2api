@@ -27,7 +27,8 @@ WORKDIR /app/frontend
 
 # Install pnpm (pinned to the lockfile-generating major; pnpm 11 validates
 # package.json overrides that pnpm 9 rejects as a lockfile mismatch).
-RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.17.0 --activate && \
+    pnpm config set dangerouslyAllowAllBuilds true
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
