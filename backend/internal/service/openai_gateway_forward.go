@@ -1353,6 +1353,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses request for web transport: %w", err)
 	}
+	// Codex continuation turns may contain only function_call_output and a
+	// previous_response_id. The generic bridge drops such orphan tool messages;
+	// restore them before encoding the Web Prompt Tool transcript.
+	if promptTools != nil {
+		restoreOpenAIWebPromptToolOutputs(&responsesReq, chatReq)
+	}
 	applyOpenAIWebPromptToolSelectionHint(promptTools, chatReq)
 	billingModel, upstreamModel := resolveOpenAIForwardMappedModels(account, originalModel, false)
 	if strings.TrimSpace(upstreamModel) == "" {
