@@ -799,3 +799,17 @@
   unlinking a concurrently-used `service.test.exe`; this is an environment
   cleanup race, not a test assertion failure. The next verification uses a
   unique Go temp directory.
+
+# 2026-09-07 Web text.format deployment
+
+- Pushed commit `1f7e41a` to `origin/main`.
+- Built and deployed only the `9999` application as
+  `local/sub2api:web-attachments-9999-1f7e41a`; 10000/10001 and the 9999
+  PostgreSQL/Redis containers were not recreated.
+- Verified health 200 on ports 9999/10000/10001, protected 9999 OpenAI routes
+  returning 401, and the new 9999 container reporting `running healthy`.
+- Applied image retention: current `1f7e41a` plus rollback `136cf0f` remain;
+  older 9999 tags and remote build artifacts were removed.
+- Recent container logs have no known Web parameter rejection or fatal/error
+  signatures. The local release archive was moved to the system temporary
+  directory after deployment so it is not left in the workspace.

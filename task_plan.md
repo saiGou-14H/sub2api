@@ -5,7 +5,11 @@
 - [completed] Confirm the Web 400 source and Responses-to-Chat conversion path.
 - [completed] Normalize plain-text and Prompt Tool structured formats before private Web dispatch.
 - [completed] Add focused regression coverage for Chat and Responses entry points.
-- [in_progress] Commit/push, deploy only 9999, and verify health, API behavior, and logs.
+- [completed] Commit/push, deploy only 9999, and verify health, API behavior, and logs.
+
+Release: commit `1f7e41a` is pushed and deployed as
+`local/sub2api:web-attachments-9999-1f7e41a`. Remote 9999 image retention
+keeps only this image and rollback `136cf0f`; 10000/10001 were not recreated.
 
 ## Previous: 2026-09-06 Incremental Prompt Tool SSE
 

@@ -968,3 +968,19 @@
 - The same normalization is applied to direct Chat Completions and
   Responses-shaped Chat Completions paths, preventing regressions in either
   public endpoint.
+
+## 2026-09-07 Web text.format release verification
+
+- Commit `1f7e41a` was pushed to `origin/main` and built on the remote Docker
+  host from a SHA-256-verified Git archive.
+- Only `sub2api-9999` was recreated with image
+  `local/sub2api:web-attachments-9999-1f7e41a`; its PostgreSQL/Redis and the
+  10000/10001 application instances were left untouched.
+- Remote health checks for 9999, 10000, and 10001 returned 200. Unauthenticated
+  9999 `/v1/chat/completions` and `/v1/responses` returned 401.
+- The 9999 image family now contains only `1f7e41a` and rollback `136cf0f`.
+- Recent 9999 container logs contain no Web `text.format`/`response_format`,
+  native tool, sampling-parameter, WebSocket, model-mode, empty-response, or
+  panic/fatal signatures. A new live upstream Web turn was not forced because
+  the available imported test accounts are known to contain revoked tokens;
+  the transport behavior is covered by the focused service tests.
