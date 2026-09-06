@@ -244,3 +244,16 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
   mixed function/custom/namespace regression coverage.
 - [completed] Run focused verification, commit/push, deploy only `9999`, and
   run server-side smoke checks.
+
+## 2026-09-06 Prompt Tool turn-boundary signals
+
+- [completed] Add explicit `event`, `start`, and `end` fields to the Web Prompt
+  Tool declaration and returned envelope.
+- [completed] Reject partial or invalid boundary signals while preserving
+  legacy envelopes that omit all three fields.
+- [completed] Append the bridge instruction after caller instructions and keep
+  native Web tool fields out of the upstream payload.
+- [completed] Run service/handler regressions, commit and push `5c4c078`, and
+  deploy only `sub2api-9999`.
+- [completed] Verify remote health, protected routes, image retention, and
+  Windows Codex CLI path configuration.

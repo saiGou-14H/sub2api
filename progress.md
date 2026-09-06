@@ -752,3 +752,26 @@
   caller tools. The bridge returns standard tool-call events; the API client
   must execute the Windows tool locally and submit the corresponding tool
   output before the model can report a real Windows directory.
+
+# 2026-09-06 Prompt Tool turn-boundary signals
+
+- Added explicit `event=tool_call`, `start=tool_call_start`, and
+  `end=tool_call_end` fields to Prompt Tool declarations and envelopes. The
+  parser rejects partial or incorrect signals and accepts all-omitted legacy
+  envelopes for compatibility.
+- Appended the bridge instruction after caller instructions so the Web model
+  cannot replace the remote execution boundary with a simulated Linux shell;
+  native Web `tools`, `tool_choice`, function, and parallel fields remain
+  stripped from the upstream payload.
+- Focused service and handler tests passed after moving Go cache/temp output to
+  `D:` because `C:` had insufficient free space for the test linker.
+- Committed and pushed `5c4c078` (`fix: add web prompt tool turn boundaries`).
+- Deployed only `sub2api-9999` as
+  `local/sub2api:web-attachments-9999-5c4c078`; PostgreSQL/Redis and ports
+  `10000/10001` were not recreated. All three health checks returned 200 and
+  unauthenticated 9999 OpenAI routes returned 401.
+- Remote image retention now keeps `5c4c078` plus rollback `a8f51b3`; build
+  archive/stage files were removed. Windows Codex CLI initially used a missing
+  `/v1` base path, then reached `/v1/responses`; the remaining 502s were
+  upstream test-account failures, with no Prompt Tool parser or native Web
+  parameter error in recent logs.
