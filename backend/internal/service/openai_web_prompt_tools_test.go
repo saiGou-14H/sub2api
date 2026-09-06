@@ -82,6 +82,23 @@ func TestOpenAIWebPromptToolsSelectionHintLeavesOrdinaryQuestionAuto(t *testing.
 	require.Empty(t, prompt.ChoiceName)
 }
 
+func TestOpenAIWebPromptToolsSelectionHintPinsRequiredLocalOperation(t *testing.T) {
+	required := json.RawMessage(`"required"`)
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model:      "auto",
+		ToolChoice: required,
+		Tools:      []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "required", prompt.Choice)
+
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"Read D:\\test.py"`)}},
+	})
+	require.Equal(t, "named", prompt.Choice)
+	require.Equal(t, "exec_command", prompt.ChoiceName)
+}
+
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
 	for name, schema := range map[string]string{
 		"unknown required": `{"type":"object","properties":{},"required":["missing"]}`,

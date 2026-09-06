@@ -75,7 +75,11 @@ type OpenAIWebPromptTools struct {
 // caller has no local tool even when the request clearly asks for one.
 // Keep ordinary questions on the public `auto` behavior.
 func applyOpenAIWebPromptToolSelectionHint(prompt *OpenAIWebPromptTools, request *apicompat.ChatCompletionsRequest) {
-	if prompt == nil || request == nil || !strings.EqualFold(strings.TrimSpace(prompt.Choice), "auto") {
+	if prompt == nil || request == nil {
+		return
+	}
+	choice := strings.ToLower(strings.TrimSpace(prompt.Choice))
+	if choice != "auto" && choice != "required" {
 		return
 	}
 	var text strings.Builder
