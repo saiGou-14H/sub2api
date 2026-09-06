@@ -1,16 +1,17 @@
 # ChatGPT Web Tool Calling Compatibility
 
-Status: Implementation baseline
+Status: Implemented compatibility bridge
 
 Last updated: 2026-09-04
 
 ## 1. Purpose
 
-Sub2API's ChatGPT Web transport currently supports access-token-backed text,
-model discovery, streaming, and attachments through the existing
-`/v1/responses` and `/v1/chat/completions` endpoints. It intentionally rejects
-function tools because the private ChatGPT Web conversation protocol does not
-accept OpenAI API `tools` definitions directly.
+Sub2API's ChatGPT Web transport supports access-token-backed text, dynamic model
+discovery, direct SSE, `stream_handoff + WebSocket`, and attachments through the
+existing `/v1/responses` and `/v1/chat/completions` endpoints. The private
+ChatGPT Web conversation endpoint does not accept OpenAI API `tools` fields
+directly, so the optional Prompt Tool bridge converts them into an internal
+strict prompt protocol.
 
 This document records the implementation baseline for adding OpenAI-compatible
 tool calling without claiming that ChatGPT Web provides a native function-
@@ -20,7 +21,7 @@ result is converted back to standard Responses/Chat tool events.
 
 ## 2. Current behavior
 
-The Web transport currently rejects:
+With Prompt Tool disabled, the Web transport rejects:
 
 - non-empty `tools` and legacy `functions` declarations;
 - non-no-op `tool_choice` and legacy `function_call` selections;
@@ -31,6 +32,10 @@ The Web transport currently rejects:
 These checks are implemented in
 `backend/internal/service/openai_web_transport.go`. They prevent Sub2API from
 silently accepting semantics that the current Web adapter would discard.
+
+With `enable_openai_web_prompt_tools=true`, function/custom/namespace and
+additional tool declarations are validated and converted instead of forwarded
+as native Web fields. The setting is fail-closed and disabled by default.
 
 ## 3. WebCodex reference conclusion
 
@@ -90,12 +95,37 @@ and JSON Schemas and gives the model two valid outcomes:
 1. Return normal assistant text when no tool is needed.
 2. Return a strict tool-call envelope containing one or more calls.
 
-The envelope should use a random per-request nonce and an unambiguous marker.
+The implemented envelope uses a random per-request nonce, a normalized schema
+hash, and an unambiguous marker:
+
+```json
+{
+  "protocol": "sub2api.prompt_tool.v1",
+  "nonce": "request_nonce",
+  "schema_hash": "sha256-prefix",
+  "calls": [
+    {"name":"get_weather","type":"function","arguments":{"city":"Shanghai"}}
+  ]
+}
+```
+
+For `custom` tools, the call uses free-text `input`:
+
+```json
+{"name":"exec","type":"custom","input":"pwd"}
+```
+
+The parser also accepts the legacy `tools` array and the compatibility forms
+`arguments: "text"`, `arguments: {"input":"text"}`, and raw text. All forms
+are normalized to the same internal call before public Responses events are
+emitted.
 The parser must accept it only when all of the following are true:
 
 - the nonce matches the current request;
 - every tool name exists in the validated request tool set;
-- every `arguments` value is valid JSON and represents an object;
+- every function `arguments` value is valid JSON and represents an object;
+- every custom `input` value is a bounded string and is validated through the
+  strict `{ "input": "..." }` wrapper Schema;
 - the call count and serialized argument size are within configured limits;
 - `tool_choice`, including a specifically named function, is satisfied;
 - no unparsed non-whitespace data is mixed into a required tool-call envelope.
@@ -178,33 +208,17 @@ capability marker in the returned call metadata. They do not imply that the
 gateway can execute the tool: only the API caller or an administrator-
 configured executor may do so.
 
-The normalized envelope is:
-
-```json
-{
-  "protocol": "sub2api.prompt_tool.v1",
-  "nonce": "request_nonce",
-  "schema_hash": "sha256-prefix",
-  "calls": [
-    {
-      "name": "get_weather",
-      "type": "function",
-      "arguments": {"city": "Shanghai"}
-    }
-  ]
-}
-```
-
 Every request receives a random nonce and schema hash. The parser requires the
 exact protocol, nonce, hash, allowlisted name, valid argument object, bounded
 call count/size, and no unparsed non-whitespace text in a tool envelope.
 
 The bridge supports `auto`, `none`, `required`, named choices, parallel calls,
-legacy `functions`/`function_call` normalization, assistant tool-call history,
-tool-result continuation, attachments, and both streaming and non-streaming
-public endpoints. Tool-enabled Web streams are buffered until the classifier
-can prove whether the output is text or a valid envelope; private markers are
-never leaked to clients.
+legacy `functions`/`function_call` normalization, `additional_tools`, namespace
+tools, assistant tool-call history, `function_call_output`,
+`custom_tool_call_output`, tool-result continuation, attachments, and both
+streaming and non-streaming public endpoints. Tool-enabled Web streams are
+buffered until the classifier can prove whether the output is text or a valid
+envelope; private markers are never leaked to clients.
 
 Legacy `functions` and `function_call` may be normalized to the modern function
 tool representation after the primary flow is stable.
@@ -217,9 +231,10 @@ envelope. The initial implementation should therefore buffer the complete
 assistant output for tool-enabled requests, then synthesize a valid streaming
 event sequence.
 
-This preserves protocol correctness at the cost of first-token latency. A later
-incremental classifier may reduce latency, but it must never leak the private
-tool envelope as assistant text.
+This preserves protocol correctness at the cost of first-token latency. The
+same buffered classifier runs after direct SSE parsing or after WebSocket
+handoff frames have been unwrapped, so the public event contract is identical
+for both Web transport variants.
 
 ## 10. Failure behavior
 
@@ -233,6 +248,12 @@ The bridge must fail closed:
   an upstream tool-selection failure;
 - incomplete Web streams cannot produce a completed tool call;
 - plain-text requests without tools retain their current streaming behavior.
+
+When a custom call is selected, Responses uses the official custom lifecycle:
+`custom_tool_call`, `response.custom_tool_call_input.delta`,
+`response.custom_tool_call_input.done`, and the paired
+`custom_tool_call_output` on continuation. Function calls retain the parallel
+`function_call` lifecycle and are never mixed with custom input events.
 
 An optional bounded model repair attempt can be evaluated later. It should not
 be part of the first implementation because it changes latency, cost, and retry

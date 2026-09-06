@@ -443,11 +443,15 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			// 的 {"input": ...} 参数，与请求方向的工具降级（customToolInputSchema）
 			// 保持一致，模型才能把历史与当前工具定义对上。
 			arguments, _ := json.Marshal(map[string]string{"input": rawString(item["input"])})
+			name := rawString(item["name"])
+			if namespace := rawString(item["namespace"]); namespace != "" && name != "" {
+				name = flattenNamespaceToolName(namespace, name)
+			}
 			toolCall := ChatToolCall{
 				ID:   rawString(item["call_id"]),
 				Type: "function",
 				Function: ChatFunctionCall{
-					Name:      rawString(item["name"]),
+					Name:      name,
 					Arguments: string(arguments),
 				},
 			}

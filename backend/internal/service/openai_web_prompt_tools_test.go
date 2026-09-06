@@ -169,6 +169,38 @@ func TestOpenAIWebPromptToolsParseResponseValidatesNonceChoiceAndArguments(t *te
 	require.Error(t, err)
 }
 
+func TestOpenAIWebPromptToolsParseResponseAcceptsCustomInputForms(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "custom", Function: &apicompat.ChatFunction{Name: "exec"}}},
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		call string
+		want string
+	}{
+		{name: "input", call: `{"name":"exec","type":"custom","input":"pwd"}`, want: "pwd"},
+		{name: "string arguments", call: `{"name":"exec","type":"custom","arguments":"pwd"}`, want: "pwd"},
+		{name: "object arguments", call: `{"name":"exec","type":"custom","arguments":{"input":"pwd"}}`, want: "pwd"},
+		{name: "raw arguments", call: `{"name":"exec","type":"custom","arguments":"echo {x}"}`, want: "echo {x}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			envelope := `{"protocol":"` + prompt.Protocol + `","nonce":"` + prompt.Nonce + `","schema_hash":"` + prompt.SchemaHash + `","calls":[` + tt.call + `]}`
+			calls, recognized, parseErr := prompt.ParseResponse(envelope)
+			require.NoError(t, parseErr)
+			require.True(t, recognized)
+			require.Len(t, calls, 1)
+			require.Equal(t, tt.want, calls[0].Input)
+			expected, marshalErr := json.Marshal(map[string]string{"input": tt.want})
+			require.NoError(t, marshalErr)
+			require.JSONEq(t, string(expected), string(calls[0].Arguments))
+		})
+	}
+}
+
 func TestOpenAIWebPromptToolsParseResponseAcceptsLegacyToolsEnvelope(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
 		Model: "auto",
@@ -406,6 +438,127 @@ func TestOpenAIWebPromptToolsReaderCarriesParallelToolMetadata(t *testing.T) {
 	raw, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"parallel_tool_calls":true`)
+}
+
+func TestOpenAIWebPromptToolsResponsesPreserveAdditionalToolsAndNamespace(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromResponsesRequest(&apicompat.ResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[{"type":"additional_tools","tools":[{"type":"custom","name":"exec","description":"Run a command","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}},{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"send_message","parameters":{"type":"object","properties":{}}}]}]}]`),
+	})
+	require.NoError(t, err)
+	require.Len(t, prompt.Tools, 2)
+	require.Equal(t, "exec", prompt.Tools[0].Name)
+	require.Equal(t, "custom", prompt.Tools[0].Type)
+	require.JSONEq(t, `{"type":"grammar","syntax":"lark","definition":"start: /.+/"}`, string(prompt.Tools[0].Format))
+	require.Equal(t, "collaboration__send_message", prompt.Tools[1].Name)
+	require.Equal(t, "function", prompt.Tools[1].Type)
+	require.Equal(t, "collaboration", prompt.Tools[1].Namespace)
+	require.Contains(t, prompt.Instruction(), `"namespace":"collaboration"`)
+}
+
+func TestOpenAIWebPromptToolsReaderEmitsCustomToolCallLifecycle(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "custom", Function: &apicompat.ChatFunction{Name: "exec"}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"calls": []any{map[string]any{"name": "exec", "type": "custom", "input": "pwd"}},
+	})
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":" + mustPromptJSONString(string(envelope)) + "}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	raw, err := io.ReadAll(newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "auto", nil, prompt))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"type":"custom_tool_call"`)
+	require.Contains(t, string(raw), `"type":"response.custom_tool_call_input.delta"`)
+	require.Contains(t, string(raw), `"type":"response.custom_tool_call_input.done"`)
+	require.Contains(t, string(raw), `"input":"pwd"`)
+	require.NotContains(t, string(raw), `response.function_call_arguments`)
+
+	var completed apicompat.ResponsesStreamEvent
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, "data: {") {
+			continue
+		}
+		var event apicompat.ResponsesStreamEvent
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && event.Type == "response.completed" {
+			completed = event
+		}
+	}
+	require.NotNil(t, completed.Response)
+	require.Len(t, completed.Response.Output, 1)
+	require.Equal(t, "custom_tool_call", completed.Response.Output[0].Type)
+	require.Equal(t, "exec", completed.Response.Output[0].Name)
+	require.Equal(t, "pwd", completed.Response.Output[0].Input)
+}
+
+func TestOpenAIWebPromptToolsReaderRestoresNamespaceOnFunctionCall(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromResponsesRequest(&apicompat.ResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[{"type":"additional_tools","tools":[{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"send_message","parameters":{"type":"object","properties":{}}}]}]}]`),
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"calls": []any{map[string]any{"name": "collaboration__send_message", "type": "function", "arguments": map[string]any{}}},
+	})
+	sse := "data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":" + mustPromptJSONString(string(envelope)) + "}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n"
+	raw, err := io.ReadAll(newOpenAIWebResponsesBodyWithPromptTools(io.NopCloser(strings.NewReader(sse)), "gpt-5.6-sol", nil, prompt))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"type":"function_call"`)
+	require.Contains(t, string(raw), `"name":"send_message"`)
+	require.Contains(t, string(raw), `"namespace":"collaboration"`)
+	require.NotContains(t, string(raw), `"name":"collaboration__send_message"`)
+}
+
+func TestOpenAIWebPromptToolsEncodeCustomHistoryAsCustom(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "custom", Function: &apicompat.ChatFunction{Name: "exec"}}},
+	})
+	require.NoError(t, err)
+	encoded := prompt.EncodeAssistantToolCalls([]apicompat.ChatToolCall{{
+		ID: "call_1", Type: "function", Function: apicompat.ChatFunctionCall{Name: "exec", Arguments: `{"input":"pwd"}`},
+	}})
+	require.Contains(t, encoded, `"type":"custom"`)
+	require.Contains(t, encoded, `"input":"pwd"`)
+	require.NotContains(t, encoded, `"arguments"`)
+}
+
+func TestOpenAIWebPromptToolsEncodeCustomOutputContinuation(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromResponsesRequest(&apicompat.ResponsesRequest{
+		Model: "gpt-5.6-sol",
+		Input: json.RawMessage(`[{"type":"additional_tools","tools":[{"type":"custom","name":"exec"},{"type":"namespace","name":"collaboration","tools":[{"type":"custom","name":"send_message"}]}]}]`),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, prompt)
+
+	request := &apicompat.ChatCompletionsRequest{
+		Model: "gpt-5.6-sol",
+		Tools: []apicompat.ChatTool{{Type: "custom", Function: &apicompat.ChatFunction{Name: "exec"}}},
+		Messages: []apicompat.ChatMessage{
+			{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: "call_exec", Function: apicompat.ChatFunctionCall{Name: "exec", Arguments: `{"input":"pwd"}`}}}},
+			{Role: "tool", ToolCallID: "call_exec", Content: json.RawMessage(`"C:\\work"`)},
+		},
+	}
+	messages, err := openAIWebMessagesFromChatRequestWithPromptTools(context.Background(), nil, "", nil, request, prompt)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+
+	first, ok := messages[0]["content"].(map[string]any)
+	require.True(t, ok)
+	firstParts, ok := first["parts"].([]string)
+	require.True(t, ok)
+	require.Contains(t, firstParts[0], `"type":"custom"`)
+	require.Contains(t, firstParts[0], `"input":"pwd"`)
+	require.NotContains(t, firstParts[0], `"arguments"`)
+
+	second, ok := messages[1]["content"].(map[string]any)
+	require.True(t, ok)
+	secondParts, ok := second["parts"].([]string)
+	require.True(t, ok)
+	require.Contains(t, secondParts[0], "Previous tool result (call_id=call_exec)")
+	require.Contains(t, secondParts[0], "C:\\work")
 }
 
 func mustPromptJSONString(value string) string {

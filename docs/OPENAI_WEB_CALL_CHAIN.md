@@ -1,8 +1,8 @@
 # OpenAI Web/Codex 当前调用链
 
-本文档记录 `sub2api` 当前 OpenAI 兼容接口的实际调用链，基于提交
-`c1631d1`（`fix: align web transport with plus har`）。文档只描述协议和代码
-路径，不包含 access token、Cookie、上传签名或其他认证材料。
+本文档记录 `sub2api` 当前 OpenAI 兼容接口的实际调用链，包括 Web Prompt
+Tool 桥接和 WebSocket handoff。文档只描述协议和代码路径，不包含 access
+token、Cookie、上传签名或其他认证材料。
 
 ## 总体流程
 
@@ -276,7 +276,7 @@ Chat Completions 路径再使用
 
 ## 12. Prompt Tool
 
-系统设置开启 Prompt Tool 且请求包含工具时：
+系统设置 `enable_openai_web_prompt_tools=true` 且请求包含工具时：
 
 ```text
 OpenAI tools/tool_choice
@@ -284,16 +284,39 @@ OpenAI tools/tool_choice
   -> 生成 protocol、nonce、schema_hash
   -> 注入内部 system prompt
   -> 从 Web 请求删除原生 tools/tool_choice
-  -> Web 模型输出严格 JSON 工具信封
+  -> Web 模型输出严格 JSON 工具信封（可包在前后文或 markdown 中）
   -> 校验 nonce、Schema、工具名和参数
-  -> 转换为标准 function_call/tool_calls
+  -> 转换为标准 function_call/custom_tool_call/tool_calls
 ```
 
 实现位于
 [openai_web_prompt_tools.go](../backend/internal/service/openai_web_prompt_tools.go)。
 
 Prompt Tool 是协议桥接，不在网关内执行实际工具。客户端或上层 Agent 执行
-工具后，把结果作为下一轮请求传回。
+工具后，把匹配的 `function_call_output` 或 `custom_tool_call_output` 作为下一轮
+请求传回。工具结果会按 `call_id` 编码为网页端用户文本，工具调用历史会被编码
+为网页端可理解的 `function` 或 `custom` 上下文。
+
+### 12.1 注册和规范化
+
+- Responses 的 `additional_tools` 会与顶层 `tools` 合并；注册项不会被误当成聊天消息。
+- `namespace` 子工具在网页侧使用稳定的安全扁平别名，回程恢复裸工具名和独立
+  `namespace` 字段；冲突或超过 64 字符的名称会拒绝或使用带哈希后缀的别名。
+- `custom` 工具使用自由文本 `input`，其内部校验仍使用 `{ "input": "..." }`
+  的严格包装 Schema；动态 `format` 描述会纳入 Prompt 指令和 Schema hash。
+- 网页模型可能返回 `calls` 或历史兼容的 `tools` 数组；两者只能出现一个，且
+  每个调用都必须命中本次请求的 nonce、Schema hash、工具类型和参数 Schema。
+
+### 12.2 标准 Responses 事件
+
+普通 function 工具产生 `response.function_call_arguments.delta/done`，custom
+工具产生 `response.custom_tool_call_input.delta/done`。两者都包含完整的
+`response.output_item.added`、`response.output_item.done` 和
+`response.completed` 生命周期；custom 项的公开输出类型为
+`custom_tool_call`，参数使用自由文本 `input`，不会伪装成 function 参数。
+
+Prompt Tool 对直接 SSE 和 `stream_handoff + WebSocket` 使用同一套分类器，因此
+私有协议标记不会泄漏到 Chat Completions 或 Responses 客户端。
 
 ## 13. 错误、限流和计费
 
@@ -319,4 +342,3 @@ Web 请求错误统一经过 `handleOpenAIWebForwardError` 和
 - [openai_web_prompt_tools.go](../backend/internal/service/openai_web_prompt_tools.go)：Prompt-based tool calling 协议。
 - [account.go](../backend/internal/service/account.go)：账号类型和 Web/Codex 选择规则。
 - [gateway_service.go](../backend/internal/service/gateway_service.go)：分组模型目录和账号可用性聚合。
-

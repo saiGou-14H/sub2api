@@ -3535,23 +3535,77 @@ func (r *openAIWebResponsesReader) finishPromptToolCalls(calls []OpenAIWebPrompt
 	for index, call := range calls {
 		itemID := "fc_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		callID := "call_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		outputName := strings.TrimSpace(call.TargetName)
+		if outputName == "" {
+			outputName = call.Name
+			if call.Namespace != "" {
+				prefix := strings.TrimSpace(call.Namespace) + "__"
+				if strings.HasPrefix(outputName, prefix) {
+					outputName = strings.TrimPrefix(outputName, prefix)
+				}
+			}
+		}
+		isCustom := strings.EqualFold(strings.TrimSpace(call.Type), "custom")
+		if isCustom {
+			input := call.Input
+			item := map[string]any{
+				"id": itemID, "type": "custom_tool_call", "status": "completed",
+				"call_id": callID, "name": outputName, "input": input,
+			}
+			if call.Namespace != "" {
+				item["namespace"] = call.Namespace
+			}
+			added := map[string]any{
+				"id": itemID, "type": "custom_tool_call", "status": "in_progress",
+				"call_id": callID, "name": outputName, "input": "",
+			}
+			if call.Namespace != "" {
+				added["namespace"] = call.Namespace
+			}
+			r.emit("response.output_item.added", map[string]any{
+				"response_id": r.responseID, "output_index": index, "item": added,
+			})
+			if input != "" {
+				r.emit("response.custom_tool_call_input.delta", map[string]any{
+					"response_id": r.responseID, "item_id": itemID, "output_index": index,
+					"call_id": callID, "name": outputName, "delta": input,
+				})
+			}
+			r.emit("response.custom_tool_call_input.done", map[string]any{
+				"response_id": r.responseID, "item_id": itemID, "output_index": index,
+				"call_id": callID, "name": outputName, "input": input,
+			})
+			r.emit("response.output_item.done", map[string]any{
+				"response_id": r.responseID, "output_index": index, "item": item,
+			})
+			items = append(items, item)
+			continue
+		}
 		arguments := string(call.Arguments)
 		item := map[string]any{
 			"id": itemID, "type": "function_call", "status": "completed",
-			"call_id": callID, "name": call.Name, "arguments": arguments,
+			"call_id": callID, "name": outputName, "arguments": arguments,
+		}
+		if call.Namespace != "" {
+			item["namespace"] = call.Namespace
+		}
+		added := map[string]any{
+			"id": itemID, "type": "function_call", "status": "in_progress",
+			"call_id": callID, "name": outputName, "arguments": "",
+		}
+		if call.Namespace != "" {
+			added["namespace"] = call.Namespace
 		}
 		r.emit("response.output_item.added", map[string]any{
-			"response_id": r.responseID, "output_index": index,
-			"item": map[string]any{
-				"id": itemID, "type": "function_call", "status": "in_progress",
-				"call_id": callID, "name": call.Name, "arguments": "",
-			},
+			"response_id": r.responseID, "output_index": index, "item": added,
 		})
 		r.emit("response.function_call_arguments.delta", map[string]any{
-			"response_id": r.responseID, "item_id": itemID, "output_index": index, "delta": arguments,
+			"response_id": r.responseID, "item_id": itemID, "output_index": index,
+			"call_id": callID, "name": outputName, "delta": arguments,
 		})
 		r.emit("response.function_call_arguments.done", map[string]any{
-			"response_id": r.responseID, "item_id": itemID, "output_index": index, "arguments": arguments,
+			"response_id": r.responseID, "item_id": itemID, "output_index": index,
+			"call_id": callID, "name": outputName, "arguments": arguments,
 		})
 		r.emit("response.output_item.done", map[string]any{
 			"response_id": r.responseID, "output_index": index, "item": item,

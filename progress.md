@@ -686,3 +686,29 @@
   WebSocket `not_connected`, model-mode 422, or empty-response signatures.
 - Applied the image retention policy: current `01abd36` and rollback
   `6769254` remain. Remote build context, archive, and build log were removed.
+
+# 2026-09-06 Codex Prompt Tool parity
+
+- Read the checked-out Codex source models and SSE parser. Confirmed that
+  `custom_tool_call` carries free-text `input`, namespace is a separate field,
+  `custom_tool_call_output` is the paired continuation item, and
+  `additional_tools` is a client tool registration item.
+- Audited the Web Prompt bridge. The remaining gap is confined to the prompt
+  layer: it flattens namespace names without retaining the namespace, emits
+  every selected call as `function_call`, and encodes custom history as a
+  function envelope.
+
+# 2026-09-06 Codex Prompt Tool parity implementation
+
+- Preserved namespace ownership, target names, and dynamic custom `format`
+  descriptors while normalizing Responses tools and `additional_tools`.
+- Added strict custom input normalization for native `input`, legacy string or
+  object `arguments.input`, and bounded raw free-text arguments.
+- Emitted official Responses custom tool lifecycle events, including
+  `response.custom_tool_call_input.delta/done`, with namespace restoration and
+  `custom_tool_call` output items. Function calls retain their own lifecycle.
+- Changed Web history replay to use `type=custom` plus free-text `input`; tool
+  results remain correlated by `call_id` and are encoded into the next Web turn.
+- Added regression tests for custom input variants, custom output continuation,
+  namespace restoration, additional tools, and mixed function/custom calls.
+- Focused service and apicompat tests passed; `git diff --check` passed.

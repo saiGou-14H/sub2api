@@ -326,6 +326,9 @@ type ResponsesTool struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Strict      *bool           `json:"strict,omitempty"`
+	// type=custom may carry a Codex grammar/format descriptor. It is preserved
+	// for prompt-based Web tools even though Chat Completions has no equivalent.
+	Format json.RawMessage `json:"format,omitempty"`
 
 	// type=namespace 的子工具列表（tools 与 children 二选一，语义相同）。
 	Tools    []ResponsesTool `json:"tools,omitempty"`

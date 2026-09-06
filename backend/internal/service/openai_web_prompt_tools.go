@@ -34,17 +34,23 @@ var openAIWebPromptToolNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // Type retains the original declaration family for generic native wrappers.
 type OpenAIWebPromptTool struct {
 	Name        string
+	TargetName  string
 	Type        string
+	Namespace   string
 	Description string
 	Parameters  json.RawMessage
+	Format      json.RawMessage
 }
 
 // OpenAIWebPromptToolCall is an untrusted model-selected call after strict
 // envelope and argument validation. The gateway generates the public call ID.
 type OpenAIWebPromptToolCall struct {
-	Name      string
-	Type      string
-	Arguments json.RawMessage
+	Name       string
+	TargetName string
+	Type       string
+	Namespace  string
+	Input      string
+	Arguments  json.RawMessage
 }
 
 // OpenAIWebPromptTools carries per-request protocol state. It is intentionally
@@ -88,15 +94,19 @@ func NewOpenAIWebPromptToolsFromResponsesRequest(req *apicompat.ResponsesRequest
 		return nil, err
 	}
 	tools := make([]apicompat.ChatTool, 0, len(effective))
+	namespaces := make(map[string]string)
+	targetNames := make(map[string]string)
+	formats := make(map[string]json.RawMessage)
 	for _, tool := range effective {
 		appendOpenAIWebPromptResponseTool(&tools, tool, "")
+		collectOpenAIWebPromptToolNamespaces(tool, "", namespaces, targetNames, formats)
 	}
 	choiceRaw := normalizeOpenAIWebResponsesPromptToolChoice(req.ToolChoice, effective)
 	choice, choiceName, err := normalizeOpenAIWebPromptToolChoice(choiceRaw, nil)
 	if err != nil {
 		return nil, err
 	}
-	return newOpenAIWebPromptTools(tools, choice, choiceName, req.ParallelToolCalls != nil && *req.ParallelToolCalls)
+	return newOpenAIWebPromptToolsWithNamespaces(tools, choice, choiceName, req.ParallelToolCalls != nil && *req.ParallelToolCalls, namespaces, targetNames, formats)
 }
 
 // normalizeOpenAIWebResponsesPromptToolChoice maps Responses-only tool choice
@@ -133,7 +143,7 @@ func normalizeOpenAIWebResponsesPromptToolChoice(raw json.RawMessage, tools []ap
 		var namespace string
 		_ = json.Unmarshal(object["namespace"], &namespace)
 		if strings.TrimSpace(namespace) != "" && strings.TrimSpace(name) != "" {
-			name = strings.Trim(strings.TrimSpace(namespace)+"__"+strings.TrimSpace(name), "_")
+			name = openAIWebPromptResponseToolName(apicompat.ResponsesTool{Type: typ, Name: name}, namespace)
 			mapped, _ := json.Marshal(map[string]any{"type": typ, "name": name})
 			return mapped
 		}
@@ -162,12 +172,60 @@ func openAIWebPromptResponseToolName(tool apicompat.ResponsesTool, namespace str
 	typ := strings.ToLower(strings.TrimSpace(tool.Type))
 	name := strings.TrimSpace(tool.Name)
 	if namespace != "" {
-		name = strings.Trim(strings.TrimSpace(namespace)+"__"+name, "_")
+		name = flattenOpenAIWebPromptToolName(namespace, name)
 	}
 	if name == "" {
 		name = "__sub2api_" + sanitizeOpenAIWebPromptToolType(typ)
 	}
 	return name
+}
+
+const openAIWebPromptToolNameMaxLen = 64
+
+func flattenOpenAIWebPromptToolName(namespace, name string) string {
+	full := strings.Trim(strings.TrimSpace(namespace)+"__"+strings.TrimSpace(name), "_")
+	if len(full) <= openAIWebPromptToolNameMaxLen {
+		return full
+	}
+	sum := sha256.Sum256([]byte(full))
+	suffix := "__" + hex.EncodeToString(sum[:4])
+	prefixLen := openAIWebPromptToolNameMaxLen - len(suffix)
+	var prefix strings.Builder
+	for _, r := range full {
+		if prefix.Len()+len(string(r)) > prefixLen {
+			break
+		}
+		prefix.WriteRune(r)
+	}
+	return prefix.String() + suffix
+}
+
+func collectOpenAIWebPromptToolNamespaces(tool apicompat.ResponsesTool, namespace string, namespaces, targetNames map[string]string, formats map[string]json.RawMessage) {
+	if namespaces == nil || targetNames == nil || formats == nil {
+		return
+	}
+	typ := strings.ToLower(strings.TrimSpace(tool.Type))
+	if typ == "namespace" {
+		children := tool.Tools
+		if len(children) == 0 {
+			children = tool.Children
+		}
+		childNamespace := strings.Trim(strings.TrimSpace(namespace)+"__"+strings.TrimSpace(tool.Name), "_")
+		for _, child := range children {
+			collectOpenAIWebPromptToolNamespaces(child, childNamespace, namespaces, targetNames, formats)
+		}
+		return
+	}
+	name := openAIWebPromptResponseToolName(tool, namespace)
+	if name != "" {
+		if strings.TrimSpace(namespace) != "" {
+			namespaces[name] = strings.TrimSpace(namespace)
+		}
+		targetNames[name] = strings.TrimSpace(tool.Name)
+		if len(bytes.TrimSpace(tool.Format)) > 0 && !bytes.Equal(bytes.TrimSpace(tool.Format), []byte("null")) {
+			formats[name] = append(json.RawMessage(nil), tool.Format...)
+		}
+	}
 }
 
 func appendOpenAIWebPromptResponseTool(out *[]apicompat.ChatTool, tool apicompat.ResponsesTool, namespace string) {
@@ -199,6 +257,10 @@ func appendOpenAIWebPromptResponseTool(out *[]apicompat.ChatTool, tool apicompat
 }
 
 func newOpenAIWebPromptTools(tools []apicompat.ChatTool, choice, choiceName string, parallel bool) (*OpenAIWebPromptTools, error) {
+	return newOpenAIWebPromptToolsWithNamespaces(tools, choice, choiceName, parallel, nil, nil, nil)
+}
+
+func newOpenAIWebPromptToolsWithNamespaces(tools []apicompat.ChatTool, choice, choiceName string, parallel bool, namespaces, targetNames map[string]string, formats map[string]json.RawMessage) (*OpenAIWebPromptTools, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -247,7 +309,11 @@ func newOpenAIWebPromptTools(tools []apicompat.ChatTool, choice, choiceName stri
 		if err != nil {
 			return nil, err
 		}
-		result.Tools = append(result.Tools, OpenAIWebPromptTool{Name: name, Type: typ, Description: description, Parameters: normalized})
+		targetName := strings.TrimSpace(targetNames[name])
+		if targetName == "" {
+			targetName = name
+		}
+		result.Tools = append(result.Tools, OpenAIWebPromptTool{Name: name, TargetName: targetName, Type: typ, Namespace: strings.TrimSpace(namespaces[name]), Description: description, Parameters: normalized, Format: append(json.RawMessage(nil), formats[name]...)})
 	}
 	if choiceName != "" {
 		if _, ok := seen[choiceName]; !ok {
@@ -256,7 +322,14 @@ func newOpenAIWebPromptTools(tools []apicompat.ChatTool, choice, choiceName stri
 	}
 	canonical := make([]map[string]any, 0, len(result.Tools))
 	for _, tool := range result.Tools {
-		canonical = append(canonical, map[string]any{"name": tool.Name, "type": tool.Type, "description": tool.Description, "parameters": json.RawMessage(tool.Parameters)})
+		entry := map[string]any{"name": tool.Name, "type": tool.Type, "description": tool.Description, "parameters": json.RawMessage(tool.Parameters)}
+		if tool.Namespace != "" {
+			entry["namespace"] = tool.Namespace
+		}
+		if len(bytes.TrimSpace(tool.Format)) > 0 {
+			entry["format"] = json.RawMessage(tool.Format)
+		}
+		canonical = append(canonical, entry)
 	}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
@@ -329,7 +402,14 @@ func (p *OpenAIWebPromptTools) Instruction() string {
 	}
 	definitions := make([]map[string]any, 0, len(p.Tools))
 	for _, tool := range p.Tools {
-		definitions = append(definitions, map[string]any{"name": tool.Name, "type": tool.Type, "description": tool.Description, "parameters": json.RawMessage(tool.Parameters)})
+		entry := map[string]any{"name": tool.Name, "type": tool.Type, "description": tool.Description, "parameters": json.RawMessage(tool.Parameters)}
+		if tool.Namespace != "" {
+			entry["namespace"] = tool.Namespace
+		}
+		if len(bytes.TrimSpace(tool.Format)) > 0 {
+			entry["format"] = json.RawMessage(tool.Format)
+		}
+		definitions = append(definitions, entry)
 	}
 	payload := map[string]any{"protocol": p.Protocol, "nonce": p.Nonce, "schema_hash": p.SchemaHash, "tools": definitions, "tool_choice": p.Choice}
 	if p.ChoiceName != "" {
@@ -352,9 +432,41 @@ func (p *OpenAIWebPromptTools) EncodeAssistantToolCalls(calls []apicompat.ChatTo
 		if len(bytes.TrimSpace(args)) == 0 {
 			args = json.RawMessage(`{}`)
 		}
-		items = append(items, map[string]any{"name": call.Function.Name, "type": "function", "arguments": args})
+		typ, namespace := "function", ""
+		if tool, ok := p.toolByName(call.Function.Name); ok {
+			typ, namespace = tool.Type, tool.Namespace
+		}
+		if strings.EqualFold(strings.TrimSpace(typ), "custom") {
+			input, _, err := normalizeOpenAIWebPromptCustomCall(nil, args)
+			if err != nil {
+				input = string(args)
+			}
+			entry := map[string]any{"name": call.Function.Name, "type": "custom", "input": input}
+			if namespace != "" {
+				entry["namespace"] = namespace
+			}
+			items = append(items, entry)
+			continue
+		}
+		entry := map[string]any{"name": call.Function.Name, "type": typ, "arguments": args}
+		if namespace != "" {
+			entry["namespace"] = namespace
+		}
+		items = append(items, entry)
 	}
 	return "Previous assistant tool calls: " + p.envelope(items)
+}
+
+func (p *OpenAIWebPromptTools) toolByName(name string) (OpenAIWebPromptTool, bool) {
+	if p == nil {
+		return OpenAIWebPromptTool{}, false
+	}
+	for _, tool := range p.Tools {
+		if tool.Name == name {
+			return tool, true
+		}
+	}
+	return OpenAIWebPromptTool{}, false
 }
 
 func (p *OpenAIWebPromptTools) EncodeToolResult(callID, output string) string {
@@ -405,6 +517,8 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		Calls      []struct {
 			Name      string          `json:"name"`
 			Type      string          `json:"type,omitempty"`
+			Namespace string          `json:"namespace,omitempty"`
+			Input     json.RawMessage `json:"input,omitempty"`
 			Arguments json.RawMessage `json:"arguments"`
 		} `json:"calls"`
 		// Some Web models emit the same call envelope under tools[]. This is
@@ -413,6 +527,8 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		Tools []struct {
 			Name      string          `json:"name"`
 			Type      string          `json:"type,omitempty"`
+			Namespace string          `json:"namespace,omitempty"`
+			Input     json.RawMessage `json:"input,omitempty"`
 			Arguments json.RawMessage `json:"arguments"`
 		} `json:"tools"`
 	}
@@ -447,6 +563,24 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		if providedType != "" && providedType != declaredType {
 			return nil, true, fmt.Errorf("tool %q type %q does not match declared type %q", call.Name, call.Type, tool.Type)
 		}
+		providedNamespace := strings.TrimSpace(call.Namespace)
+		if providedNamespace != "" && providedNamespace != strings.TrimSpace(tool.Namespace) {
+			return nil, true, fmt.Errorf("tool %q namespace %q does not match declared namespace %q", call.Name, call.Namespace, tool.Namespace)
+		}
+		if declaredType == "custom" {
+			input, args, err := normalizeOpenAIWebPromptCustomCall(call.Input, call.Arguments)
+			if err != nil {
+				return nil, true, fmt.Errorf("tool %q input: %w", call.Name, err)
+			}
+			if len(args) > openAIWebPromptToolMaxBytes || len([]byte(input)) > openAIWebPromptToolMaxBytes {
+				return nil, true, errors.New("prompt tool input exceeds size limit")
+			}
+			if err := validateOpenAIWebPromptArguments(tool.Parameters, args); err != nil {
+				return nil, true, fmt.Errorf("tool %q arguments: %w", call.Name, err)
+			}
+			result = append(result, OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Input: input, Arguments: args})
+			continue
+		}
 		args := normalizeOpenAIWebPromptArguments(call.Arguments)
 		if len(args) == 0 {
 			args = []byte(`{}`)
@@ -457,7 +591,7 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		if err := validateOpenAIWebPromptArguments(tool.Parameters, args); err != nil {
 			return nil, true, fmt.Errorf("tool %q arguments: %w", call.Name, err)
 		}
-		result = append(result, OpenAIWebPromptToolCall{Name: call.Name, Type: tool.Type, Arguments: append(json.RawMessage(nil), args...)})
+		result = append(result, OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Arguments: append(json.RawMessage(nil), args...)})
 	}
 	if p.Choice == "none" && len(result) > 0 {
 		return nil, true, errors.New("tool_choice none was not respected")
@@ -476,6 +610,40 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		}
 	}
 	return result, true, nil
+}
+
+func normalizeOpenAIWebPromptCustomCall(inputRaw, argumentsRaw json.RawMessage) (string, []byte, error) {
+	inputRaw = bytes.TrimSpace(inputRaw)
+	argumentsRaw = bytes.TrimSpace(argumentsRaw)
+	var input string
+	if len(inputRaw) > 0 && !bytes.Equal(inputRaw, []byte("null")) {
+		if err := json.Unmarshal(inputRaw, &input); err != nil {
+			return "", nil, errors.New("input must be a string")
+		}
+	} else if len(argumentsRaw) > 0 && !bytes.Equal(argumentsRaw, []byte("null")) {
+		var encoded string
+		if argumentsRaw[0] == '"' && json.Unmarshal(argumentsRaw, &encoded) == nil {
+			input = encoded
+		} else {
+			var object map[string]json.RawMessage
+			if json.Unmarshal(argumentsRaw, &object) == nil {
+				if raw, ok := object["input"]; ok {
+					if err := json.Unmarshal(raw, &input); err != nil {
+						return "", nil, errors.New("arguments.input must be a string")
+					}
+				} else {
+					input = string(argumentsRaw)
+				}
+			} else {
+				input = string(argumentsRaw)
+			}
+		}
+	}
+	args, err := json.Marshal(map[string]string{"input": input})
+	if err != nil {
+		return "", nil, fmt.Errorf("encode custom input: %w", err)
+	}
+	return input, args, nil
 }
 
 // extractOpenAIWebPromptEnvelope finds a complete JSON object embedded in a

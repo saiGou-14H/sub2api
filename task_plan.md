@@ -218,3 +218,14 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
   serialization for Web parent cursors, with cancellation-aware bounded retry.
 - [completed] Run focused service, repository, and Redis integration tests;
   publish and deploy verification completed for this release.
+
+## 2026-09-06 Codex Prompt Tool parity
+
+- [completed] Align Web Prompt Tool definitions with Codex custom tools,
+  namespace tools, and Responses `additional_tools` registrations.
+- [completed] Emit the official `custom_tool_call` SSE lifecycle and preserve
+  namespace metadata while retaining function-call compatibility.
+- [completed] Encode custom tool history/results for the next Web turn and add
+  mixed function/custom/namespace regression coverage.
+- [in_progress] Run focused verification, commit/push, deploy only `9999`, and
+  run server-side smoke checks.
