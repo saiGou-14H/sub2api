@@ -1186,7 +1186,7 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 			return nil, writeOpenAIWebRequestError(c, err)
 		}
 		normalizeOpenAIWebResponsesTextFormat(&responsesReq, promptTools)
-		converted, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+		converted, err := responsesToOpenAIWebChatRequest(&responsesReq, &apicompat.ResponsesToChatOptions{
 			ReasoningContentByID: s.reasoningContentByID,
 		})
 		if err != nil {

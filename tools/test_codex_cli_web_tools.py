@@ -366,6 +366,9 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory(prefix="codex-cli-web-tools-") as codex_home:
             env = os.environ.copy()
+            # Current Codex CLI automation reads CODEX_API_KEY. Keep the
+            # OpenAI name as a compatibility fallback for older clients.
+            env["CODEX_API_KEY"] = str(setup["gateway_key"])
             env["OPENAI_API_KEY"] = str(setup["gateway_key"])
             env["CODEX_HOME"] = codex_home
             # Custom Codex providers read credentials from CODEX_HOME/auth.json
@@ -377,8 +380,6 @@ def main() -> int:
             )
             command = [
                 args.codex,
-                "-a",
-                "never",
                 "exec",
                 "--ephemeral",
                 "--json",

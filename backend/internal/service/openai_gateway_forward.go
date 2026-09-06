@@ -1285,6 +1285,26 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 }
 
+// responsesToOpenAIWebChatRequest keeps Responses top-level instructions in
+// the Chat request's Instructions field. The generic Responses-to-Chat bridge
+// represents them as a leading system message, which would place the Web
+// Prompt Tool protocol in a separate earlier system turn and lets a Codex
+// client prompt override it.
+func responsesToOpenAIWebChatRequest(req *apicompat.ResponsesRequest, opts *apicompat.ResponsesToChatOptions) (*apicompat.ChatCompletionsRequest, error) {
+	if req == nil {
+		return nil, errors.New("responses request is nil")
+	}
+	request := *req
+	instructions := request.Instructions
+	request.Instructions = ""
+	converted, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&request, opts)
+	if err != nil {
+		return nil, err
+	}
+	converted.Instructions = instructions
+	return converted, nil
+}
+
 // forwardResponsesViaOpenAIWeb converts a Responses request to the text-chat
 // shape accepted by the authenticated ChatGPT Web conversation endpoint. The
 // transport converts its response back to Responses SSE, allowing the normal
@@ -1326,7 +1346,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 	normalizeOpenAIWebResponsesTextFormat(&responsesReq, promptTools)
 
 	s.recacheReasoningItemsFromInput(responsesReq.Input)
-	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+	chatReq, err := responsesToOpenAIWebChatRequest(&responsesReq, &apicompat.ResponsesToChatOptions{
 		ReasoningContentByID: s.reasoningContentByID,
 	})
 	if err != nil {

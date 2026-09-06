@@ -195,6 +195,49 @@ func TestOpenAIWebTransportPromptToolBoundaryFollowsClientInstructions(t *testin
 	require.NotEqual(t, "system", secondAuthor["role"])
 }
 
+func TestResponsesToOpenAIWebChatRequestKeepsPromptToolBoundaryAfterCodexInstructions(t *testing.T) {
+	request := &apicompat.ResponsesRequest{
+		Model:        "auto",
+		Instructions: "Codex client instructions must remain active.",
+		Input:        json.RawMessage(`"inspect the workspace"`),
+		Tools: []apicompat.ResponsesTool{{
+			Type:       "function",
+			Name:       "exec_command",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"],"additionalProperties":false}`),
+		}},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromResponsesRequest(request)
+	require.NoError(t, err)
+
+	chatRequest, err := responsesToOpenAIWebChatRequest(request, nil)
+	require.NoError(t, err)
+	require.Equal(t, request.Instructions, chatRequest.Instructions)
+	require.Len(t, chatRequest.Messages, 1)
+	require.Equal(t, "user", chatRequest.Messages[0].Role)
+
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request: chatRequest, PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	messages, ok := payload["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 2)
+	first := messages[0].(map[string]any)
+	firstAuthor := first["author"].(map[string]any)
+	require.Equal(t, "system", firstAuthor["role"])
+	firstContent := first["content"].(map[string]any)
+	instruction := firstContent["parts"].([]any)[0].(string)
+	require.Contains(t, instruction, request.Instructions)
+	require.Contains(t, instruction, "REMOTE EXECUTION BOUNDARY (mandatory)")
+	require.Greater(t, strings.Index(instruction, "REMOTE EXECUTION BOUNDARY"), strings.Index(instruction, request.Instructions))
+	second := messages[1].(map[string]any)
+	secondAuthor := second["author"].(map[string]any)
+	require.Equal(t, "user", secondAuthor["role"])
+}
+
 func TestOpenAIWebTransportPromptToolsSanitizeToolHistoryMetadata(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
 		Model: "auto",
