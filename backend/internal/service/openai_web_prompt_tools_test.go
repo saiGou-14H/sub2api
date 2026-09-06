@@ -148,6 +148,7 @@ func TestOpenAIWebPromptToolsParseResponseValidatesNonceChoiceAndArguments(t *te
 	require.NoError(t, err)
 	good, _ := json.Marshal(map[string]any{
 		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"event": openAIWebPromptToolEvent, "start": openAIWebPromptToolStartSignal, "end": openAIWebPromptToolEndSignal,
 		"calls": []any{map[string]any{"name": "lookup", "type": "function", "arguments": map[string]any{"city": "Shanghai"}}},
 	})
 	calls, recognized, err := prompt.ParseResponse(string(good))
@@ -163,10 +164,27 @@ func TestOpenAIWebPromptToolsParseResponseValidatesNonceChoiceAndArguments(t *te
 
 	badArgs, _ := json.Marshal(map[string]any{
 		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"event": openAIWebPromptToolEvent, "start": openAIWebPromptToolStartSignal, "end": openAIWebPromptToolEndSignal,
 		"calls": []any{map[string]any{"name": "lookup", "arguments": map[string]any{"city": 42}}},
 	})
 	_, _, err = prompt.ParseResponse(string(badArgs))
 	require.Error(t, err)
+}
+
+func TestOpenAIWebPromptToolsRejectsInvalidBoundarySignals(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}}},
+	})
+	require.NoError(t, err)
+	envelope, _ := json.Marshal(map[string]any{
+		"protocol": prompt.Protocol, "nonce": prompt.Nonce, "schema_hash": prompt.SchemaHash,
+		"event": openAIWebPromptToolEvent, "start": openAIWebPromptToolStartSignal, "end": "wrong_end",
+		"calls": []any{map[string]any{"name": "lookup", "arguments": map[string]any{}}},
+	})
+	_, recognized, err := prompt.ParseResponse(string(envelope))
+	require.True(t, recognized)
+	require.ErrorContains(t, err, "boundary signals")
 }
 
 func TestOpenAIWebPromptToolsParseResponseAcceptsCustomInputForms(t *testing.T) {

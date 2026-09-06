@@ -284,7 +284,7 @@ OpenAI tools/tool_choice
   -> 生成 protocol、nonce、schema_hash
   -> 注入内部 system prompt
   -> 从 Web 请求删除原生 tools/tool_choice
-  -> Web 模型输出严格 JSON 工具信封（可包在前后文或 markdown 中）
+  -> Web 模型输出严格 JSON 工具信封（event/start/end 起止信号，可包在前后文或 markdown 中）
   -> 校验 nonce、Schema、工具名和参数
   -> 转换为标准 function_call/custom_tool_call/tool_calls
 ```

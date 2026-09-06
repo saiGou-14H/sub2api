@@ -96,13 +96,16 @@ and JSON Schemas and gives the model two valid outcomes:
 2. Return a strict tool-call envelope containing one or more calls.
 
 The implemented envelope uses a random per-request nonce, a normalized schema
-hash, and an unambiguous marker:
+hash, an explicit event type, and start/end turn signals:
 
 ```json
 {
   "protocol": "sub2api.prompt_tool.v1",
   "nonce": "request_nonce",
   "schema_hash": "sha256-prefix",
+  "event": "tool_call",
+  "start": "tool_call_start",
+  "end": "tool_call_end",
   "calls": [
     {"name":"get_weather","type":"function","arguments":{"city":"Shanghai"}}
   ]
@@ -118,7 +121,9 @@ For `custom` tools, the call uses free-text `input`:
 The parser also accepts the legacy `tools` array and the compatibility forms
 `arguments: "text"`, `arguments: {"input":"text"}`, and raw text. All forms
 are normalized to the same internal call before public Responses events are
-emitted.
+emitted. Legacy envelopes may omit all three boundary fields; partial or
+incorrect boundary fields are rejected so a malformed turn is never classified
+as a valid tool call.
 The parser must accept it only when all of the following are true:
 
 - the nonce matches the current request;

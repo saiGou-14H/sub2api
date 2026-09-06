@@ -153,6 +153,48 @@ func TestOpenAIWebTransportPromptToolsNeverSerializeNativeToolFields(t *testing.
 	require.NotEmpty(t, request.ToolChoice)
 }
 
+func TestOpenAIWebTransportPromptToolBoundaryFollowsClientInstructions(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model:        "auto",
+		Instructions: "Codex client instructions must remain active.",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "exec_command",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`),
+		}}},
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"inspect the workspace"`)}},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromChatRequest(request)
+	require.NoError(t, err)
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request: request, PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	messages, ok := payload["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 2)
+	first, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	author, ok := first["author"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "system", author["role"])
+	content, ok := first["content"].(map[string]any)
+	require.True(t, ok)
+	parts, ok := content["parts"].([]any)
+	require.True(t, ok)
+	require.Len(t, parts, 1)
+	instruction, ok := parts[0].(string)
+	require.True(t, ok)
+	require.Contains(t, instruction, "Codex client instructions must remain active.")
+	require.Contains(t, instruction, "REMOTE EXECUTION BOUNDARY (mandatory)")
+	require.Greater(t, strings.Index(instruction, "REMOTE EXECUTION BOUNDARY"), strings.Index(instruction, "Codex client instructions"))
+	second := messages[1].(map[string]any)
+	secondAuthor := second["author"].(map[string]any)
+	require.NotEqual(t, "system", secondAuthor["role"])
+}
+
 func TestOpenAIWebTransportPromptToolsSanitizeToolHistoryMetadata(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
 		Model: "auto",

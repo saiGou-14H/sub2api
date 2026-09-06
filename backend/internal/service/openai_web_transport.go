@@ -1358,6 +1358,11 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		request.ToolChoice = nil
 		request.FunctionCall = nil
 		request.ParallelToolCalls = nil
+		// Keep the bridge instruction in the same final system message as the
+		// caller's instructions. A separate leading system message can be
+		// overridden by Codex's long client prompt, causing the Web model to
+		// execute or simulate a shell instead of returning a tool envelope.
+		request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.Instruction())
 	}
 	model, ok := NormalizeOpenAIWebModel(request.Model)
 	if !ok {
@@ -1369,10 +1374,6 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 	}
 	if len(messages) == 0 {
 		return nil, errors.New("Chat Completions request has no messages")
-	}
-	if options.PromptTools != nil {
-		prompt := openAIWebMessage("system", options.PromptTools.Instruction(), nil)
-		messages = append([]map[string]any{prompt}, messages...)
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -1438,6 +1439,18 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		payload["thinking_effort"] = effort
 	}
 	return json.Marshal(payload)
+}
+
+func appendOpenAIWebPromptInstruction(existing, bridge string) string {
+	existing = strings.TrimSpace(existing)
+	bridge = strings.TrimSpace(bridge)
+	if existing == "" {
+		return bridge
+	}
+	if bridge == "" {
+		return existing
+	}
+	return existing + "\n\n" + bridge
 }
 
 func normalizeOpenAIWebThinkingEffort(value string) string {
