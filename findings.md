@@ -888,3 +888,29 @@
 - The current lease is 15 minutes, matching the default WebSocket read budget;
   long-running turns beyond that budget are outside the gateway's normal
   request lifetime and must be retried as a complete replay after expiry.
+
+## 2026-09-06 Cross-instance test-account import
+
+- The live `10000` application is `/root/sub2api-deploy` (`sub2api`, port
+  10000); the isolated target is `/root/sub2api-deploy-9999` (`sub2api-9999`,
+  port 9999).
+- The source group resolved unambiguously to `0707-phone-free`, ID 40,
+  platform `openai`, with 3,827 accounts. The target group resolved to `测试`,
+  ID 2, platform `openai`, with 8 accounts before the operation.
+- The source selection contained 100 accounts matching platform `openai`,
+  type `oauth`, status `active`, `schedulable=true`, and
+  `credentials_status.has_access_token=true`. The export returned exactly 100
+  account records and no proxies.
+- The target import returned `account_created=100` and
+  `account_failed=0`. The target account total increased from 8 to 108; the
+  100 new account IDs were then bound with a bulk update to group 2, which
+  returned 100 successes and 0 failures. A second group-filtered listing
+  confirmed all 100 new IDs are members of the target group.
+- Two target spot checks returned `test_start` followed by an error. A source
+  check of the corresponding first selected account returned the same
+  upstream `401` with code `token_revoked` (`Encountered invalidated oauth
+  token for user, failing request`). This is an upstream credential-state
+  issue in the source data, not a cross-instance serialization or binding
+  failure.
+- No credentials, access tokens, administrator secrets, or full export
+  payloads were written to disk, logs, or repository files.

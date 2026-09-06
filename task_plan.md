@@ -219,6 +219,21 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
 - [completed] Run focused service, repository, and Redis integration tests;
   publish and deploy verification completed for this release.
 
+## 2026-09-06 Cross-instance test-account import
+
+- [completed] Resolve the `10000` source group `0707-phone-free` (ID 40) and
+  the `9999` target group `测试` (ID 2) through the live admin APIs.
+- [completed] Select 100 active, schedulable OpenAI OAuth accounts with an
+  access-token presence flag from the source group.
+- [completed] Export the selected accounts in memory, import them into the
+  isolated `9999` instance, and bind only the newly-created accounts to the
+  target test group.
+- [completed] Verify the target group increased from 8 to 108 accounts and
+  all 100 newly-created account IDs are bound to group 2.
+- [completed] Run source/target connectivity spot checks and confirm the
+  observed `401 token_revoked` is present on the source account as well as its
+  imported copy; no migration corruption was observed.
+
 ## 2026-09-06 Codex Prompt Tool parity
 
 - [completed] Align Web Prompt Tool definitions with Codex custom tools,

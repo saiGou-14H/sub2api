@@ -726,3 +726,20 @@
   parameter rejection or Prompt Tool parser error in logs.
 - Applied image retention for the 9999 family: current `a8f51b3` and rollback
   `01abd36` remain; older image tags and remote build artifacts were removed.
+
+# 2026-09-06 Cross-instance test-account import
+
+- Confirmed on the server that `10000` maps to `/root/sub2api-deploy` and
+  `9999` maps to `/root/sub2api-deploy-9999`; both admin logins were verified
+  in process memory.
+- Resolved source `0707-phone-free` (group 40) and target `测试` (group 2).
+  Selected 100 active and schedulable OpenAI OAuth accounts with access-token
+  presence from the 3,827-account source group.
+- Imported the 100-account export into `9999` with idempotency protection and
+  no proxy records. Result: 100 created, 0 failed. Bound the resulting IDs to
+  target group 2: 100 succeeded, 0 failed.
+- Verified target account total/group total changed from 8 to 108 and all 100
+  new accounts are in the target group.
+- Connectivity spot checks on target and source both produced upstream
+  `401 token_revoked`; the source-side reproduction confirms the issue is
+  stale/revoked source OAuth credentials rather than import corruption.
