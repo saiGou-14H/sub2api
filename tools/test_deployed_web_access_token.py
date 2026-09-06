@@ -201,7 +201,10 @@ def main():
         status, payload = request(
             BASE + "/keys",
             "POST",
-            {"name": name, "expires_in_days": 1},
+            # The admin account's key must be bound to a routable group before
+            # the public OpenAI endpoints will accept it. The isolated 9999
+            # deployment uses group 2 for its Web smoke-test pool.
+            {"name": name, "group_id": 2, "expires_in_days": 1},
             admin_token,
         )
         result["api_key_create_status"] = status

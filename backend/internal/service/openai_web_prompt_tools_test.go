@@ -36,6 +36,21 @@ func TestOpenAIWebPromptToolsNormalizesStrictFunctionSchema(t *testing.T) {
 	require.Len(t, prompt.SchemaHash, 24)
 }
 
+func TestOpenAIWebPromptToolsInstructionRequiresClientToolForExplicitLocalOperations(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "write_file",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+		}}},
+	})
+	require.NoError(t, err)
+	instruction := prompt.Instruction()
+	require.Contains(t, instruction, "If the user explicitly asks you to perform an operation")
+	require.Contains(t, instruction, "The remote execution boundary is the reason to emit a client tool call")
+	require.Contains(t, instruction, "Normal prose is allowed only when no declared tool can satisfy the request")
+}
+
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
 	for name, schema := range map[string]string{
 		"unknown required": `{"type":"object","properties":{},"required":["missing"]}`,
