@@ -1,5 +1,22 @@
 # Findings
 
+## 2026-09-06 Incremental Prompt Tool SSE
+
+- Baseline is clean commit `eb80ee7`; deployed runtime is `5c4c078`.
+- Prompt Tool currently accumulates upstream text and only emits tool events
+  in `finish()`. Incremental SSE requires parsing before upstream completion.
+- Current official documentation search/fetch attempts returned HTTP 403.
+  Do not claim fresh official-page verification.
+- Sanitized HAR analysis found 282/297 `response.custom_tool_call_input.delta`
+  events in Codex Responses streams, while Web conversation HARs expose only
+  cumulative `o=append`/`o=patch` text updates. The adapter therefore must
+  derive incremental Prompt Tool deltas from cumulative Web text and validate
+  the full envelope at the terminal frame.
+- The incremental reader now emits stable `response.output_item.added`,
+  argument/input delta events with `call_id`/`name`, and defers done/completed
+  events until strict final parsing. Prefix rewrites and interrupted streams
+  fail closed.
+
 ## 2026-09-05 Prompt Tool switch refresh diagnosis
 
 - The frontend load path already assigns every non-null field returned by `GET /api/v1/admin/settings` into the reactive form, including `enable_openai_web_prompt_tools`.

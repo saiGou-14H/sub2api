@@ -3144,28 +3144,30 @@ func openAIWebAssistantHistory(messages []apicompat.ChatMessage) ([]string, stri
 }
 
 type openAIWebResponsesReader struct {
-	source           io.ReadCloser
-	reader           *bufio.Reader
-	model            string
-	responseID       string
-	itemID           string
-	conversationID   string
-	lastMessageID    string
-	createdAt        int64
-	sequenceNumber   int
-	rawText          string
-	text             string
-	historyText      string
-	historyMessages  []string
-	historyIndex     int
-	promptTools      *OpenAIWebPromptTools
-	promptClassified bool
-	usage            map[string]any
-	output           bytes.Buffer
-	started          bool
-	failed           bool
-	finished         bool
-	closed           bool
+	source             io.ReadCloser
+	reader             *bufio.Reader
+	model              string
+	responseID         string
+	itemID             string
+	conversationID     string
+	lastMessageID      string
+	createdAt          int64
+	sequenceNumber     int
+	rawText            string
+	text               string
+	historyText        string
+	historyMessages    []string
+	historyIndex       int
+	promptTools        *OpenAIWebPromptTools
+	promptClassified   bool
+	promptEnvelopeSeen bool
+	promptStreamCalls  []openAIWebPromptStreamCall
+	usage              map[string]any
+	output             bytes.Buffer
+	started            bool
+	failed             bool
+	finished           bool
+	closed             bool
 }
 
 // OpenAIWebConversationStateProvider exposes the private Web cursor captured
@@ -3225,6 +3227,10 @@ func (r *openAIWebResponsesReader) Read(p []byte) (int, error) {
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				r.finish(false)
+				break
+			}
+			if r.promptEnvelopeSeen {
+				r.failPromptStream("upstream stream interrupted during tool call")
 				break
 			}
 			return 0, err
@@ -3287,6 +3293,9 @@ func readOpenAIWebSSEFrame(reader *bufio.Reader) (openAIWebSSEFrame, error) {
 }
 
 func (r *openAIWebResponsesReader) convertFrame(frame openAIWebSSEFrame) {
+	if r.finished {
+		return
+	}
 	data := strings.TrimSpace(frame.data)
 	if data == "" {
 		if openAIWebFrameTerminal(nil, frame.event) {
@@ -3343,6 +3352,11 @@ func (r *openAIWebResponsesReader) convertFrame(frame openAIWebSSEFrame) {
 	}
 	if nextRaw, changed := applyOpenAIWebTextPatch(payload, r.rawText, r.historyText); changed {
 		nextText := sanitizeOpenAIWebText(nextRaw)
+		if r.promptTools != nil {
+			// Sanitizing prose can mutate whitespace, escapes, or annotation-like
+			// characters inside a tool's JSON arguments or custom input.
+			nextText = nextRaw
+		}
 		delta := nextText
 		if strings.HasPrefix(nextText, r.text) {
 			delta = strings.TrimPrefix(nextText, r.text)
@@ -3365,6 +3379,9 @@ func (r *openAIWebResponsesReader) convertFrame(frame openAIWebSSEFrame) {
 				"content_index": 0,
 				"delta":         delta,
 			})
+		} else if err := r.streamPromptToolPrefix(); err != nil {
+			r.failPromptStream(err.Error())
+			return
 		}
 	}
 	if openAIWebFrameTerminal(payload, frame.event) {
@@ -3438,9 +3455,21 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 	if r == nil || r.finished {
 		return
 	}
+	if r.failed {
+		r.finished = true
+		_, _ = r.output.WriteString("data: [DONE]\n\n")
+		return
+	}
+	r.start()
 	if r.promptTools != nil && !r.promptClassified {
 		r.promptClassified = true
 		calls, recognized, err := r.promptTools.ParseResponse(r.text)
+		if err == nil && r.promptEnvelopeSeen && !recognized {
+			err = errors.New("incomplete or invalid prompt tool envelope")
+		}
+		if err == nil && recognized && !fromDone {
+			err = errors.New("upstream stream ended before tool turn completion")
+		}
 		if err != nil {
 			r.failed = true
 			response := r.responseObject("failed", nil)
@@ -3474,6 +3503,7 @@ func (r *openAIWebResponsesReader) finish(fromDone bool) {
 		}
 		// Prompt mode buffers the upstream text until classification. Emit the
 		// ordinary message lifecycle only after we know it is not a tool envelope.
+		r.text = sanitizeOpenAIWebText(r.text)
 		r.emitPromptMessageStart()
 		if r.text != "" {
 			r.emit("response.output_text.delta", map[string]any{
@@ -3544,88 +3574,40 @@ func (r *openAIWebResponsesReader) emitPromptMessageStart() {
 }
 
 func (r *openAIWebResponsesReader) finishPromptToolCalls(calls []OpenAIWebPromptToolCall) {
+	if len(calls) < len(r.promptStreamCalls) {
+		r.failPromptStream("prompt tool stream removed an emitted call")
+		return
+	}
+	// Reconcile every provisional call before publishing any executable item.
+	for index, call := range calls {
+		value := string(call.Arguments)
+		if call.Type == "custom" {
+			value = call.Input
+		}
+		if err := r.emitPromptCallPrefix(index, call, value); err != nil {
+			r.failPromptStream(err.Error())
+			return
+		}
+	}
 	items := make([]any, 0, len(calls))
 	for index, call := range calls {
-		itemID := "fc_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		callID := "call_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		outputName := strings.TrimSpace(call.TargetName)
-		if outputName == "" {
-			outputName = call.Name
-			if call.Namespace != "" {
-				prefix := strings.TrimSpace(call.Namespace) + "__"
-				if strings.HasPrefix(outputName, prefix) {
-					outputName = strings.TrimPrefix(outputName, prefix)
-				}
-			}
+		state := &r.promptStreamCalls[index]
+		value, event, field := string(call.Arguments), "response.function_call_arguments.done", "arguments"
+		if call.Type == "custom" {
+			value, event, field = call.Input, "response.custom_tool_call_input.done", "input"
 		}
-		isCustom := strings.EqualFold(strings.TrimSpace(call.Type), "custom")
-		if isCustom {
-			input := call.Input
-			item := map[string]any{
-				"id": itemID, "type": "custom_tool_call", "status": "completed",
-				"call_id": callID, "name": outputName, "input": input,
-			}
-			if call.Namespace != "" {
-				item["namespace"] = call.Namespace
-			}
-			added := map[string]any{
-				"id": itemID, "type": "custom_tool_call", "status": "in_progress",
-				"call_id": callID, "name": outputName, "input": "",
-			}
-			if call.Namespace != "" {
-				added["namespace"] = call.Namespace
-			}
-			r.emit("response.output_item.added", map[string]any{
-				"response_id": r.responseID, "output_index": index, "item": added,
-			})
-			if input != "" {
-				r.emit("response.custom_tool_call_input.delta", map[string]any{
-					"response_id": r.responseID, "item_id": itemID, "output_index": index,
-					"call_id": callID, "name": outputName, "delta": input,
-				})
-			}
-			r.emit("response.custom_tool_call_input.done", map[string]any{
-				"response_id": r.responseID, "item_id": itemID, "output_index": index,
-				"call_id": callID, "name": outputName, "input": input,
-			})
-			r.emit("response.output_item.done", map[string]any{
-				"response_id": r.responseID, "output_index": index, "item": item,
-			})
-			items = append(items, item)
-			continue
-		}
-		arguments := string(call.Arguments)
-		item := map[string]any{
-			"id": itemID, "type": "function_call", "status": "completed",
-			"call_id": callID, "name": outputName, "arguments": arguments,
-		}
-		if call.Namespace != "" {
-			item["namespace"] = call.Namespace
-		}
-		added := map[string]any{
-			"id": itemID, "type": "function_call", "status": "in_progress",
-			"call_id": callID, "name": outputName, "arguments": "",
-		}
-		if call.Namespace != "" {
-			added["namespace"] = call.Namespace
-		}
-		r.emit("response.output_item.added", map[string]any{
-			"response_id": r.responseID, "output_index": index, "item": added,
-		})
-		r.emit("response.function_call_arguments.delta", map[string]any{
-			"response_id": r.responseID, "item_id": itemID, "output_index": index,
-			"call_id": callID, "name": outputName, "delta": arguments,
-		})
-		r.emit("response.function_call_arguments.done", map[string]any{
-			"response_id": r.responseID, "item_id": itemID, "output_index": index,
-			"call_id": callID, "name": outputName, "arguments": arguments,
-		})
+		item := state.item("completed", value)
+		r.emit(event, map[string]any{"response_id": r.responseID, "item_id": state.itemID,
+			"output_index": index, "call_id": state.callID, "name": item["name"], field: value})
 		r.emit("response.output_item.done", map[string]any{
 			"response_id": r.responseID, "output_index": index, "item": item,
 		})
 		items = append(items, item)
 	}
 	response := r.responseObject("completed", items)
+	if r.usage != nil {
+		response["usage"] = r.usage
+	}
 	r.emit("response.completed", map[string]any{"response": response})
 	r.finished = true
 	_, _ = r.output.WriteString("data: [DONE]\n\n")

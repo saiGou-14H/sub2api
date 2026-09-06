@@ -343,3 +343,22 @@ and Runner disconnect/retry coverage.
 This document is the contract for the first runtime implementation; any change
 to the envelope or registry requires a versioned protocol update and regression
 tests.
+
+## 15. Streaming tool events
+
+The Web upstream still returns assistant content as cumulative text patches.
+When Prompt Tool is enabled, the adapter keeps the raw patch text and incrementally
+parses a JSON prefix after the protocol marker is observed. Once `name`, `type`,
+and the arguments/input prefix are available it emits the corresponding
+`response.output_item.added` and argument/input `delta` events immediately. The
+public call ID and item ID are generated once and remain stable for the turn.
+
+Only the terminal Web frame is allowed to produce `arguments.done` or
+`custom_tool_call_input.done`, `output_item.done`, and `response.completed`.
+At that point the complete envelope is parsed again using the strict nonce,
+schema hash, boundary-signal, tool-choice, size, and JSON-Schema checks. A
+truncated stream, rewritten prefix, invalid end signal, or failed final schema
+validation produces `response.failed` and exactly one `data: [DONE]`; no
+provisional call is exposed as completed. Legacy envelopes that omit all three
+boundary fields remain buffered and compatible, but are not speculatively
+streamed.

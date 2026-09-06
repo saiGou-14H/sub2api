@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-09-06 Incremental Prompt Tool SSE
+
+- Restored prior progress and clean worktree; inspecting sanitized HAR shapes
+  and the current decoder before implementation.
+- Added incremental Prompt Tool JSON-prefix decoding to the Web Responses
+  reader, preserving raw tool text and stable call IDs across SSE frames.
+- Added fragmented function/custom/error regression tests and documented the
+  lifecycle contract. Focused service and apicompat tests pass; full service
+  suite remains noisy with pre-existing external-adapter failures.
+
 ## 2026-09-04 Plus HAR dynamic-catalog continuation
 
 - Restored the active planning files and current dirty worktree without retrying the known-broken catch-up helper.

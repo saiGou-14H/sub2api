@@ -1,5 +1,16 @@
 # Access-token web chat compatibility
 
+## Active: 2026-09-06 Incremental Prompt Tool SSE
+
+- [in_progress] Inspect sanitized HAR event structures and current stream converters.
+- [completed] Implement incremental tool argument emission with strict final validation.
+- [completed] Test fragmented envelopes, error paths, Chat conversion, and handoff parity.
+- [pending] Commit/push and deploy only 9999, retaining one rollback build.
+
+Current constraint: official documentation search/fetch returns HTTP 403.
+An initial multi-file plan patch failed on a stale findings anchor; no source
+change resulted. Recover context from existing plans (catch-up helper is broken).
+
 ## Goal
 
 Adapt Sub2API so a caller can configure a ChatGPT web account with only an access token, send web conversations through the configured upstream, and expose the result through the existing OpenAI-compatible API.
