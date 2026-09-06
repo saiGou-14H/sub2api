@@ -914,3 +914,22 @@
   failure.
 - No credentials, access tokens, administrator secrets, or full export
   payloads were written to disk, logs, or repository files.
+
+## 2026-09-06 Windows caller versus tool execution environment
+
+- Calling `9999` from a Windows client only identifies the network caller; it
+  does not transfer the Windows filesystem, process table, shell, or current
+  working directory to the upstream model.
+- The repository contains no backend/frontend hard-coded `/root` or
+  `/home/oai` environment banner. Those paths therefore come from the
+  upstream model's runtime/system context or from a client-provided agent
+  prompt, not from the Windows caller's local filesystem.
+- The Web Prompt Tool bridge is intentionally client-executed. It prepends an
+  internal schema/nonce instruction, strips native Web `tools` fields, parses
+  a valid model envelope, and emits standard Responses `function_call` or
+  `custom_tool_call` events. It never runs caller-provided functions.
+- A Windows-aware tool turn requires the client to receive the tool event,
+  execute an approved local PowerShell/Windows tool, and send the result back
+  as `function_call_output` or `custom_tool_call_output`. If the client sees
+  only `output_text`/`message.content`, no local tool was executed and a
+  Linux path in the prose is not evidence of Windows access.

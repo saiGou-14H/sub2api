@@ -743,3 +743,12 @@
 - Connectivity spot checks on target and source both produced upstream
   `401 token_revoked`; the source-side reproduction confirms the issue is
   stale/revoked source OAuth credentials rather than import corruption.
+
+# 2026-09-06 Windows caller environment diagnosis
+
+- Audited the Web Prompt Tool bridge after a Windows API caller received a
+  response mentioning `/root`, `/home/oai`, and a Linux container.
+- Confirmed the gateway does not inject those paths and does not execute
+  caller tools. The bridge returns standard tool-call events; the API client
+  must execute the Windows tool locally and submit the corresponding tool
+  output before the model can report a real Windows directory.
