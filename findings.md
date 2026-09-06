@@ -984,3 +984,6 @@
   panic/fatal signatures. A new live upstream Web turn was not forced because
   the available imported test accounts are known to contain revoked tokens;
   the transport behavior is covered by the focused service tests.
+- Local cleanup removed the exact D-drive Go review cache, three old release
+  context directories, the empty C-drive stage directory, and the deployed
+  release archive; no project build artifact remains outside the repository.

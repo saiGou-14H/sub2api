@@ -10,6 +10,8 @@
 Release: commit `1f7e41a` is pushed and deployed as
 `local/sub2api:web-attachments-9999-1f7e41a`. Remote 9999 image retention
 keeps only this image and rollback `136cf0f`; 10000/10001 were not recreated.
+Local C:/D: historical release contexts and the isolated Go review cache were
+removed after deployment; no untracked build artifacts remain in the repo.
 
 ## Previous: 2026-09-06 Incremental Prompt Tool SSE
 

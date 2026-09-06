@@ -813,3 +813,5 @@
 - Recent container logs have no known Web parameter rejection or fatal/error
   signatures. The local release archive was moved to the system temporary
   directory after deployment so it is not left in the workspace.
+- Removed the exact historical build targets from C: and D: after confirming
+  no audit task was using the Go cache; all six paths now report absent.
