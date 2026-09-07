@@ -1428,11 +1428,13 @@ type OpenAIWebConversationOptions struct {
 	// Tool bridge is active. It carries request-scoped nonce/schema state.
 	PromptTools *OpenAIWebPromptTools
 	// ReuseConversationInstructions means the Web cursor already contains the
-	// caller's system/developer instructions. The transport keeps only a small
-	// continuation directive when PromptTools is active.
+	// caller's system/developer instructions. The current prompt-tool registry
+	// is still appended in full for every request.
 	ReuseConversationInstructions bool
-	// ReusePromptToolInstruction is retained as the prompt-tool-specific part of
-	// the continuation behavior. It prevents replaying the full tool schema.
+	// ReusePromptToolInstruction is retained for compatibility with callers that
+	// still populate it. The transport always sends the complete request-scoped
+	// tool registry so a reused or pre-existing Web conversation cannot lose its
+	// tool capability description.
 	ReusePromptToolInstruction bool
 	// PromptToolDuplicateSignatures is populated only for a compact tool-result
 	// continuation. Matching calls are rejected before they become executable
@@ -1488,11 +1490,12 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		// caller's instructions. A separate leading system message can be
 		// overridden by Codex's long client prompt, causing the Web model to
 		// execute or simulate a shell instead of returning a tool envelope.
-		if options.ReusePromptToolInstruction {
-			request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.ContinuationInstruction())
-		} else {
-			request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.Instruction())
-		}
+		// Always re-inject the complete registry. Reused cursors can refer to a
+		// conversation created before this request's tools existed, or to a
+		// different account after failover. A compact continuation marker is not
+		// enough in either case because the Web model may never have seen the
+		// current tool definitions.
+		request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.Instruction())
 	}
 	model, ok := NormalizeOpenAIWebModel(request.Model)
 	if !ok {
@@ -1596,21 +1599,34 @@ func logOpenAIWebConversationPayload(ctx context.Context, account *Account, opti
 	messageCount := 0
 	hasToolTurn := false
 	model := ""
+	promptToolCount := 0
+	promptToolNames := []string(nil)
+	promptToolSchemaHash := ""
+	promptToolInstructionMode := "none"
 	if options.Request != nil {
 		messageCount = len(options.Request.Messages)
 		hasToolTurn = openAIWebRequestHasToolTurn(options.Request)
 		model = strings.TrimSpace(options.Request.Model)
 	}
-	logger.FromContext(ctx).Debug("openai_web_conversation_payload_built",
+	if options.PromptTools != nil {
+		promptToolCount = len(options.PromptTools.Tools)
+		promptToolNames = options.PromptTools.PromptToolNames()
+		promptToolSchemaHash = options.PromptTools.SchemaHash
+		promptToolInstructionMode = "full"
+	}
+	logger.FromContext(ctx).Info("openai_web_conversation_payload_built",
 		zap.Int64("account_id", accountIDForWebTransport(account)),
 		zap.String("model", model),
 		zap.Int("payload_bytes", payloadBytes),
 		zap.Int("message_count", messageCount),
 		zap.Bool("has_tool_turn", hasToolTurn),
 		zap.Bool("prompt_tools", options.PromptTools != nil),
+		zap.Int("prompt_tool_count", promptToolCount),
+		zap.Strings("prompt_tool_names", promptToolNames),
+		zap.String("prompt_tool_schema_hash", promptToolSchemaHash),
+		zap.String("prompt_tool_instruction_mode", promptToolInstructionMode),
 		zap.Bool("reused_conversation_cursor", strings.TrimSpace(options.ConversationID) != ""),
 		zap.Bool("reused_conversation_instructions", options.ReuseConversationInstructions),
-		zap.Bool("reused_prompt_tool_instruction", options.ReusePromptToolInstruction),
 	)
 }
 

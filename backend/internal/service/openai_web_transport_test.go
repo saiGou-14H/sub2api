@@ -168,7 +168,7 @@ func TestOpenAIWebTransportRejectsOversizedConversationPayloadLocally(t *testing
 	require.Greater(t, payloadError.PayloadBytes, payloadError.LimitBytes)
 }
 
-func TestOpenAIWebTransportCanOmitPromptInstructionOnCursorContinuation(t *testing.T) {
+func TestOpenAIWebTransportReinjectsPromptInstructionOnCursorContinuation(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
 		Model: "auto",
 		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
@@ -191,10 +191,10 @@ func TestOpenAIWebTransportCanOmitPromptInstructionOnCursorContinuation(t *testi
 	})
 	require.NoError(t, err)
 	require.Contains(t, string(first), "REMOTE EXECUTION BOUNDARY")
-	require.NotContains(t, string(continued), "REMOTE EXECUTION BOUNDARY")
+	require.Contains(t, string(continued), "REMOTE EXECUTION BOUNDARY")
+	require.Contains(t, string(continued), promptTools.Tools[0].Name)
 	require.Contains(t, string(continued), promptTools.Nonce)
 	require.Contains(t, string(continued), promptTools.SchemaHash)
-	require.Less(t, len(continued), len(first))
 }
 
 func TestOpenAIWebConversation413IsReturnedAsRequestError(t *testing.T) {
