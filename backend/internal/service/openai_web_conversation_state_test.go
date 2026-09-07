@@ -13,9 +13,10 @@ import (
 )
 
 type testOpenAIWebStateBody struct {
-	conversationID string
-	parentID       string
-	assistantText  string
+	conversationID       string
+	parentID             string
+	assistantText        string
+	promptToolSignatures []string
 }
 
 func (b *testOpenAIWebStateBody) Read([]byte) (int, error) { return 0, io.EOF }
@@ -26,6 +27,10 @@ func (b *testOpenAIWebStateBody) OpenAIWebConversationState() (string, string) {
 
 func (b *testOpenAIWebStateBody) OpenAIWebAssistantText() string {
 	return b.assistantText
+}
+
+func (b *testOpenAIWebStateBody) OpenAIWebPromptToolCallSignatures() []string {
+	return append([]string(nil), b.promptToolSignatures...)
 }
 
 func testOpenAIWebContinuationContext(t *testing.T, sessionID string) *gin.Context {
@@ -174,6 +179,32 @@ func TestPrepareOpenAIWebContinuationCompactsToolResultAgainstCursor(t *testing.
 	require.Len(t, transportReq.Messages, 2)
 	require.Equal(t, "tool", transportReq.Messages[0].Role)
 	require.Equal(t, "user", transportReq.Messages[1].Role)
+}
+
+func TestCommitOpenAIWebContinuationStoresPromptToolCallSignatures(t *testing.T) {
+	service := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	account := &Account{ID: 105}
+	c := testOpenAIWebContinuationContext(t, "session-tool-signature")
+	first := &apicompat.ChatCompletionsRequest{
+		Model:    "auto",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"write the file"`)}},
+	}
+	_, continuation := service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, first)
+	call := OpenAIWebPromptToolCall{
+		Name: "write", Type: "function", Arguments: json.RawMessage(`{"content":"hello","file_path":"C:\\work\\a.txt"}`),
+	}
+	service.commitOpenAIWebContinuation(context.Background(), c, account, "auto", first, "resp_tool_signature", &testOpenAIWebStateBody{
+		conversationID:       "conv-tool-signature",
+		parentID:             "msg-tool-signature",
+		assistantText:        "tool call",
+		promptToolSignatures: []string{openAIWebPromptToolCallSignature(call)},
+	}, continuation)
+
+	key := openAIWebStorageKey(c, account.ID, "auto", openAIWebSessionKeyHash(c, "session-tool-signature"))
+	state, found, err := service.openaiWSStateStore.GetWebConversationState(context.Background(), 7, key)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, []string{openAIWebPromptToolCallSignature(call)}, state.LastPromptToolCallSignatures)
 }
 
 func TestPrepareOpenAIWebContinuationRejectsEditedOrReorderedHistory(t *testing.T) {

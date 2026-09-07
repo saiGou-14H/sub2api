@@ -1387,6 +1387,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		ReuseConversationInstructions: continuation != nil && continuation.reused,
 		ReusePromptToolInstruction:    continuation != nil && continuation.reused && promptTools != nil,
 	}
+	if continuation != nil && continuation.reused && continuation.state != nil && promptTools != nil && openAIWebRequestContainsOnlyToolResults(transportReq) {
+		conversationOptions.PromptToolDuplicateSignatures = append([]string(nil), continuation.state.LastPromptToolCallSignatures...)
+	}
 	if continuation != nil && continuation.state != nil {
 		conversationOptions.ConversationID = continuation.state.ConversationID
 		conversationOptions.ParentMessageID = continuation.state.ParentMessageID

@@ -234,6 +234,36 @@ func TestOpenAIWebPromptToolsParseResponseValidatesNonceChoiceAndArguments(t *te
 	require.Error(t, err)
 }
 
+func TestOpenAIWebPromptToolsContinuationBlocksEquivalentCompletedCall(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "write",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"}}}`),
+		}}},
+	})
+	require.NoError(t, err)
+	call := OpenAIWebPromptToolCall{
+		Name: "write", Type: "function", Arguments: json.RawMessage(`{"content":"hello","file_path":"C:\\work\\a.txt"}`),
+	}
+	reader := newOpenAIWebResponsesBodyWithPromptTools(
+		io.NopCloser(strings.NewReader("data: {\"conversation_id\":\"conv\",\"o\":\"append\",\"p\":\"/message/content/parts/0\",\"v\":"+mustPromptJSONString(prompt.envelope([]map[string]any{{"name": "write", "type": "function", "arguments": json.RawMessage(`{"file_path":"C:\\work\\a.txt","content":"hello"}`)}}))+"}\n\ndata: {\"conversation_id\":\"conv\",\"is_complete\":true}\n\n")),
+		"auto", nil, prompt, []string{openAIWebPromptToolCallSignature(call)},
+	)
+	raw, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "prompt tool call duplicates a previously completed call")
+	require.Contains(t, string(raw), `"code":"tool_protocol_error"`)
+	require.NotContains(t, string(raw), `"type":"response.completed"`)
+}
+
+func TestOpenAIWebPromptToolCallSignatureCanonicalizesObjectArguments(t *testing.T) {
+	left := OpenAIWebPromptToolCall{Name: "write", Type: "function", Arguments: json.RawMessage(`{"file_path":"a","content":"b"}`)}
+	right := OpenAIWebPromptToolCall{Name: "write", Type: "function", Arguments: json.RawMessage(`{"content":"b","file_path":"a"}`)}
+	require.Equal(t, openAIWebPromptToolCallSignature(left), openAIWebPromptToolCallSignature(right))
+	require.Contains(t, (&OpenAIWebPromptTools{Protocol: "p", Nonce: "n", SchemaHash: "h"}).ContinuationInstruction(), "semantically identical arguments")
+}
+
 func TestOpenAIWebPromptToolsRejectsInvalidBoundarySignals(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
 		Model: "auto",

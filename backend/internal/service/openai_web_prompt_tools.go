@@ -500,7 +500,7 @@ func (p *OpenAIWebPromptTools) ContinuationInstruction() string {
 	if p == nil {
 		return ""
 	}
-	return fmt.Sprintf("Continue the existing REMOTE TOOL PROTOCOL for this conversation. For this turn, emit the exact protocol envelope using protocol=%s, nonce=%s, schema_hash=%s. Keep the previously declared tools and tool boundaries; emit no prose when a tool is required.", p.Protocol, p.Nonce, p.SchemaHash)
+	return fmt.Sprintf("Continue the existing REMOTE TOOL PROTOCOL for this conversation. For this turn, emit the exact protocol envelope using protocol=%s, nonce=%s, schema_hash=%s. Keep the previously declared tools and tool boundaries; emit no prose when a tool is required. Previous tool calls whose results are present in this turn have already completed. If a result satisfies the request, answer directly. Never emit the same tool again with semantically identical arguments; call it again only when the arguments materially differ or the previous result explicitly failed.", p.Protocol, p.Nonce, p.SchemaHash)
 }
 
 func (p *OpenAIWebPromptTools) EncodeAssistantToolCalls(calls []apicompat.ChatToolCall) string {
@@ -555,6 +555,59 @@ func (p *OpenAIWebPromptTools) EncodeToolResult(callID, output string) string {
 		return output
 	}
 	return fmt.Sprintf("Previous tool result (call_id=%s):\n%s", strings.TrimSpace(callID), output)
+}
+
+// openAIWebPromptToolCallSignature identifies the executable meaning of a
+// prompt-tool call while intentionally ignoring the client-generated call ID.
+// JSON objects are decoded and re-encoded so equivalent key ordering does not
+// turn the same side effect into a new call.
+func openAIWebPromptToolCallSignature(call OpenAIWebPromptToolCall) string {
+	arguments := bytes.TrimSpace(call.Arguments)
+	if strings.EqualFold(strings.TrimSpace(call.Type), "custom") {
+		return openAIWebHash(
+			"web-prompt-tool-call-v1",
+			call.Name,
+			call.Type,
+			call.Namespace,
+			call.Input,
+		)
+	}
+	if len(arguments) == 0 {
+		arguments = []byte(`{}`)
+	}
+	var value any
+	if json.Unmarshal(arguments, &value) == nil {
+		if canonical, err := json.Marshal(value); err == nil {
+			arguments = canonical
+		}
+	}
+	return openAIWebHash(
+		"web-prompt-tool-call-v1",
+		call.Name,
+		call.Type,
+		call.Namespace,
+		string(arguments),
+	)
+}
+
+func openAIWebPromptToolCallSignatures(calls []OpenAIWebPromptToolCall) []string {
+	if len(calls) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(calls))
+	result := make([]string, 0, len(calls))
+	for _, call := range calls {
+		signature := openAIWebPromptToolCallSignature(call)
+		if signature == "" {
+			continue
+		}
+		if _, exists := seen[signature]; exists {
+			continue
+		}
+		seen[signature] = struct{}{}
+		result = append(result, signature)
+	}
+	return result
 }
 
 func (p *OpenAIWebPromptTools) envelope(calls []map[string]any) string {
@@ -654,6 +707,7 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		byName[tool.Name] = tool
 	}
 	result := make([]OpenAIWebPromptToolCall, 0, len(calls))
+	seenSignatures := make(map[string]struct{}, len(calls))
 	for _, call := range calls {
 		tool, ok := byName[call.Name]
 		if !ok {
@@ -679,7 +733,13 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 			if err := validateOpenAIWebPromptArguments(tool.Parameters, args); err != nil {
 				return nil, true, fmt.Errorf("tool %q arguments: %w", call.Name, err)
 			}
-			result = append(result, OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Input: input, Arguments: args})
+			parsed := OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Input: input, Arguments: args}
+			signature := openAIWebPromptToolCallSignature(parsed)
+			if _, exists := seenSignatures[signature]; exists {
+				return nil, true, fmt.Errorf("prompt tool envelope contains duplicate call %q", call.Name)
+			}
+			seenSignatures[signature] = struct{}{}
+			result = append(result, parsed)
 			continue
 		}
 		args := normalizeOpenAIWebPromptArguments(call.Arguments)
@@ -692,7 +752,13 @@ func (p *OpenAIWebPromptTools) ParseResponse(text string) ([]OpenAIWebPromptTool
 		if err := validateOpenAIWebPromptArguments(tool.Parameters, args); err != nil {
 			return nil, true, fmt.Errorf("tool %q arguments: %w", call.Name, err)
 		}
-		result = append(result, OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Arguments: append(json.RawMessage(nil), args...)})
+		parsed := OpenAIWebPromptToolCall{Name: call.Name, TargetName: tool.TargetName, Type: tool.Type, Namespace: tool.Namespace, Arguments: append(json.RawMessage(nil), args...)}
+		signature := openAIWebPromptToolCallSignature(parsed)
+		if _, exists := seenSignatures[signature]; exists {
+			return nil, true, fmt.Errorf("prompt tool envelope contains duplicate call %q", call.Name)
+		}
+		seenSignatures[signature] = struct{}{}
+		result = append(result, parsed)
 	}
 	if p.Choice == "none" && len(result) > 0 {
 		return nil, true, errors.New("tool_choice none was not respected")

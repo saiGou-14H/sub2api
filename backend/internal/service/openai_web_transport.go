@@ -1434,8 +1434,12 @@ type OpenAIWebConversationOptions struct {
 	// ReusePromptToolInstruction is retained as the prompt-tool-specific part of
 	// the continuation behavior. It prevents replaying the full tool schema.
 	ReusePromptToolInstruction bool
-	ConversationID             string
-	ParentMessageID            string
+	// PromptToolDuplicateSignatures is populated only for a compact tool-result
+	// continuation. Matching calls are rejected before they become executable
+	// Responses tool items.
+	PromptToolDuplicateSignatures []string
+	ConversationID                string
+	ParentMessageID               string
 	// TurnTraceID is shared by the browser's conversation/prepare and
 	// conversation requests. Leave it empty to generate one per transaction.
 	TurnTraceID       string
@@ -3264,7 +3268,7 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	if options.Request != nil {
 		history = options.Request.Messages
 	}
-	resp.Body = newOpenAIWebResponsesBodyWithPromptTools(conversationBody, model, history, options.PromptTools)
+	resp.Body = newOpenAIWebResponsesBodyWithPromptTools(conversationBody, model, history, options.PromptTools, options.PromptToolDuplicateSignatures)
 	resp.Header.Set("Content-Type", "text/event-stream")
 	return resp, nil
 }
@@ -3280,7 +3284,7 @@ func NewOpenAIWebResponsesBodyWithHistory(source io.ReadCloser, model string, me
 	return newOpenAIWebResponsesBodyWithPromptTools(source, model, messages, nil)
 }
 
-func newOpenAIWebResponsesBodyWithPromptTools(source io.ReadCloser, model string, messages []apicompat.ChatMessage, promptTools *OpenAIWebPromptTools) io.ReadCloser {
+func newOpenAIWebResponsesBodyWithPromptTools(source io.ReadCloser, model string, messages []apicompat.ChatMessage, promptTools *OpenAIWebPromptTools, duplicateSignatures ...[]string) io.ReadCloser {
 	if source == nil {
 		// Keep the exported constructor safe for callers that only have an
 		// optional upstream body. Do will reject a nil response body before it
@@ -3289,16 +3293,25 @@ func newOpenAIWebResponsesBodyWithPromptTools(source io.ReadCloser, model string
 		source = io.NopCloser(strings.NewReader(""))
 	}
 	historyMessages, historyText := openAIWebAssistantHistory(messages)
+	duplicateSet := make(map[string]struct{})
+	if len(duplicateSignatures) > 0 {
+		for _, signature := range duplicateSignatures[0] {
+			if strings.TrimSpace(signature) != "" {
+				duplicateSet[strings.TrimSpace(signature)] = struct{}{}
+			}
+		}
+	}
 	return &openAIWebResponsesReader{
-		source:          source,
-		reader:          bufio.NewReaderSize(source, 64*1024),
-		model:           strings.TrimSpace(model),
-		responseID:      "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
-		itemID:          "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
-		createdAt:       time.Now().Unix(),
-		historyText:     historyText,
-		historyMessages: historyMessages,
-		promptTools:     promptTools,
+		source:                        source,
+		reader:                        bufio.NewReaderSize(source, 64*1024),
+		model:                         strings.TrimSpace(model),
+		responseID:                    "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		itemID:                        "msg_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		createdAt:                     time.Now().Unix(),
+		historyText:                   historyText,
+		historyMessages:               historyMessages,
+		promptTools:                   promptTools,
+		promptToolDuplicateSignatures: duplicateSet,
 	}
 }
 
@@ -3329,30 +3342,32 @@ func openAIWebAssistantHistory(messages []apicompat.ChatMessage) ([]string, stri
 }
 
 type openAIWebResponsesReader struct {
-	source             io.ReadCloser
-	reader             *bufio.Reader
-	model              string
-	responseID         string
-	itemID             string
-	conversationID     string
-	lastMessageID      string
-	createdAt          int64
-	sequenceNumber     int
-	rawText            string
-	text               string
-	historyText        string
-	historyMessages    []string
-	historyIndex       int
-	promptTools        *OpenAIWebPromptTools
-	promptClassified   bool
-	promptEnvelopeSeen bool
-	promptStreamCalls  []openAIWebPromptStreamCall
-	usage              map[string]any
-	output             bytes.Buffer
-	started            bool
-	failed             bool
-	finished           bool
-	closed             bool
+	source                        io.ReadCloser
+	reader                        *bufio.Reader
+	model                         string
+	responseID                    string
+	itemID                        string
+	conversationID                string
+	lastMessageID                 string
+	createdAt                     int64
+	sequenceNumber                int
+	rawText                       string
+	text                          string
+	historyText                   string
+	historyMessages               []string
+	historyIndex                  int
+	promptTools                   *OpenAIWebPromptTools
+	promptToolDuplicateSignatures map[string]struct{}
+	promptToolCallSignatures      []string
+	promptClassified              bool
+	promptEnvelopeSeen            bool
+	promptStreamCalls             []openAIWebPromptStreamCall
+	usage                         map[string]any
+	output                        bytes.Buffer
+	started                       bool
+	failed                        bool
+	finished                      bool
+	closed                        bool
 }
 
 // OpenAIWebConversationStateProvider exposes the private Web cursor captured
@@ -3372,6 +3387,13 @@ type OpenAIWebConversationTranscriptProvider interface {
 	OpenAIWebAssistantText() string
 }
 
+// OpenAIWebPromptToolCallProvider exposes the normalized tool calls emitted by
+// the current response so the conversation cursor can guard the next turn
+// against replaying the same side effect.
+type OpenAIWebPromptToolCallProvider interface {
+	OpenAIWebPromptToolCallSignatures() []string
+}
+
 func (r *openAIWebResponsesReader) OpenAIWebConversationState() (string, string) {
 	if r == nil {
 		return "", ""
@@ -3384,6 +3406,13 @@ func (r *openAIWebResponsesReader) OpenAIWebAssistantText() string {
 		return ""
 	}
 	return strings.TrimSpace(r.text)
+}
+
+func (r *openAIWebResponsesReader) OpenAIWebPromptToolCallSignatures() []string {
+	if r == nil || len(r.promptToolCallSignatures) == 0 {
+		return nil
+	}
+	return append([]string(nil), r.promptToolCallSignatures...)
 }
 
 func (r *openAIWebResponsesReader) Close() error {
@@ -3759,6 +3788,13 @@ func (r *openAIWebResponsesReader) emitPromptMessageStart() {
 }
 
 func (r *openAIWebResponsesReader) finishPromptToolCalls(calls []OpenAIWebPromptToolCall) {
+	for _, call := range calls {
+		if _, duplicate := r.promptToolDuplicateSignatures[openAIWebPromptToolCallSignature(call)]; duplicate {
+			r.failPromptStream("prompt tool call duplicates a previously completed call; retry the continuation using the existing tool result")
+			return
+		}
+	}
+	r.promptToolCallSignatures = openAIWebPromptToolCallSignatures(calls)
 	if len(calls) < len(r.promptStreamCalls) {
 		r.failPromptStream("prompt tool stream removed an emitted call")
 		return

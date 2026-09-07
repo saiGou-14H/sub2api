@@ -19,17 +19,18 @@ import (
 // The identifiers are private upstream values and are never exposed as the
 // public Responses response ID.
 type OpenAIWebConversationState struct {
-	ConversationID         string `json:"conversation_id"`
-	ParentMessageID        string `json:"parent_message_id"`
-	AccountID              int64  `json:"account_id"`
-	GroupID                int64  `json:"group_id"`
-	Model                  string `json:"model"`
-	SessionKeyHash         string `json:"session_key_hash"`
-	ProfileFingerprint     string `json:"profile_fingerprint,omitempty"`
-	LastUserFingerprint    string `json:"last_user_fingerprint,omitempty"`
-	TranscriptFingerprint  string `json:"transcript_fingerprint,omitempty"`
-	TranscriptMessageCount int    `json:"transcript_message_count,omitempty"`
-	RequiresFullReplay     bool   `json:"requires_full_replay,omitempty"`
+	ConversationID               string   `json:"conversation_id"`
+	ParentMessageID              string   `json:"parent_message_id"`
+	AccountID                    int64    `json:"account_id"`
+	GroupID                      int64    `json:"group_id"`
+	Model                        string   `json:"model"`
+	SessionKeyHash               string   `json:"session_key_hash"`
+	ProfileFingerprint           string   `json:"profile_fingerprint,omitempty"`
+	LastUserFingerprint          string   `json:"last_user_fingerprint,omitempty"`
+	TranscriptFingerprint        string   `json:"transcript_fingerprint,omitempty"`
+	TranscriptMessageCount       int      `json:"transcript_message_count,omitempty"`
+	LastPromptToolCallSignatures []string `json:"last_prompt_tool_call_signatures,omitempty"`
+	RequiresFullReplay           bool     `json:"requires_full_replay,omitempty"`
 }
 
 type openAIWebContinuationContext struct {
@@ -214,6 +215,23 @@ func openAIWebRequestHasToolTurn(req *apicompat.ChatCompletionsRequest) bool {
 		}
 	}
 	return false
+}
+
+// openAIWebRequestContainsOnlyToolResults identifies the compact continuation
+// turn sent after the client has executed the assistant's tool call. A request
+// that also contains a new user message starts a fresh turn and must remain
+// eligible to call the same tool again with new intent.
+func openAIWebRequestContainsOnlyToolResults(req *apicompat.ChatCompletionsRequest) bool {
+	if req == nil || len(req.Messages) == 0 {
+		return false
+	}
+	for _, message := range req.Messages {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role != "tool" && role != "function" {
+			return false
+		}
+	}
+	return true
 }
 
 // openAIWebPromptToolContinuationMessages extracts the new tool turn that is
@@ -594,6 +612,9 @@ func (s *OpenAIGatewayService) commitOpenAIWebContinuation(ctx context.Context, 
 	state.LastUserFingerprint, _ = openAIWebLastUserFingerprint(req)
 	if transcriptProvider, ok := body.(OpenAIWebConversationTranscriptProvider); ok {
 		state.TranscriptFingerprint, state.TranscriptMessageCount = openAIWebTranscriptFingerprint(req.Messages, transcriptProvider.OpenAIWebAssistantText())
+	}
+	if promptToolProvider, ok := body.(OpenAIWebPromptToolCallProvider); ok {
+		state.LastPromptToolCallSignatures = promptToolProvider.OpenAIWebPromptToolCallSignatures()
 	}
 	store := s.getOpenAIWSStateStore()
 	if store == nil {
