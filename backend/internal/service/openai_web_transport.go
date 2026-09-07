@@ -432,7 +432,7 @@ func ValidateOpenAIWebResponsesRequestWithPromptTools(req *apicompat.ResponsesRe
 	// conversation_id/parent_message_id pair instead.
 	if req.Reasoning != nil {
 		if !openAIWebReasoningEffortSupported(req.Reasoning.Effort) {
-			return openAIWebInvalidParam("reasoning.effort", "reasoning.effort is not supported by ChatGPT web transport")
+			return openAIWebInvalidParam("reasoning.effort", "reasoning.effort must be none, minimal, low, medium, high, xhigh, max, or extended")
 		}
 		if !openAIWebReasoningSummarySupported(req.Reasoning.Summary) {
 			return openAIWebInvalidParam("reasoning.summary", "reasoning.summary must be auto, concise, or detailed")
@@ -580,7 +580,7 @@ func openAIWebDefaultServiceTier(value string) bool {
 
 func openAIWebReasoningEffortSupported(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "none", "minimal", "low", "medium", "high", "xhigh", "extended":
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "extended", "max":
 		return true
 	default:
 		return false
@@ -1629,7 +1629,7 @@ func normalizeOpenAIWebThinkingEffort(value string) string {
 			return "min"
 		}
 		return strings.ToLower(strings.TrimSpace(value))
-	case "xhigh", "extended":
+	case "xhigh", "extended", "max":
 		return "extended"
 	default:
 		return ""

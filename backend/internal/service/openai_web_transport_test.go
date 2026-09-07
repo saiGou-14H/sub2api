@@ -523,6 +523,25 @@ func TestOpenAIWebTransportMapsMinimalReasoningEffortToMin(t *testing.T) {
 	require.Equal(t, "min", payload["thinking_effort"])
 }
 
+func TestOpenAIWebTransportMapsMaxReasoningEffortToExtended(t *testing.T) {
+	request := &apicompat.ResponsesRequest{
+		Model:     "gpt-5.6-sol-wm",
+		Input:     json.RawMessage(`"hello"`),
+		Reasoning: &apicompat.ResponsesReasoning{Effort: "max"},
+	}
+	require.NoError(t, ValidateOpenAIWebResponsesRequest(request))
+
+	chatRequest, err := apicompat.ResponsesToChatCompletionsRequest(request)
+	require.NoError(t, err)
+	require.Equal(t, "max", chatRequest.ReasoningEffort)
+
+	body, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(chatRequest)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	require.Equal(t, "extended", payload["thinking_effort"])
+}
+
 func TestOpenAIWebTransportAcceptsAndDropsChatSamplingParameters(t *testing.T) {
 	temperature := 0.2
 	topP := 0.7
