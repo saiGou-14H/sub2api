@@ -47,21 +47,22 @@ func TestOpenAIWebPromptToolsInstructionRequiresClientToolForExplicitLocalOperat
 	})
 	require.NoError(t, err)
 	instruction := prompt.Instruction()
-	require.Contains(t, instruction, "If the user explicitly asks you to perform an operation")
+	require.Contains(t, instruction, "The user does not need to name, list, or select a tool")
+	require.Contains(t, instruction, "inspect all entries and match the user's intent")
 	require.Contains(t, instruction, "The remote execution boundary is the reason to emit a client tool call")
-	require.Contains(t, instruction, "Normal prose is allowed only when no declared tool can satisfy the request")
+	require.Contains(t, instruction, "Normal prose is allowed after a tool result has been supplied or when no declared tool can satisfy the request")
 }
 
 func TestOpenAIWebPromptToolsSelectionHintChoosesExplicitLocalTool(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
-		Model: "auto",
+		Model: "auto", ToolChoice: json.RawMessage(`"required"`),
 		Tools: []apicompat.ChatTool{
 			{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}`)}},
 			{Type: "function", Function: &apicompat.ChatFunction{Name: "request_user_input", Parameters: json.RawMessage(`{"type":"object"}`)}},
 		},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "auto", prompt.Choice)
+	require.Equal(t, "required", prompt.Choice)
 
 	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
 		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"Create exactly D:\\test.py and read it back"`)}},
@@ -102,7 +103,7 @@ func TestOpenAIWebPromptToolsSelectionHintPinsRequiredLocalOperation(t *testing.
 
 func TestOpenAIWebPromptToolsSelectionHintChoosesChineseDirectoryTool(t *testing.T) {
 	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
-		Model: "auto",
+		Model: "auto", ToolChoice: json.RawMessage(`"required"`),
 		Tools: []apicompat.ChatTool{
 			{Type: "function", Function: &apicompat.ChatFunction{Name: "list_directory", Parameters: json.RawMessage(`{"type":"object","properties":{"directory":{"type":"string"}}}`)}},
 			{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}}}`)}},
@@ -114,6 +115,48 @@ func TestOpenAIWebPromptToolsSelectionHintChoosesChineseDirectoryTool(t *testing
 	})
 	require.Equal(t, "named", prompt.Choice)
 	require.Equal(t, "list_directory", prompt.ChoiceName)
+}
+
+func TestOpenAIWebPromptToolsSelectionHintChoosesFilesListAlias(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto", ToolChoice: json.RawMessage(`"required"`),
+		Tools: []apicompat.ChatTool{
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "files_list", Description: "List files in a local workspace.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "workspace_write", Description: "Write files in a local workspace.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}}}`)}},
+		},
+	})
+	require.NoError(t, err)
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"本地有什么文件"`)}},
+	})
+	require.Equal(t, "named", prompt.Choice)
+	require.Equal(t, "files_list", prompt.ChoiceName)
+}
+
+func TestOpenAIWebPromptToolsAutomaticSelectionIsLeftToModel(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "files_list", Description: "List files in a local workspace.", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"本地有什么文件"`)}},
+	})
+	require.Equal(t, "auto", prompt.Choice)
+	require.Empty(t, prompt.ChoiceName)
+}
+
+func TestOpenAIWebPromptToolsSynthesizesMissingDescription(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name: "workspace_write", Parameters: json.RawMessage(`{"type":"object"}`),
+		}}},
+	})
+	require.NoError(t, err)
+	require.Contains(t, prompt.Instruction(), "Create or write content in the connected workspace")
 }
 
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
