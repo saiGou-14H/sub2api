@@ -294,3 +294,20 @@ Adapt Sub2API so a caller can configure a ChatGPT web account with only an acces
   deploy only `sub2api-9999`.
 - [completed] Verify remote health, protected routes, image retention, and
   Windows Codex CLI path configuration.
+
+## 2026-09-07 Codex CLI tool-call verification
+
+- [completed] Reproduce the current Windows Codex CLI failure against the
+  existing test group using `model=auto` and classify account-pool failures
+  separately from tool/protocol failures.
+- [completed] Fix the deterministic HTTP continuation restriction for Web
+  accounts and add focused regression coverage.
+- [in_progress] Run local/remote tests, then commit/push and deploy only `9999`.
+- [in_progress] Run bounded Codex CLI tool probes for directory listing, file
+  create/read, PowerShell execution, and patch editing; clean only this run's
+  temporary files.
+
+Finding: Web Prompt Tool first-turn SSE and Windows local tool execution were
+working. The deterministic continuation failure was the gateway rejecting
+`previous_response_id` for every non-API-key account, including Web transport;
+the fix allows Web transport while preserving the Codex OAuth restriction.

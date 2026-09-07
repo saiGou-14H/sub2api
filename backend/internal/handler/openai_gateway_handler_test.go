@@ -901,6 +901,20 @@ func TestOpenAIResponses_RejectsMessageIDAsPreviousResponseID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "previous_response_id must be a response.id")
 }
 
+func TestHTTPContinuationRestrictionAllowsWebAccounts(t *testing.T) {
+	webAccount := &service.Account{
+		Type:     service.AccountTypeOAuth,
+		Platform: service.PlatformOpenAI,
+		Extra:    map[string]any{service.OpenAIWebTransportExtraKey: service.OpenAITransportWeb},
+	}
+	codexAccount := &service.Account{Type: service.AccountTypeOAuth, Platform: service.PlatformOpenAI}
+	apiKeyAccount := &service.Account{Type: service.AccountTypeAPIKey, Platform: service.PlatformOpenAI}
+
+	assert.False(t, httpContinuationRequiresAPIKey(webAccount))
+	assert.True(t, httpContinuationRequiresAPIKey(codexAccount))
+	assert.False(t, httpContinuationRequiresAPIKey(apiKeyAccount))
+}
+
 func TestOpenAIResponses_AcceptsHTTPContinuationPreviousResponseIDBeforeRouting(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

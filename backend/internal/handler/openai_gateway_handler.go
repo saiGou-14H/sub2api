@@ -689,10 +689,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			zap.Float64("load_skew", scheduleDecision.LoadSkew),
 		)
 		account := selection.Account
-		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && !account.IsOpenAIApiKey() {
-			// The public Responses HTTP API supports previous_response_id on API-key
-			// accounts. OAuth/SetupToken upstreams do not, so keep searching instead
-			// of silently deleting continuation state from a mixed account pool.
+		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && httpContinuationRequiresAPIKey(account) {
+			// API-key accounts and Web transport accounts can continue through the
+			// gateway. Codex OAuth/SetupToken accounts still require native routing.
 			failedAccountIDs[account.ID] = struct{}{}
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
