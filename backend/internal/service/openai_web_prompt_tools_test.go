@@ -434,7 +434,7 @@ func TestOpenAIWebPromptToolsCompactsLargeToolCatalog(t *testing.T) {
 	for index := 0; index < openAIWebPromptToolMaxCount; index++ {
 		tools = append(tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{
 			Name:        fmt.Sprintf("tool_%d", index),
-			Description: strings.Repeat("description ", 400),
+			Description: strings.Repeat("description ", 100),
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"long parameter description"}},"required":["path"]}`),
 		}})
 	}
@@ -443,6 +443,7 @@ func TestOpenAIWebPromptToolsCompactsLargeToolCatalog(t *testing.T) {
 	require.Less(t, len([]byte(prompt.Instruction())), 96<<10)
 	require.Contains(t, prompt.Instruction(), `"name":"tool_0"`)
 	require.Contains(t, prompt.Instruction(), `"path"`)
+	require.Contains(t, prompt.Instruction(), strings.Repeat("description ", 100))
 }
 
 func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T) {

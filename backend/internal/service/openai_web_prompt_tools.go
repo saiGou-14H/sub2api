@@ -25,9 +25,10 @@ const (
 	openAIWebPromptToolMaxCalls        = 16
 	openAIWebPromptToolMaxDepth        = 32
 	openAIWebPromptDescriptionMaxBytes = 4096
-	// Keep the model-facing catalog useful without allowing one verbose tool
-	// description to consume the Web conversation budget.
-	openAIWebPromptInstructionDescriptionMaxBytes = 512
+	// Include the complete normalized tool usage description in the model-facing
+	// catalog. The separate normalized description limit above still prevents a
+	// single untrusted declaration from consuming the Web request budget.
+	openAIWebPromptInstructionDescriptionMaxBytes = openAIWebPromptDescriptionMaxBytes
 	openAIWebPromptInstructionFormatMaxBytes      = 4096
 	// Keep the generated system instruction below the practical ChatGPT Web
 	// conversation-body threshold. Requests above this bound fail locally with
