@@ -33,9 +33,11 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/google/uuid"
 	"github.com/imroc/req/v3"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -66,8 +68,13 @@ const (
 	openAIWebMaxResponseErrorBytes = 1 << 20
 	openAIWebMaxAttachmentBytes    = 32 << 20
 	openAIWebMaxAttachmentCount    = 16
-	openAIWebDefaultPowAttempts    = 100_000
-	openAIWebDefaultSecCHUA        = `"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"`
+	// ChatGPT Web rejects the larger conversation bodies observed in the
+	// incident at roughly 150 KB. Keep a conservative local ceiling so a
+	// first turn or an unsafe replay fails locally instead of rotating through
+	// every account with the same deterministic 413.
+	openAIWebMaxConversationPayloadBytes = 140 << 10
+	openAIWebDefaultPowAttempts          = 100_000
+	openAIWebDefaultSecCHUA              = `"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"`
 	// OpenAIWebTransportExtraKey selects the classic ChatGPT Web protocol for
 	// an OpenAI OAuth-like account. Missing or unknown values remain on Codex.
 	OpenAIWebTransportExtraKey = "openai_transport"
@@ -174,9 +181,41 @@ func (e *OpenAIWebChallengeError) Error() string {
 
 // OpenAIWebHTTPError is a bounded, credential-free upstream error.
 type OpenAIWebHTTPError struct {
-	Endpoint   string
-	StatusCode int
-	Message    string
+	Endpoint     string
+	StatusCode   int
+	Message      string
+	RequestBytes int
+}
+
+// OpenAIWebPayloadTooLargeError is raised after the Web request has been
+// serialized and measured. It is deliberately separate from
+// OpenAIWebRequestError so callers can return HTTP 413 without treating the
+// request as a malformed field-level 400.
+type OpenAIWebPayloadTooLargeError struct {
+	PayloadBytes int
+	LimitBytes   int
+}
+
+func (e *OpenAIWebPayloadTooLargeError) Error() string {
+	if e == nil {
+		return "ChatGPT web request payload is too large"
+	}
+	return fmt.Sprintf("ChatGPT web request payload is too large: %d bytes exceeds %d byte limit", e.PayloadBytes, e.LimitBytes)
+}
+
+func isOpenAIWebPayloadTooLargeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var local *OpenAIWebPayloadTooLargeError
+	if errors.As(err, &local) {
+		return true
+	}
+	var upstream *OpenAIWebHTTPError
+	if !errors.As(err, &upstream) || upstream == nil || upstream.StatusCode != http.StatusRequestEntityTooLarge {
+		return false
+	}
+	return upstream.Endpoint == OpenAIWebConversationPath || upstream.RequestBytes >= openAIWebMaxConversationPayloadBytes
 }
 
 // OpenAIWebRequestError identifies a downstream request field that cannot be
@@ -1179,6 +1218,14 @@ func webHTTPError(endpoint string, status int, body []byte, secrets ...string) e
 	return &OpenAIWebHTTPError{Endpoint: endpoint, StatusCode: status, Message: message}
 }
 
+func webHTTPErrorWithRequestBytes(endpoint string, status int, body []byte, requestBytes int, secrets ...string) error {
+	err := webHTTPError(endpoint, status, body, secrets...)
+	if webErr, ok := err.(*OpenAIWebHTTPError); ok {
+		webErr.RequestBytes = requestBytes
+	}
+	return err
+}
+
 func extractOpenAIWebErrorMessage(body []byte) string {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
@@ -1379,9 +1426,16 @@ type OpenAIWebConversationOptions struct {
 	Request *apicompat.ChatCompletionsRequest
 	// PromptTools is populated only when the administrator-enabled Web Prompt
 	// Tool bridge is active. It carries request-scoped nonce/schema state.
-	PromptTools     *OpenAIWebPromptTools
-	ConversationID  string
-	ParentMessageID string
+	PromptTools *OpenAIWebPromptTools
+	// ReuseConversationInstructions means the Web cursor already contains the
+	// caller's system/developer instructions. The transport keeps only a small
+	// continuation directive when PromptTools is active.
+	ReuseConversationInstructions bool
+	// ReusePromptToolInstruction is retained as the prompt-tool-specific part of
+	// the continuation behavior. It prevents replaying the full tool schema.
+	ReusePromptToolInstruction bool
+	ConversationID             string
+	ParentMessageID            string
 	// TurnTraceID is shared by the browser's conversation/prepare and
 	// conversation requests. Leave it empty to generate one per transaction.
 	TurnTraceID       string
@@ -1417,6 +1471,9 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		return nil, err
 	}
 	normalizeOpenAIWebResponseFormat(request, options.PromptTools)
+	if options.ReuseConversationInstructions {
+		request.Instructions = ""
+	}
 	if options.PromptTools != nil {
 		request.Tools = nil
 		request.Functions = nil
@@ -1427,7 +1484,11 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		// caller's instructions. A separate leading system message can be
 		// overridden by Codex's long client prompt, causing the Web model to
 		// execute or simulate a shell instead of returning a tool envelope.
-		request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.Instruction())
+		if options.ReusePromptToolInstruction {
+			request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.ContinuationInstruction())
+		} else {
+			request.Instructions = appendOpenAIWebPromptInstruction(request.Instructions, options.PromptTools.Instruction())
+		}
 	}
 	model, ok := NormalizeOpenAIWebModel(request.Model)
 	if !ok {
@@ -1503,7 +1564,50 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		}
 		payload["thinking_effort"] = effort
 	}
-	return json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > openAIWebMaxConversationPayloadBytes {
+		logOpenAIWebConversationPayload(ctx, account, options, len(body))
+		logger.FromContext(ctx).Warn("openai_web_conversation_payload_too_large",
+			zap.Int64("account_id", accountIDForWebTransport(account)),
+			zap.Int("payload_bytes", len(body)),
+			zap.Int("local_limit_bytes", openAIWebMaxConversationPayloadBytes),
+			zap.Bool("cursor_continuation", strings.TrimSpace(options.ConversationID) != ""),
+			zap.Bool("prompt_tools", options.PromptTools != nil),
+		)
+		return nil, &OpenAIWebPayloadTooLargeError{
+			PayloadBytes: len(body),
+			LimitBytes:   openAIWebMaxConversationPayloadBytes,
+		}
+	}
+	return body, nil
+}
+
+func logOpenAIWebConversationPayload(ctx context.Context, account *Account, options OpenAIWebConversationOptions, payloadBytes int) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	messageCount := 0
+	hasToolTurn := false
+	model := ""
+	if options.Request != nil {
+		messageCount = len(options.Request.Messages)
+		hasToolTurn = openAIWebRequestHasToolTurn(options.Request)
+		model = strings.TrimSpace(options.Request.Model)
+	}
+	logger.FromContext(ctx).Debug("openai_web_conversation_payload_built",
+		zap.Int64("account_id", accountIDForWebTransport(account)),
+		zap.String("model", model),
+		zap.Int("payload_bytes", payloadBytes),
+		zap.Int("message_count", messageCount),
+		zap.Bool("has_tool_turn", hasToolTurn),
+		zap.Bool("prompt_tools", options.PromptTools != nil),
+		zap.Bool("reused_conversation_cursor", strings.TrimSpace(options.ConversationID) != ""),
+		zap.Bool("reused_conversation_instructions", options.ReuseConversationInstructions),
+		zap.Bool("reused_prompt_tool_instruction", options.ReusePromptToolInstruction),
+	)
 }
 
 func appendOpenAIWebPromptInstruction(existing, bridge string) string {
@@ -3090,6 +3194,8 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	if err != nil {
 		return nil, err
 	}
+	requestPayloadBytes := len(body)
+	logOpenAIWebConversationPayload(ctx, account, options, requestPayloadBytes)
 	turnTraceID := openAIWebTurnTraceID(options.TurnTraceID)
 	conduitToken, err := t.prepareConversation(ctx, account, token, body, turnTraceID)
 	if err != nil {
@@ -3120,7 +3226,21 @@ func (t *OpenAIWebTransport) Do(ctx context.Context, account *Account, token str
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := readAndCloseWebBody(resp, openAIWebMaxResponseErrorBytes)
-		return nil, webHTTPError(OpenAIWebConversationPath, resp.StatusCode, body, token)
+		webErr := webHTTPErrorWithRequestBytes(OpenAIWebConversationPath, resp.StatusCode, body, requestPayloadBytes, token)
+		if resp.StatusCode == http.StatusRequestEntityTooLarge {
+			message := ""
+			if typed, ok := webErr.(*OpenAIWebHTTPError); ok && typed != nil {
+				message = typed.Message
+			}
+			logger.FromContext(ctx).Warn("openai_web_conversation_payload_rejected",
+				zap.Int64("account_id", accountIDForWebTransport(account)),
+				zap.Int("payload_bytes", requestPayloadBytes),
+				zap.Bool("cursor_continuation", strings.TrimSpace(options.ConversationID) != ""),
+				zap.Bool("prompt_tools", options.PromptTools != nil),
+				zap.String("upstream_message", message),
+			)
+		}
+		return nil, webErr
 	}
 	if resp.Body == nil {
 		return nil, errors.New("ChatGPT web conversation returned no response body")

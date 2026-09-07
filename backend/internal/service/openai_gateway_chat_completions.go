@@ -1232,7 +1232,12 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
 	}
 	transportReq, continuation := s.prepareOpenAIWebContinuation(ctx, c, account, upstreamModel, body, &chatReq)
-	conversationOptions := OpenAIWebConversationOptions{Request: transportReq, PromptTools: promptTools}
+	conversationOptions := OpenAIWebConversationOptions{
+		Request:                       transportReq,
+		PromptTools:                   promptTools,
+		ReuseConversationInstructions: continuation != nil && continuation.reused,
+		ReusePromptToolInstruction:    continuation != nil && continuation.reused && promptTools != nil,
+	}
 	if continuation != nil && continuation.state != nil {
 		conversationOptions.ConversationID = continuation.state.ConversationID
 		conversationOptions.ParentMessageID = continuation.state.ParentMessageID
@@ -1246,7 +1251,11 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaOpenAIWeb(
 		conversationOptions,
 	)
 	if err != nil {
-		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
+		if isOpenAIWebPayloadTooLargeError(err) {
+			s.releaseOpenAIWebContinuation(continuation)
+		} else {
+			s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
+		}
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, true)
 	}
 	if resp == nil || resp.Body == nil {

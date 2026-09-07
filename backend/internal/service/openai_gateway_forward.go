@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // Forward forwards request to OpenAI API
@@ -1380,7 +1381,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		return nil, fmt.Errorf("get access token for ChatGPT web transport: %w", err)
 	}
 	transportReq, continuation := s.prepareOpenAIWebContinuation(ctx, c, account, upstreamModel, body, chatReq)
-	conversationOptions := OpenAIWebConversationOptions{Request: transportReq, PromptTools: promptTools}
+	conversationOptions := OpenAIWebConversationOptions{
+		Request:                       transportReq,
+		PromptTools:                   promptTools,
+		ReuseConversationInstructions: continuation != nil && continuation.reused,
+		ReusePromptToolInstruction:    continuation != nil && continuation.reused && promptTools != nil,
+	}
 	if continuation != nil && continuation.state != nil {
 		conversationOptions.ConversationID = continuation.state.ConversationID
 		conversationOptions.ParentMessageID = continuation.state.ParentMessageID
@@ -1394,7 +1400,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaOpenAIWeb(
 		conversationOptions,
 	)
 	if err != nil {
-		s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
+		if isOpenAIWebPayloadTooLargeError(err) {
+			s.releaseOpenAIWebContinuation(continuation)
+		} else {
+			s.invalidateOpenAIWebContinuation(ctx, c, account, upstreamModel, continuation)
+		}
 		return s.handleOpenAIWebForwardError(ctx, c, account, err, body, upstreamModel, false)
 	}
 	if resp == nil || resp.Body == nil {
@@ -1468,6 +1478,11 @@ func (s *OpenAIGatewayService) handleOpenAIWebForwardError(
 	upstreamModel string,
 	chatCompletions bool,
 ) (*OpenAIForwardResult, error) {
+	var payloadTooLargeError *OpenAIWebPayloadTooLargeError
+	if errors.As(err, &payloadTooLargeError) {
+		return nil, writeOpenAIWebPayloadTooLargeError(c, payloadTooLargeError)
+	}
+
 	var requestError *OpenAIWebRequestError
 	if errors.As(err, &requestError) {
 		return nil, writeOpenAIWebRequestError(c, requestError)
@@ -1482,6 +1497,23 @@ func (s *OpenAIGatewayService) handleOpenAIWebForwardError(
 		message := strings.TrimSpace(webHTTPError.Message)
 		if message == "" {
 			message = http.StatusText(statusCode)
+		}
+		// ChatGPT Web returns 413 for both proxy/body limits and its localized
+		// "message too long" validation. Both are deterministic request errors;
+		// rotating through Web accounts only repeats the same body and obscures
+		// the actual cause from the caller.
+		if statusCode == http.StatusRequestEntityTooLarge &&
+			(webHTTPError.Endpoint == OpenAIWebConversationPath || webHTTPError.RequestBytes >= openAIWebMaxConversationPayloadBytes) {
+			logger.FromContext(ctx).Warn("openai_web_payload_too_large",
+				zap.Int64("account_id", account.ID),
+				zap.Int("payload_bytes", webHTTPError.RequestBytes),
+				zap.Int("local_limit_bytes", openAIWebMaxConversationPayloadBytes),
+				zap.String("upstream_message", message),
+			)
+			return nil, writeOpenAIWebPayloadTooLargeError(c, &OpenAIWebPayloadTooLargeError{
+				PayloadBytes: webHTTPError.RequestBytes,
+				LimitBytes:   openAIWebMaxConversationPayloadBytes,
+			})
 		}
 		return s.handleOpenAIWebSyntheticHTTPError(ctx, c, account, statusCode, "upstream_error", message, requestBody, upstreamModel, chatCompletions)
 	}
@@ -1513,6 +1545,20 @@ func writeOpenAIWebRequestError(c *gin.Context, err error) error {
 	MarkResponseCommitted(c)
 	c.JSON(http.StatusBadRequest, gin.H{"error": payload})
 	return requestError
+}
+
+func writeOpenAIWebPayloadTooLargeError(c *gin.Context, err *OpenAIWebPayloadTooLargeError) error {
+	if err == nil {
+		err = &OpenAIWebPayloadTooLargeError{}
+	}
+	MarkResponseCommitted(c)
+	c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+		"error": gin.H{
+			"type":    "invalid_request_error",
+			"message": OpenAIRequestBodyTooLargeClientMessage,
+		},
+	})
+	return err
 }
 
 func (s *OpenAIGatewayService) handleOpenAIWebSyntheticHTTPError(

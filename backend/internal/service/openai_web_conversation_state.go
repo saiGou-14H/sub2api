@@ -201,6 +201,85 @@ func openAIWebRequestRequiresFullReplay(req *apicompat.ChatCompletionsRequest) b
 	return false
 }
 
+// openAIWebRequestHasToolTurn reports whether the request carries tool-call
+// history or a tool result. Tool declarations alone do not make a request a
+// tool continuation; a normal user turn may still carry the same declarations.
+func openAIWebRequestHasToolTurn(req *apicompat.ChatCompletionsRequest) bool {
+	if req == nil {
+		return false
+	}
+	for _, message := range req.Messages {
+		if openAIWebMessageHasToolContent(message) {
+			return true
+		}
+	}
+	return false
+}
+
+// openAIWebPromptToolContinuationMessages extracts the new tool turn that is
+// sent after a Web cursor. Responses clients commonly send only
+// function_call_output items, but some clients replay the previous assistant
+// tool call before those outputs. The cursor already contains that assistant
+// message, so forwarding it again only grows the Web request body.
+func openAIWebPromptToolContinuationMessages(req *apicompat.ChatCompletionsRequest) ([]apicompat.ChatMessage, bool) {
+	if req == nil || len(req.Messages) == 0 || !openAIWebRequestHasToolTurn(req) {
+		return nil, false
+	}
+
+	start := -1
+	for index := len(req.Messages) - 1; index >= 0; index-- {
+		message := req.Messages[index]
+		if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") && openAIWebMessageHasToolContent(message) {
+			start = index + 1
+			break
+		}
+	}
+
+	if start < 0 {
+		// With no replayed assistant tool call, locate the newest contiguous
+		// block of tool results. It may be followed by a new user message in
+		// the same request, which is another common previous_response_id shape.
+		lastTool := -1
+		for index := len(req.Messages) - 1; index >= 0; index-- {
+			role := strings.ToLower(strings.TrimSpace(req.Messages[index].Role))
+			if role == "tool" || role == "function" {
+				lastTool = index
+				break
+			}
+		}
+		if lastTool < 0 {
+			return nil, false
+		}
+		start = lastTool
+		for start > 0 {
+			role := strings.ToLower(strings.TrimSpace(req.Messages[start-1].Role))
+			if role != "tool" && role != "function" {
+				break
+			}
+			start--
+		}
+	}
+
+	if start < 0 || start >= len(req.Messages) {
+		return nil, false
+	}
+	candidate := req.Messages[start:]
+	// Once the tool result has already been followed by an assistant answer,
+	// the tool turn is complete. A later request may contain that answer and a
+	// new user message; replaying the old result would execute the same turn a
+	// second time. Let the normal transcript-prefix path compact that request.
+	for _, message := range candidate {
+		role := strings.ToLower(strings.TrimSpace(message.Role))
+		if role == "assistant" && !openAIWebMessageHasToolContent(message) {
+			return nil, false
+		}
+	}
+	if !openAIWebRequestHasToolTurn(&apicompat.ChatCompletionsRequest{Messages: candidate}) {
+		return nil, false
+	}
+	return append([]apicompat.ChatMessage(nil), candidate...), true
+}
+
 func openAIWebLastUserFingerprint(req *apicompat.ChatCompletionsRequest) (string, int) {
 	if req == nil {
 		return "", -1
@@ -389,12 +468,36 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 	}
 	lastUserFingerprint, lastUserIndex := openAIWebLastUserFingerprint(req)
 	if lastUserFingerprint == "" {
+		// A tool-only Responses continuation has no user message. It is still
+		// safe to reuse the stored cursor because the cursor is bound to this
+		// account, API key, group, and session/previous-response alias.
+		if messages, ok := openAIWebPromptToolContinuationMessages(req); ok {
+			transportCopy := *req
+			transportCopy.Messages = messages
+			continuation.reused = true
+			continuation.eligible = true
+			return &transportCopy, continuation
+		}
 		return transportReq, continuation
 	}
-	if lastUserIndex > 0 && !openAIWebHistoryPrefixMatches(req, lastUserIndex, state) {
+	if lastUserIndex > 0 && previousResponseID == "" && !openAIWebHistoryPrefixMatches(req, lastUserIndex, state) {
 		s.resetOpenAIWebContinuationState(ctx, c, continuation)
 		continuation.eligible = continuation.stateKey != ""
 		return transportReq, continuation
+	}
+	// A stored Web cursor represents the already committed assistant tool turn.
+	// Tool results can therefore be sent as a new turn against the cursor even
+	// though the public request contains tool history that cannot be safely
+	// replayed indefinitely. Keep the current result(s), while dropping the
+	// already committed assistant tool call and older results.
+	if openAIWebRequestHasToolTurn(req) {
+		if messages, ok := openAIWebPromptToolContinuationMessages(req); ok {
+			transportCopy := *req
+			transportCopy.Messages = messages
+			continuation.reused = true
+			continuation.eligible = true
+			return &transportCopy, continuation
+		}
 	}
 	if lastUserFingerprint == state.LastUserFingerprint {
 		return transportReq, continuation
@@ -403,7 +506,8 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 		continuation.eligible = true
 		return transportReq, continuation
 	}
-	if openAIWebRequestRequiresFullReplay(req) {
+	if openAIWebRequestRequiresFullReplay(req) &&
+		!(lastUserIndex > 0 && openAIWebHistoryPrefixMatches(req, lastUserIndex, state)) {
 		continuation.eligible = true
 		return transportReq, continuation
 	}
@@ -482,7 +586,10 @@ func (s *OpenAIGatewayService) commitOpenAIWebContinuation(ctx context.Context, 
 		Model:              strings.TrimSpace(model),
 		SessionKeyHash:     continuation.sessionKeyHash,
 		ProfileFingerprint: continuation.profileFingerprint,
-		RequiresFullReplay: openAIWebRequestRequiresFullReplay(req),
+		// A reused cursor already contains the assistant tool call and accepts
+		// the compacted tool result. Keep the next ordinary turn eligible for
+		// cursor reuse instead of pinning the session to full replay forever.
+		RequiresFullReplay: openAIWebRequestRequiresFullReplay(req) && !continuation.reused,
 	}
 	state.LastUserFingerprint, _ = openAIWebLastUserFingerprint(req)
 	if transcriptProvider, ok := body.(OpenAIWebConversationTranscriptProvider); ok {

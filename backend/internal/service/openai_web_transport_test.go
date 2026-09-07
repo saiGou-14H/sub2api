@@ -153,6 +153,78 @@ func TestOpenAIWebTransportPromptToolsNeverSerializeNativeToolFields(t *testing.
 	require.NotEmpty(t, request.ToolChoice)
 }
 
+func TestOpenAIWebTransportRejectsOversizedConversationPayloadLocally(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Messages: []apicompat.ChatMessage{{
+			Role:    "user",
+			Content: json.RawMessage(`"` + strings.Repeat("x", 150<<10) + `"`),
+		}},
+	}
+
+	_, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayload(request)
+	var payloadError *OpenAIWebPayloadTooLargeError
+	require.ErrorAs(t, err, &payloadError)
+	require.Greater(t, payloadError.PayloadBytes, payloadError.LimitBytes)
+}
+
+func TestOpenAIWebTransportCanOmitPromptInstructionOnCursorContinuation(t *testing.T) {
+	request := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{
+			Name:       "exec_command",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}}}`),
+		}}},
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"run it"`)}},
+	}
+	promptTools, err := NewOpenAIWebPromptToolsFromChatRequest(request)
+	require.NoError(t, err)
+
+	first, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request: request, PromptTools: promptTools,
+	})
+	require.NoError(t, err)
+	continued, err := NewOpenAIWebTransport(nil, OpenAIWebTransportOptions{}).BuildConversationPayloadWithOptions(OpenAIWebConversationOptions{
+		Request: request, PromptTools: promptTools,
+		ReuseConversationInstructions: true, ReusePromptToolInstruction: true,
+		ConversationID: "conv-1", ParentMessageID: "msg-1",
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(first), "REMOTE EXECUTION BOUNDARY")
+	require.NotContains(t, string(continued), "REMOTE EXECUTION BOUNDARY")
+	require.Contains(t, string(continued), promptTools.Nonce)
+	require.Contains(t, string(continued), promptTools.SchemaHash)
+	require.Less(t, len(continued), len(first))
+}
+
+func TestOpenAIWebConversation413IsReturnedAsRequestError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	service := &OpenAIGatewayService{}
+	_, err := service.handleOpenAIWebForwardError(
+		context.Background(),
+		c,
+		&Account{ID: 105},
+		&OpenAIWebHTTPError{
+			Endpoint:     OpenAIWebConversationPath,
+			StatusCode:   http.StatusRequestEntityTooLarge,
+			Message:      "你提交的消息过长，请修改后重新提交。",
+			RequestBytes: 154376,
+		},
+		nil,
+		"auto",
+		false,
+	)
+
+	var payloadError *OpenAIWebPayloadTooLargeError
+	require.ErrorAs(t, err, &payloadError)
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	require.Contains(t, recorder.Body.String(), OpenAIRequestBodyTooLargeClientMessage)
+}
+
 func TestOpenAIWebTransportPromptToolBoundaryFollowsClientInstructions(t *testing.T) {
 	request := &apicompat.ChatCompletionsRequest{
 		Model:        "auto",

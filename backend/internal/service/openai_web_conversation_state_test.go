@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"testing"
@@ -104,6 +105,75 @@ func TestPrepareOpenAIWebContinuationReusesLatestAttachmentMessage(t *testing.T)
 	require.True(t, next.reused)
 	require.Len(t, transportReq.Messages, 1)
 	require.Equal(t, attachment.Messages[2], transportReq.Messages[0])
+}
+
+func TestPrepareOpenAIWebContinuationCompactsToolResultAgainstCursor(t *testing.T) {
+	service := &OpenAIGatewayService{openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+	account := &Account{ID: 104}
+	c := testOpenAIWebContinuationContext(t, "session-tool-result")
+	first := &apicompat.ChatCompletionsRequest{
+		Model:    "auto",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"run the command"`)}},
+	}
+	_, firstContinuation := service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, first)
+	service.commitOpenAIWebContinuation(context.Background(), c, account, "auto", first, "resp_tool_1", &testOpenAIWebStateBody{
+		conversationID: "conv-tool-1",
+		parentID:       "msg-tool-1",
+		assistantText:  `{"protocol":"sub2api.prompt_tool.v1","calls":[{"name":"exec_command"}]}`,
+	}, firstContinuation)
+
+	second := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Messages: []apicompat.ChatMessage{
+			{Role: "user", Content: json.RawMessage(`"run the command"`)},
+			{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: "call_exec", Type: "function", Function: apicompat.ChatFunctionCall{Name: "exec_command", Arguments: `{"cmd":"dir"}`}}}},
+			{Role: "tool", ToolCallID: "call_exec", Content: json.RawMessage(`"ok"`)},
+		},
+	}
+	transportReq, continuation := service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, second)
+	require.True(t, continuation.reused)
+	require.Equal(t, "conv-tool-1", continuation.state.ConversationID)
+	require.Len(t, transportReq.Messages, 1)
+	require.Equal(t, "tool", transportReq.Messages[0].Role)
+	require.Equal(t, "call_exec", transportReq.Messages[0].ToolCallID)
+	service.commitOpenAIWebContinuation(context.Background(), c, account, "auto", second, "resp_tool_2", &testOpenAIWebStateBody{
+		conversationID: "conv-tool-1",
+		parentID:       "msg-tool-2",
+		assistantText:  "command finished",
+	}, continuation)
+
+	third := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Messages: []apicompat.ChatMessage{
+			{Role: "user", Content: json.RawMessage(`"run the command"`)},
+			{Role: "assistant", ToolCalls: []apicompat.ChatToolCall{{ID: "call_exec", Type: "function", Function: apicompat.ChatFunctionCall{Name: "exec_command", Arguments: `{"cmd":"dir"}`}}}},
+			{Role: "tool", ToolCallID: "call_exec", Content: json.RawMessage(`"ok"`)},
+			{Role: "assistant", Content: json.RawMessage(`"command finished"`)},
+			{Role: "user", Content: json.RawMessage(`"what next?"`)},
+		},
+	}
+	transportReq, continuation = service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", nil, third)
+	require.True(t, continuation.reused)
+	require.Len(t, transportReq.Messages, 1)
+	require.Equal(t, `"what next?"`, string(transportReq.Messages[0].Content))
+	service.commitOpenAIWebContinuation(context.Background(), c, account, "auto", third, "resp_tool_3", &testOpenAIWebStateBody{
+		conversationID: "conv-tool-1",
+		parentID:       "msg-tool-3",
+		assistantText:  "next answer",
+	}, continuation)
+
+	toolOutputAndUser := &apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Messages: []apicompat.ChatMessage{
+			{Role: "tool", ToolCallID: "call_exec", Content: json.RawMessage(`"ok"`)},
+			{Role: "user", Content: json.RawMessage(`"what next after that?"`)},
+		},
+	}
+	transportReq, continuation = service.prepareOpenAIWebContinuation(context.Background(), c, account, "auto", []byte(`{"previous_response_id":"resp_tool_3"}`), toolOutputAndUser)
+	require.True(t, continuation.reused)
+	require.Len(t, transportReq.Messages, 2)
+	require.Equal(t, "tool", transportReq.Messages[0].Role)
+	require.Equal(t, "user", transportReq.Messages[1].Role)
 }
 
 func TestPrepareOpenAIWebContinuationRejectsEditedOrReorderedHistory(t *testing.T) {
