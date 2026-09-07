@@ -65,6 +65,19 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 			},
 		},
 		{
+			name:   "responses_previous_response_web",
+			path:   "/v1/responses",
+			body:   `{"model":"auto","input":"hello","previous_response_id":"resp_previous"}`,
+			stream: false,
+			forward: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.Forward(c.Request.Context(), c, account, body)
+			},
+			assertBody: func(t *testing.T, body string) {
+				require.Contains(t, body, `"object":"response"`)
+				require.Contains(t, body, `"text":"OK"`)
+			},
+		},
+		{
 			name:   "responses_stream",
 			path:   "/v1/responses",
 			body:   `{"model":"auto","stream":true,"input":"hello"}`,
@@ -151,15 +164,6 @@ func TestOpenAIGatewayWebRoutingRejectsUnsupportedParametersBeforeNetwork(t *tes
 		param   string
 		forward func(*OpenAIGatewayService, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error)
 	}{
-		{
-			name:  "responses previous response",
-			path:  "/v1/responses",
-			body:  `{"model":"auto","input":"hello","previous_response_id":"resp_previous"}`,
-			param: "previous_response_id",
-			forward: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
-				return s.Forward(c.Request.Context(), c, account, body)
-			},
-		},
 		{
 			name:  "chat missing model",
 			path:  "/v1/chat/completions",
