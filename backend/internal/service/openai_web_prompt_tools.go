@@ -25,6 +25,10 @@ const (
 	openAIWebPromptToolMaxCalls        = 16
 	openAIWebPromptToolMaxDepth        = 32
 	openAIWebPromptDescriptionMaxBytes = 4096
+	// Keep the model-facing catalog useful without allowing one verbose tool
+	// description to consume the Web conversation budget.
+	openAIWebPromptInstructionDescriptionMaxBytes = 512
+	openAIWebPromptInstructionFormatMaxBytes      = 4096
 	// Keep the generated system instruction below the practical ChatGPT Web
 	// conversation-body threshold. Requests above this bound fail locally with
 	// a useful parameter error instead of an opaque upstream 422.
@@ -36,13 +40,16 @@ var openAIWebPromptToolNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // OpenAIWebPromptTool is the normalized, executable view of one public tool.
 // Type retains the original declaration family for generic native wrappers.
 type OpenAIWebPromptTool struct {
-	Name        string
-	TargetName  string
-	Type        string
-	Namespace   string
-	Description string
-	Parameters  json.RawMessage
-	Format      json.RawMessage
+	Name              string
+	TargetName        string
+	Type              string
+	Namespace         string
+	Description       string
+	PromptDescription string
+	Parameters        json.RawMessage
+	PromptParameters  json.RawMessage
+	Format            json.RawMessage
+	PromptFormat      json.RawMessage
 }
 
 // OpenAIWebPromptToolCall is an untrusted model-selected call after strict
@@ -105,6 +112,14 @@ func applyOpenAIWebPromptToolSelectionHint(prompt *OpenAIWebPromptTools, request
 		prompt.ChoiceName = name
 		return true
 	}
+	selectFirstNamed := func(names ...string) bool {
+		for _, name := range names {
+			if selectNamed(name) {
+				return true
+			}
+		}
+		return false
+	}
 	if hasAny("apply patch", "apply_patch", "patch file") && selectNamed("apply_patch") {
 		return
 	}
@@ -114,12 +129,18 @@ func applyOpenAIWebPromptToolSelectionHint(prompt *OpenAIWebPromptTools, request
 	if hasAny("write_stdin", "continue the command", "poll the command", "read the running command") && selectNamed("write_stdin") {
 		return
 	}
+	if (hasAny("list directory", "list files", "directory listing", "列出文件", "列出目录", "文件列表", "目录列表") ||
+		(hasAny("列出") && hasAny("文件", "目录"))) &&
+		selectFirstNamed("list_directory", "list_directories", "read_directory") {
+		return
+	}
 	if hasAny(
 		"create ", "write ", "append ", "edit ", "modify ", "read ", "inspect ", "list ",
 		"file", "directory", "folder", "workspace", "shell", "command", "powershell",
 		"terminal", "run ", "execute ", "d:\\", "c:\\",
+		"创建", "写入", "追加", "编辑", "修改", "读取", "查看", "列出", "文件", "目录", "文件夹", "工作区", "命令", "终端", "运行", "执行", "本地",
 	) {
-		selectNamed("exec_command")
+		selectFirstNamed("exec_command", "run_command", "shell")
 	}
 }
 
@@ -371,7 +392,18 @@ func newOpenAIWebPromptToolsWithNamespaces(tools []apicompat.ChatTool, choice, c
 		if targetName == "" {
 			targetName = name
 		}
-		result.Tools = append(result.Tools, OpenAIWebPromptTool{Name: name, TargetName: targetName, Type: typ, Namespace: strings.TrimSpace(namespaces[name]), Description: description, Parameters: normalized, Format: append(json.RawMessage(nil), formats[name]...)})
+		result.Tools = append(result.Tools, OpenAIWebPromptTool{
+			Name:              name,
+			TargetName:        targetName,
+			Type:              typ,
+			Namespace:         strings.TrimSpace(namespaces[name]),
+			Description:       description,
+			PromptDescription: truncateString(description, openAIWebPromptInstructionDescriptionMaxBytes),
+			Parameters:        normalized,
+			PromptParameters:  compactOpenAIWebPromptInstructionSchema(normalized),
+			Format:            append(json.RawMessage(nil), formats[name]...),
+			PromptFormat:      compactOpenAIWebPromptInstructionFormat(formats[name]),
+		})
 	}
 	if choiceName != "" {
 		if _, ok := seen[choiceName]; !ok {
@@ -454,18 +486,109 @@ func openAIWebPromptNativeSchema(toolType string) json.RawMessage {
 	return encoded
 }
 
+// compactOpenAIWebPromptInstructionSchema produces the model-facing schema
+// summary. The complete normalized schema remains in Parameters for server-side
+// validation; the Web model only needs the structure required to form a call.
+func compactOpenAIWebPromptInstructionSchema(raw json.RawMessage) json.RawMessage {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&value) != nil {
+		return append(json.RawMessage(nil), raw...)
+	}
+	compactOpenAIWebPromptInstructionSchemaNode(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return append(json.RawMessage(nil), raw...)
+	}
+	return encoded
+}
+
+func compactOpenAIWebPromptInstructionSchemaNode(value any) {
+	switch current := value.(type) {
+	case []any:
+		for _, child := range current {
+			compactOpenAIWebPromptInstructionSchemaNode(child)
+		}
+	case map[string]any:
+		allowed := map[string]struct{}{
+			"type": {}, "properties": {}, "required": {}, "additionalProperties": {},
+			"items": {}, "prefixItems": {}, "enum": {}, "const": {}, "format": {},
+			"oneOf": {}, "anyOf": {}, "allOf": {}, "$ref": {}, "$defs": {},
+		}
+		for key := range current {
+			if _, ok := allowed[key]; !ok {
+				delete(current, key)
+			}
+		}
+		if enum, ok := current["enum"].([]any); ok {
+			encoded, _ := json.Marshal(enum)
+			if len(enum) > 32 || len(encoded) > 1024 {
+				delete(current, "enum")
+			}
+		}
+		for key, child := range current {
+			if key == "oneOf" || key == "anyOf" || key == "allOf" {
+				if variants, ok := child.([]any); ok && len(variants) > 8 {
+					current[key] = variants[:8]
+				}
+			}
+			compactOpenAIWebPromptInstructionSchemaNode(child)
+		}
+	}
+}
+
+func compactOpenAIWebPromptInstructionFormat(raw json.RawMessage) json.RawMessage {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+	var value map[string]any
+	if json.Unmarshal(raw, &value) != nil {
+		if len(raw) <= openAIWebPromptInstructionFormatMaxBytes {
+			return append(json.RawMessage(nil), raw...)
+		}
+		return nil
+	}
+	for key := range value {
+		if key != "type" && key != "syntax" && key != "language" && key != "definition" {
+			delete(value, key)
+		}
+	}
+	if definition, ok := value["definition"].(string); ok && len([]byte(definition)) > openAIWebPromptInstructionFormatMaxBytes {
+		value["definition"] = truncateString(definition, openAIWebPromptInstructionFormatMaxBytes)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) > openAIWebPromptInstructionFormatMaxBytes+1024 {
+		return nil
+	}
+	return encoded
+}
+
 func (p *OpenAIWebPromptTools) Instruction() string {
 	if p == nil {
 		return ""
 	}
 	definitions := make([]map[string]any, 0, len(p.Tools))
 	for _, tool := range p.Tools {
-		entry := map[string]any{"name": tool.Name, "type": tool.Type, "description": tool.Description, "parameters": json.RawMessage(tool.Parameters)}
+		description := tool.PromptDescription
+		if description == "" {
+			description = tool.Description
+		}
+		parameters := tool.PromptParameters
+		if len(bytes.TrimSpace(parameters)) == 0 {
+			parameters = tool.Parameters
+		}
+		entry := map[string]any{"name": tool.Name, "type": tool.Type, "description": description, "parameters": json.RawMessage(parameters)}
 		if tool.Namespace != "" {
 			entry["namespace"] = tool.Namespace
 		}
-		if len(bytes.TrimSpace(tool.Format)) > 0 {
-			entry["format"] = json.RawMessage(tool.Format)
+		format := tool.PromptFormat
+		if len(bytes.TrimSpace(format)) == 0 {
+			format = tool.Format
+		}
+		if len(bytes.TrimSpace(format)) > 0 {
+			entry["format"] = json.RawMessage(format)
 		}
 		definitions = append(definitions, entry)
 	}

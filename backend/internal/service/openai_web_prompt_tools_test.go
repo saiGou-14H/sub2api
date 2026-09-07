@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -97,6 +98,22 @@ func TestOpenAIWebPromptToolsSelectionHintPinsRequiredLocalOperation(t *testing.
 	})
 	require.Equal(t, "named", prompt.Choice)
 	require.Equal(t, "exec_command", prompt.ChoiceName)
+}
+
+func TestOpenAIWebPromptToolsSelectionHintChoosesChineseDirectoryTool(t *testing.T) {
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
+		Model: "auto",
+		Tools: []apicompat.ChatTool{
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "list_directory", Parameters: json.RawMessage(`{"type":"object","properties":{"directory":{"type":"string"}}}`)}},
+			{Type: "function", Function: &apicompat.ChatFunction{Name: "exec_command", Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}}}`)}},
+		},
+	})
+	require.NoError(t, err)
+	applyOpenAIWebPromptToolSelectionHint(prompt, &apicompat.ChatCompletionsRequest{
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"列出 D:\\A2Mesh 目录中的所有文件"`)}},
+	})
+	require.Equal(t, "named", prompt.Choice)
+	require.Equal(t, "list_directory", prompt.ChoiceName)
 }
 
 func TestOpenAIWebPromptToolsRejectsUnsafeSchemas(t *testing.T) {
@@ -402,20 +419,30 @@ func TestOpenAIWebPromptToolsCompactsSchemaAnnotations(t *testing.T) {
 	require.Contains(t, string(prompt.Tools[0].Parameters), `"properties"`)
 }
 
-func TestOpenAIWebPromptToolsRejectsOversizedInstruction(t *testing.T) {
-	largeSchema := `{"type":"object","properties":{"payload":{"type":"string","minLength":` + strings.Repeat("1", 120000) + `}}}`
+func TestOpenAIWebPromptToolsRejectsOversizedSchema(t *testing.T) {
+	largeSchema := `{"type":"object","properties":{"payload":{"type":"string","minLength":` + strings.Repeat("1", openAIWebPromptToolMaxBytes) + `}}}`
 	_, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{
 		Model: "auto",
-		Tools: []apicompat.ChatTool{
-			{Type: "function", Function: &apicompat.ChatFunction{Name: "one", Parameters: json.RawMessage(largeSchema)}},
-			{Type: "function", Function: &apicompat.ChatFunction{Name: "two", Parameters: json.RawMessage(largeSchema)}},
-			{Type: "function", Function: &apicompat.ChatFunction{Name: "three", Parameters: json.RawMessage(largeSchema)}},
-			{Type: "function", Function: &apicompat.ChatFunction{Name: "four", Parameters: json.RawMessage(largeSchema)}},
-			{Type: "function", Function: &apicompat.ChatFunction{Name: "five", Parameters: json.RawMessage(largeSchema)}},
-		},
+		Tools: []apicompat.ChatTool{{Type: "function", Function: &apicompat.ChatFunction{Name: "one", Parameters: json.RawMessage(largeSchema)}}},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "prompt tool instruction exceeds ChatGPT web limit")
+	require.Contains(t, err.Error(), "schema exceeds size limit")
+}
+
+func TestOpenAIWebPromptToolsCompactsLargeToolCatalog(t *testing.T) {
+	tools := make([]apicompat.ChatTool, 0, openAIWebPromptToolMaxCount)
+	for index := 0; index < openAIWebPromptToolMaxCount; index++ {
+		tools = append(tools, apicompat.ChatTool{Type: "function", Function: &apicompat.ChatFunction{
+			Name:        fmt.Sprintf("tool_%d", index),
+			Description: strings.Repeat("description ", 400),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"long parameter description"}},"required":["path"]}`),
+		}})
+	}
+	prompt, err := NewOpenAIWebPromptToolsFromChatRequest(&apicompat.ChatCompletionsRequest{Model: "auto", Tools: tools})
+	require.NoError(t, err)
+	require.Less(t, len([]byte(prompt.Instruction())), 96<<10)
+	require.Contains(t, prompt.Instruction(), `"name":"tool_0"`)
+	require.Contains(t, prompt.Instruction(), `"path"`)
 }
 
 func TestOpenAIWebPromptToolsReaderEmitsStandardFunctionCallEvents(t *testing.T) {
