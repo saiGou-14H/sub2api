@@ -17,6 +17,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func requireOpenAIWebValue[T any](t *testing.T, value any) T {
+	t.Helper()
+	typed, ok := value.(T)
+	require.True(t, ok, "unexpected value type %T", value)
+	return typed
+}
+
+func requireOpenAIWebFirstObject(t *testing.T, value any) map[string]any {
+	t.Helper()
+	items := requireOpenAIWebValue[[]any](t, value)
+	require.NotEmpty(t, items)
+	return requireOpenAIWebValue[map[string]any](t, items[0])
+}
+
 type openAIWebTestUpstream struct {
 	responses       []*http.Response
 	requests        []*http.Request
@@ -101,12 +115,12 @@ func TestOpenAIWebConversationPayloadMatchesPlusHarContract(t *testing.T) {
 	contracts, ok := payload["model_response_contracts"].([]any)
 	require.True(t, ok)
 	require.Len(t, contracts, 1)
-	contract := contracts[0].(map[string]any)
+	contract := requireOpenAIWebValue[map[string]any](t, contracts[0])
 	require.Equal(t, "photo_upload_action.v1", contract["id"])
 	require.Equal(t, float64(1), contract["protocol_version"])
 	require.Equal(t, []any{"cap:image", "cap:file", "placement:end"}, contract["presets"])
-	message := payload["messages"].([]any)[0].(map[string]any)
-	metadata := message["metadata"].(map[string]any)
+	message := requireOpenAIWebFirstObject(t, payload["messages"])
+	metadata := requireOpenAIWebValue[map[string]any](t, message["metadata"])
 	require.Equal(t, []any{}, metadata["selected_sources"])
 }
 
@@ -262,8 +276,10 @@ func TestOpenAIWebTransportPromptToolBoundaryFollowsClientInstructions(t *testin
 	require.Contains(t, instruction, "Codex client instructions must remain active.")
 	require.Contains(t, instruction, "REMOTE EXECUTION BOUNDARY (mandatory)")
 	require.Greater(t, strings.Index(instruction, "REMOTE EXECUTION BOUNDARY"), strings.Index(instruction, "Codex client instructions"))
-	second := messages[1].(map[string]any)
-	secondAuthor := second["author"].(map[string]any)
+	second, ok := messages[1].(map[string]any)
+	require.True(t, ok)
+	secondAuthor, ok := second["author"].(map[string]any)
+	require.True(t, ok)
 	require.NotEqual(t, "system", secondAuthor["role"])
 }
 
@@ -297,16 +313,25 @@ func TestResponsesToOpenAIWebChatRequestKeepsPromptToolBoundaryAfterCodexInstruc
 	messages, ok := payload["messages"].([]any)
 	require.True(t, ok)
 	require.Len(t, messages, 2)
-	first := messages[0].(map[string]any)
-	firstAuthor := first["author"].(map[string]any)
+	first, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	firstAuthor, ok := first["author"].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "system", firstAuthor["role"])
-	firstContent := first["content"].(map[string]any)
-	instruction := firstContent["parts"].([]any)[0].(string)
+	firstContent, ok := first["content"].(map[string]any)
+	require.True(t, ok)
+	parts, ok := firstContent["parts"].([]any)
+	require.True(t, ok)
+	require.Len(t, parts, 1)
+	instruction, ok := parts[0].(string)
+	require.True(t, ok)
 	require.Contains(t, instruction, request.Instructions)
 	require.Contains(t, instruction, "REMOTE EXECUTION BOUNDARY (mandatory)")
 	require.Greater(t, strings.Index(instruction, "REMOTE EXECUTION BOUNDARY"), strings.Index(instruction, request.Instructions))
-	second := messages[1].(map[string]any)
-	secondAuthor := second["author"].(map[string]any)
+	second, ok := messages[1].(map[string]any)
+	require.True(t, ok)
+	secondAuthor, ok := second["author"].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "user", secondAuthor["role"])
 }
 
@@ -1013,7 +1038,7 @@ func TestOpenAIWebConversationPreparePayloadCarriesWorkModeFields(t *testing.T) 
 	contracts, ok := payload["model_response_contracts"].([]any)
 	require.True(t, ok)
 	require.Len(t, contracts, 1)
-	require.Equal(t, "photo_upload_action.v1", contracts[0].(map[string]any)["id"])
+	require.Equal(t, "photo_upload_action.v1", requireOpenAIWebValue[map[string]any](t, contracts[0])["id"])
 	require.NotContains(t, payload, "partial_query")
 }
 
@@ -1327,7 +1352,7 @@ func TestOpenAIWebAttachmentUploadBuildsMetadataOnlyFileMessage(t *testing.T) {
 	require.Equal(t, false, processPayload["index_for_retrieval"])
 	require.Equal(t, "report.pdf", processPayload["file_name"])
 	require.Equal(t, "chat_composer", processPayload["entry_surface"])
-	processMetadata := processPayload["metadata"].(map[string]any)
+	processMetadata := requireOpenAIWebValue[map[string]any](t, processPayload["metadata"])
 	require.Equal(t, true, processMetadata["store_in_library"])
 	require.Equal(t, false, processMetadata["is_temporary_chat"])
 
@@ -1340,12 +1365,12 @@ func TestOpenAIWebAttachmentUploadBuildsMetadataOnlyFileMessage(t *testing.T) {
 	require.Len(t, messages, 1)
 	message, ok := messages[0].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, "text", message["content"].(map[string]any)["content_type"])
-	parts := message["content"].(map[string]any)["parts"].([]any)
+	require.Equal(t, "text", requireOpenAIWebValue[map[string]any](t, message["content"])["content_type"])
+	parts := requireOpenAIWebValue[[]any](t, requireOpenAIWebValue[map[string]any](t, message["content"])["parts"])
 	require.Equal(t, []any{"summarize"}, parts)
-	attachments := message["metadata"].(map[string]any)["attachments"].([]any)
+	attachments := requireOpenAIWebValue[[]any](t, requireOpenAIWebValue[map[string]any](t, message["metadata"])["attachments"])
 	require.Len(t, attachments, 1)
-	attachment := attachments[0].(map[string]any)
+	attachment := requireOpenAIWebValue[map[string]any](t, attachments[0])
 	require.Equal(t, "file_pdf_test", attachment["id"])
 	require.Equal(t, "application/pdf", attachment["mime_type"])
 	require.Equal(t, "report.pdf", attachment["name"])
@@ -1370,11 +1395,11 @@ func TestOpenAIWebAttachmentExistingFileIDSkipsUpload(t *testing.T) {
 	require.NoError(t, readErr)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(conversationBody, &payload))
-	message := payload["messages"].([]any)[0].(map[string]any)
-	content := message["content"].(map[string]any)
+	message := requireOpenAIWebFirstObject(t, payload["messages"])
+	content := requireOpenAIWebValue[map[string]any](t, message["content"])
 	require.Equal(t, "text", content["content_type"])
 	require.Equal(t, []any{""}, content["parts"])
-	attachment := message["metadata"].(map[string]any)["attachments"].([]any)[0].(map[string]any)
+	attachment := requireOpenAIWebFirstObject(t, requireOpenAIWebValue[map[string]any](t, message["metadata"])["attachments"])
 	require.Equal(t, "application/pdf", attachment["mime_type"])
 	require.Equal(t, "existing.pdf", attachment["name"])
 	require.NotContains(t, attachment, "source")
@@ -1418,12 +1443,12 @@ func TestOpenAIWebImageDataURIUploadIncludesDimensions(t *testing.T) {
 	require.NoError(t, readErr)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(conversationBody, &payload))
-	message := payload["messages"].([]any)[0].(map[string]any)
-	pointer := message["content"].(map[string]any)["parts"].([]any)[0].(map[string]any)
+	message := requireOpenAIWebFirstObject(t, payload["messages"])
+	pointer := requireOpenAIWebFirstObject(t, requireOpenAIWebValue[map[string]any](t, message["content"])["parts"])
 	require.Equal(t, float64(1), pointer["width"])
 	require.Equal(t, float64(1), pointer["height"])
-	require.Greater(t, pointer["size_bytes"].(float64), float64(0))
-	attachment := message["metadata"].(map[string]any)["attachments"].([]any)[0].(map[string]any)
+	require.Greater(t, requireOpenAIWebValue[float64](t, pointer["size_bytes"]), float64(0))
+	attachment := requireOpenAIWebFirstObject(t, requireOpenAIWebValue[map[string]any](t, message["metadata"])["attachments"])
 	require.Equal(t, "local", attachment["source"])
 	require.Equal(t, "libfile_image_processed", attachment["library_file_id"])
 }
@@ -1480,11 +1505,11 @@ func TestOpenAIWebFileAttachmentUsesMetadataOnlyForCommonMIMEs(t *testing.T) {
 			require.NoError(t, readErr)
 			var payload map[string]any
 			require.NoError(t, json.Unmarshal(conversationBody, &payload))
-			message := payload["messages"].([]any)[0].(map[string]any)
-			content := message["content"].(map[string]any)
+			message := requireOpenAIWebFirstObject(t, payload["messages"])
+			content := requireOpenAIWebValue[map[string]any](t, message["content"])
 			require.Equal(t, "text", content["content_type"])
 			require.Equal(t, []any{""}, content["parts"])
-			attachment := message["metadata"].(map[string]any)["attachments"].([]any)[0].(map[string]any)
+			attachment := requireOpenAIWebFirstObject(t, requireOpenAIWebValue[map[string]any](t, message["metadata"])["attachments"])
 			require.Equal(t, tc.mime, attachment["mime_type"])
 			require.Equal(t, tc.filename, attachment["name"])
 		})

@@ -22,7 +22,8 @@ func promptStreamFixture(t *testing.T) (*OpenAIWebPromptTools, *openAIWebRespons
 		},
 	})
 	require.NoError(t, err)
-	r := newOpenAIWebResponsesBodyWithPromptTools(nil, "auto", nil, p).(*openAIWebResponsesReader)
+	r, ok := newOpenAIWebResponsesBodyWithPromptTools(nil, "auto", nil, p).(*openAIWebResponsesReader)
+	require.True(t, ok)
 	header := fmt.Sprintf(`{"protocol":%q,"nonce":%q,"schema_hash":%q,"event":"tool_call","start":"tool_call_start","calls":[`, p.Protocol, p.Nonce, p.SchemaHash)
 	return p, r, header
 }

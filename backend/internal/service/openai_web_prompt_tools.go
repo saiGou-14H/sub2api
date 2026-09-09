@@ -88,10 +88,10 @@ func applyOpenAIWebPromptToolSelectionHint(prompt *OpenAIWebPromptTools, request
 		return
 	}
 	var text strings.Builder
-	text.WriteString(strings.ToLower(strings.TrimSpace(request.Instructions)))
+	_, _ = text.WriteString(strings.ToLower(strings.TrimSpace(request.Instructions)))
 	for _, message := range request.Messages {
-		text.WriteByte('\n')
-		text.WriteString(strings.ToLower(string(message.Content)))
+		_ = text.WriteByte('\n')
+		_, _ = text.WriteString(strings.ToLower(string(message.Content)))
 	}
 	content := text.String()
 	hasAny := func(values ...string) bool {
@@ -165,7 +165,7 @@ func openAIWebPromptToolsEnabledForRequest(req *apicompat.ChatCompletionsRequest
 
 func NewOpenAIWebPromptToolsFromChatRequest(req *apicompat.ChatCompletionsRequest) (*OpenAIWebPromptTools, error) {
 	if req == nil {
-		return nil, errors.New("Chat Completions request is nil")
+		return nil, errors.New("chat completions request is nil")
 	}
 	tools := make([]apicompat.ChatTool, 0, len(req.Tools)+len(req.Functions))
 	tools = append(tools, req.Tools...)
@@ -181,7 +181,7 @@ func NewOpenAIWebPromptToolsFromChatRequest(req *apicompat.ChatCompletionsReques
 
 func NewOpenAIWebPromptToolsFromResponsesRequest(req *apicompat.ResponsesRequest) (*OpenAIWebPromptTools, error) {
 	if req == nil {
-		return nil, errors.New("Responses request is nil")
+		return nil, errors.New("responses request is nil")
 	}
 	effective, err := apicompat.EffectiveResponsesTools(req)
 	if err != nil {
@@ -289,7 +289,7 @@ func flattenOpenAIWebPromptToolName(namespace, name string) string {
 		if prefix.Len()+len(string(r)) > prefixLen {
 			break
 		}
-		prefix.WriteRune(r)
+		_, _ = prefix.WriteRune(r)
 	}
 	return prefix.String() + suffix
 }
@@ -486,7 +486,7 @@ func sanitizeOpenAIWebPromptToolType(value string) string {
 	var b strings.Builder
 	for _, r := range value {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
+			_, _ = b.WriteRune(r)
 		}
 	}
 	if b.Len() == 0 {

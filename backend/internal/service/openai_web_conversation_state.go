@@ -72,8 +72,9 @@ func openAIWebPreviousResponseID(body []byte) string {
 func openAIWebHash(parts ...string) string {
 	h := sha256.New()
 	for _, part := range parts {
-		h.Write([]byte{0})
-		h.Write([]byte(part))
+		// hash.Hash writes always consume the full input and return a nil error.
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(part))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -525,7 +526,7 @@ func (s *OpenAIGatewayService) prepareOpenAIWebContinuation(ctx context.Context,
 		return transportReq, continuation
 	}
 	if openAIWebRequestRequiresFullReplay(req) &&
-		!(lastUserIndex > 0 && openAIWebHistoryPrefixMatches(req, lastUserIndex, state)) {
+		(lastUserIndex <= 0 || !openAIWebHistoryPrefixMatches(req, lastUserIndex, state)) {
 		continuation.eligible = true
 		return transportReq, continuation
 	}

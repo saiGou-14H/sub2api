@@ -296,7 +296,8 @@ func TestOpenAIWebContinuationPreviousResponseAliasKeepsCanonicalSessionState(t 
 }
 
 func TestOpenAIWebConversationLockHonorsCancellationAndRelease(t *testing.T) {
-	store := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	store, ok := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
 	firstRelease, acquired := store.AcquireOpenAIWebConversationLock(context.Background(), 7, "lock-test")
 	require.True(t, acquired)
 

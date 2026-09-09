@@ -130,9 +130,11 @@ func TestOpenAIWSStateStore_RedisStateIsAuthoritativeAcrossInstances(t *testing.
 
 func TestOpenAIWSStateStore_DistributedConversationLockSerializesInstances(t *testing.T) {
 	cache := &sharedWebConversationCache{}
-	first := NewOpenAIWSStateStore(cache)
-	second := NewOpenAIWSStateStore(cache)
-	releaseFirst, acquired := first.(*defaultOpenAIWSStateStore).AcquireOpenAIWebConversationLock(context.Background(), 7, "lock-key")
+	first, ok := NewOpenAIWSStateStore(cache).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
+	second, ok := NewOpenAIWSStateStore(cache).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
+	releaseFirst, acquired := first.AcquireOpenAIWebConversationLock(context.Background(), 7, "lock-key")
 	require.True(t, acquired)
 
 	result := make(chan struct {
@@ -142,7 +144,7 @@ func TestOpenAIWSStateStore_DistributedConversationLockSerializesInstances(t *te
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	go func() {
-		release, ok := second.(*defaultOpenAIWSStateStore).AcquireOpenAIWebConversationLock(ctx, 7, "lock-key")
+		release, ok := second.AcquireOpenAIWebConversationLock(ctx, 7, "lock-key")
 		result <- struct {
 			release  func()
 			acquired bool

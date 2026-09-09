@@ -327,7 +327,7 @@ func TestAccount_OpenAIWebSupportsCurrentModelCatalogIgnoringLegacyMapping(t *te
 		Credentials: map[string]any{
 			"model_mapping": map[string]any{
 				OpenAIWebTestModel: "gpt-5.6-sol",
-				"gpt-5.6-luna":    "gpt-5.6-sol",
+				"gpt-5.6-luna":     "gpt-5.6-sol",
 			},
 		},
 		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},

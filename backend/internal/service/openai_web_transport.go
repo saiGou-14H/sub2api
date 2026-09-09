@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha3"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -38,7 +39,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/imroc/req/v3"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -333,7 +333,7 @@ func ValidateOpenAIWebChatCompletionsRequestWithPromptTools(req *apicompat.ChatC
 	if !openAIWebPlainTextFormat(req.ResponseFormat) {
 		// Structured output can be represented by the request-scoped Prompt
 		// Tool envelope, but must never reach the private Web payload.
-		if !(promptToolsEnabled && openAIWebChatRequestHasPromptTools(req)) {
+		if !promptToolsEnabled || !openAIWebChatRequestHasPromptTools(req) {
 			return openAIWebUnsupportedParam("response_format")
 		}
 	}
@@ -440,7 +440,7 @@ func ValidateOpenAIWebResponsesRequestWithPromptTools(req *apicompat.ResponsesRe
 	}
 	if req.Text != nil {
 		if !openAIWebPlainTextFormat(req.Text.Format) &&
-			!(promptToolsEnabled && len(effectiveTools) > 0 && openAIWebStructuredTextFormat(req.Text.Format)) {
+			(!promptToolsEnabled || len(effectiveTools) == 0 || !openAIWebStructuredTextFormat(req.Text.Format)) {
 			return openAIWebUnsupportedParam("text.format")
 		}
 		if !openAIWebTextVerbositySupported(req.Text.Verbosity) {
@@ -1464,7 +1464,7 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		return nil, errors.New("ChatGPT web transport is nil")
 	}
 	if options.Request == nil {
-		return nil, errors.New("Chat Completions request is nil")
+		return nil, errors.New("chat completions request is nil")
 	}
 	// Work on a request-local copy. Prompt Tools uses the public tool
 	// declaration to build its instruction and response parser, but the classic
@@ -1506,7 +1506,7 @@ func (t *OpenAIWebTransport) buildConversationPayload(ctx context.Context, accou
 		return nil, err
 	}
 	if len(messages) == 0 {
-		return nil, errors.New("Chat Completions request has no messages")
+		return nil, errors.New("chat completions request has no messages")
 	}
 	timezone := strings.TrimSpace(options.Timezone)
 	if timezone == "" {
@@ -1656,10 +1656,6 @@ func normalizeOpenAIWebThinkingEffort(value string) string {
 	}
 }
 
-func openAIWebMessagesFromChatRequest(request *apicompat.ChatCompletionsRequest) ([]map[string]any, error) {
-	return openAIWebMessagesFromChatRequestWithTransport(context.Background(), nil, "", nil, request)
-}
-
 type openAIWebAttachment struct {
 	ID          string
 	Name        string
@@ -1686,13 +1682,9 @@ type openAIWebMessageContent struct {
 	Attachments []openAIWebAttachment
 }
 
-func openAIWebMessagesFromChatRequestWithTransport(ctx context.Context, account *Account, token string, transport *OpenAIWebTransport, request *apicompat.ChatCompletionsRequest) ([]map[string]any, error) {
-	return openAIWebMessagesFromChatRequestWithPromptTools(ctx, account, token, transport, request, nil)
-}
-
 func openAIWebMessagesFromChatRequestWithPromptTools(ctx context.Context, account *Account, token string, transport *OpenAIWebTransport, request *apicompat.ChatCompletionsRequest, promptTools *OpenAIWebPromptTools) ([]map[string]any, error) {
 	if request == nil {
-		return nil, errors.New("Chat Completions request is nil")
+		return nil, errors.New("chat completions request is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -1884,17 +1876,6 @@ func openAIWebAttachmentMetadata(attachments []openAIWebAttachment) []map[string
 	return metadata
 }
 
-func openAIWebMessageText(content json.RawMessage) (string, error) {
-	parsed, err := openAIWebMessageContentFromRaw(content)
-	if err != nil {
-		return "", err
-	}
-	if len(parsed.Attachments) > 0 {
-		return "", errors.New("ChatGPT web message contains an attachment; use an authenticated web transport")
-	}
-	return parsed.Text, nil
-}
-
 func openAIWebMessageContentFromRaw(content json.RawMessage) (openAIWebMessageContent, error) {
 	if len(bytes.TrimSpace(content)) == 0 || bytes.Equal(bytes.TrimSpace(content), []byte("null")) {
 		return openAIWebMessageContent{}, nil
@@ -1918,7 +1899,7 @@ func openAIWebMessageContentFromRaw(content json.RawMessage) (openAIWebMessageCo
 		switch strings.ToLower(strings.TrimSpace(typ)) {
 		case "text", "input_text":
 			if value, ok := part["text"].(string); ok {
-				builder.WriteString(value)
+				_, _ = builder.WriteString(value)
 			}
 		case "image_url", "input_image", "image":
 			attachment, err := openAIWebImageAttachmentFromPart(part, index+1)
@@ -1934,7 +1915,7 @@ func openAIWebMessageContentFromRaw(content json.RawMessage) (openAIWebMessageCo
 			result.Attachments = append(result.Attachments, attachment)
 		default:
 			if value, ok := part["text"].(string); ok {
-				builder.WriteString(value)
+				_, _ = builder.WriteString(value)
 			}
 		}
 	}
@@ -2799,17 +2780,17 @@ func openAIWebStringValue(value any) string {
 func encodeOpenAIWebSSEFrame(frame openAIWebSSEFrame) []byte {
 	var builder strings.Builder
 	if strings.TrimSpace(frame.event) != "" {
-		builder.WriteString("event: ")
-		builder.WriteString(strings.TrimSpace(frame.event))
-		builder.WriteString("\n")
+		_, _ = builder.WriteString("event: ")
+		_, _ = builder.WriteString(strings.TrimSpace(frame.event))
+		_, _ = builder.WriteString("\n")
 	}
 	data := strings.Split(frame.data, "\n")
 	for _, line := range data {
-		builder.WriteString("data: ")
-		builder.WriteString(line)
-		builder.WriteString("\n")
+		_, _ = builder.WriteString("data: ")
+		_, _ = builder.WriteString(line)
+		_, _ = builder.WriteString("\n")
 	}
-	builder.WriteString("\n")
+	_, _ = builder.WriteString("\n")
 	return []byte(builder.String())
 }
 
@@ -2981,9 +2962,10 @@ func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account 
 	headers.Set("Accept", "*/*")
 	if parsed, parseErr := url.Parse(wsURL); parseErr == nil && t.jar != nil {
 		cookieURL := *parsed
-		if cookieURL.Scheme == "ws" {
+		switch cookieURL.Scheme {
+		case "ws":
 			cookieURL.Scheme = "http"
-		} else if cookieURL.Scheme == "wss" {
+		case "wss":
 			cookieURL.Scheme = "https"
 		}
 		for _, cookie := range t.jar.Cookies(&cookieURL) {
@@ -3035,7 +3017,7 @@ func (t *OpenAIWebTransport) newOpenAIWebTopicBody(ctx context.Context, account 
 		seen:        make(map[string]struct{}),
 	}
 	if prefix != nil && prefix.Len() > 0 {
-		body.output.Write(prefix.Bytes())
+		_, _ = body.output.Write(prefix.Bytes())
 	}
 	return body, nil
 }
@@ -3078,7 +3060,7 @@ func (b *openAIWebTopicBody) Read(p []byte) (int, error) {
 			return 0, parseErr
 		}
 		if terminal {
-			b.output.WriteString("data: [DONE]\n\n")
+			_, _ = b.output.WriteString("data: [DONE]\n\n")
 			b.done = true
 		}
 	}
@@ -3154,9 +3136,9 @@ func (b *openAIWebTopicBody) consumeFrame(frame []byte) (bool, error) {
 			if _, exists := b.seen[streamItemID]; !exists {
 				b.seen[streamItemID] = struct{}{}
 				b.streamItemCount++
-				b.output.WriteString(encodedItem)
+				_, _ = b.output.WriteString(encodedItem)
 				if !strings.HasSuffix(encodedItem, "\n\n") {
-					b.output.WriteString("\n\n")
+					_, _ = b.output.WriteString("\n\n")
 				}
 			}
 		}
@@ -3352,7 +3334,7 @@ func openAIWebAssistantHistory(messages []apicompat.ChatMessage) ([]string, stri
 			continue
 		}
 		values = append(values, content.Text)
-		combined.WriteString(content.Text)
+		_, _ = combined.WriteString(content.Text)
 	}
 	return values, combined.String()
 }
@@ -4138,7 +4120,7 @@ func openAIWebFullText(value any) string {
 			var builder strings.Builder
 			for _, part := range parts {
 				if text, ok := part.(string); ok {
-					builder.WriteString(text)
+					_, _ = builder.WriteString(text)
 				}
 			}
 			return builder.String()
@@ -4147,7 +4129,7 @@ func openAIWebFullText(value any) string {
 	if list, ok := value.([]any); ok {
 		var builder strings.Builder
 		for _, item := range list {
-			builder.WriteString(openAIWebFullText(item))
+			_, _ = builder.WriteString(openAIWebFullText(item))
 		}
 		return builder.String()
 	}

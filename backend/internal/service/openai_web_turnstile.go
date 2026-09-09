@@ -393,14 +393,6 @@ func openAIWebTurnstileNumber(value any) (float64, bool) {
 	}
 }
 
-func openAIWebTurnstileInt(value any) (int, bool) {
-	number, ok := openAIWebTurnstileNumber(value)
-	if !ok || number != math.Trunc(number) || number < math.MinInt || number > math.MaxInt {
-		return 0, false
-	}
-	return int(number), true
-}
-
 func openAIWebTurnstileRegister(value any) float64 {
 	register, _ := openAIWebTurnstileNumber(value)
 	return register
@@ -533,7 +525,7 @@ func openAIWebTurnstileJSONMarshal(value any) (string, error) {
 	escaped := false
 	for _, character := range encoded {
 		if inString {
-			spaced.WriteByte(character)
+			_ = spaced.WriteByte(character)
 			if escaped {
 				escaped = false
 			} else if character == '\\' {
@@ -546,13 +538,13 @@ func openAIWebTurnstileJSONMarshal(value any) (string, error) {
 		switch character {
 		case '"':
 			inString = true
-			spaced.WriteByte(character)
+			_ = spaced.WriteByte(character)
 		case ',':
-			spaced.WriteString(", ")
+			_, _ = spaced.WriteString(", ")
 		case ':':
-			spaced.WriteString(": ")
+			_, _ = spaced.WriteString(": ")
 		default:
-			spaced.WriteByte(character)
+			_ = spaced.WriteByte(character)
 		}
 	}
 	return spaced.String(), nil
@@ -565,7 +557,7 @@ func openAIWebTurnstileEscapeNonASCII(value []byte) []byte {
 	for index := 0; index < len(value); {
 		character := value[index]
 		if !inString {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			if character == '"' {
 				inString = true
 			}
@@ -573,31 +565,31 @@ func openAIWebTurnstileEscapeNonASCII(value []byte) []byte {
 			continue
 		}
 		if escaped {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			escaped = false
 			index++
 			continue
 		}
 		if character == '\\' {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			escaped = true
 			index++
 			continue
 		}
 		if character == '"' {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			inString = false
 			index++
 			continue
 		}
 		if character < utf8.RuneSelf {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			index++
 			continue
 		}
 		runeValue, size := utf8.DecodeRune(value[index:])
 		if runeValue == utf8.RuneError && size == 1 {
-			output.WriteByte(character)
+			_ = output.WriteByte(character)
 			index++
 			continue
 		}
