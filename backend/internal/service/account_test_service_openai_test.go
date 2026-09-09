@@ -331,6 +331,10 @@ func TestAccountTestService_OpenAIWebRejectsUnsupportedModel(t *testing.T) {
 	ctx, recorder := newTestContext()
 	upstream := &openAIWebTestUpstream{}
 	svc := &AccountTestService{httpUpstream: upstream}
+	// A validation regression must fail against the fake, never contact ChatGPT.
+	svc.openAIWebTransportFactory = func() *OpenAIWebTransport {
+		return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
+	}
 	account := &Account{
 		ID:          94,
 		Platform:    PlatformOpenAI,
@@ -339,10 +343,12 @@ func TestAccountTestService_OpenAIWebRejectsUnsupportedModel(t *testing.T) {
 		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "hello", "")
-	require.EqualError(t, err, `model "gpt-5.4" is not supported by ChatGPT web transport`)
+	// Availability is discovered dynamically; a valid slug such as gpt-5.4
+	// cannot be assumed unsupported. Reject malformed wire selectors locally.
+	err := svc.testOpenAIAccountConnection(ctx, account, "invalid model/name", "hello", "")
+	require.EqualError(t, err, `model "invalid model/name" is not supported by ChatGPT web transport`)
 	require.Empty(t, upstream.requests)
-	require.Contains(t, recorder.Body.String(), `gpt-5.4`)
+	require.Contains(t, recorder.Body.String(), `invalid model/name`)
 	require.Contains(t, recorder.Body.String(), `is not supported by ChatGPT web transport`)
 }
 

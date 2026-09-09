@@ -96,6 +96,7 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := newOpenAIWebGatewayTestUpstream()
+			upstream.responses[len(upstream.responses)-1].Header.Set("X-Web-Request-Id", "web-request-42")
 			service := &OpenAIGatewayService{httpUpstream: upstream}
 			service.openAIWebTransportFactory = func() *OpenAIWebTransport {
 				return NewOpenAIWebTransportFromUpstream(upstream, OpenAIWebTransportOptions{BaseURL: "https://web.test"})
@@ -123,9 +124,14 @@ func TestOpenAIGatewayWebRoutingChatAndResponses(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
 			c.Request.Header.Set("Content-Type", "application/json")
 
+			account.Extra[AccountExtraUpstreamRequestIDHeader] = "X-Web-Request-Id"
 			result, err := tt.forward(service, c, account, []byte(tt.body))
 			require.NoError(t, err)
 			require.NotNil(t, result)
+			require.Equal(t, "web-request-42", result.UpstreamHeaders.Get("X-Web-Request-Id"))
+			upstreamRequestID := usageUpstreamRequestIDPtr(account, result.UpstreamHeaders, result.OpenAIWSMode)
+			require.NotNil(t, upstreamRequestID)
+			require.Equal(t, "web-request-42", *upstreamRequestID)
 			require.Equal(t, tt.stream, result.Stream)
 			require.Equal(t, OpenAIWebTestModel, result.BillingModel)
 			require.Equal(t, OpenAIWebTestModel, result.UpstreamModel)

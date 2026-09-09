@@ -234,6 +234,7 @@ func TestResolveOpenAIForwardMappedModels_CompactMappingPrecedence(t *testing.T)
 	tests := []struct {
 		name           string
 		account        *Account
+		requestedModel string
 		requireCompact bool
 		wantBilling    string
 		wantUpstream   string
@@ -285,22 +286,37 @@ func TestResolveOpenAIForwardMappedModels_CompactMappingPrecedence(t *testing.T)
 					"compact_model_mapping": map[string]any{OpenAIWebTestModel: "gpt-5.5-openai-compact"},
 				},
 				Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb}},
+			requestedModel: OpenAIWebTestModel,
 			requireCompact: true,
 			wantBilling:    OpenAIWebTestModel,
 			wantUpstream:   OpenAIWebTestModel,
+		},
+		{
+			name: "web transport preserves explicit slug despite matching legacy mappings",
+			account: &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
+				Credentials: conflictingMappings,
+				Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportWeb}},
+			requestedModel: "gpt-5.5",
+			requireCompact: true,
+			wantBilling:    "gpt-5.5",
+			wantUpstream:   "gpt-5.5",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			billing, upstream := resolveOpenAIForwardMappedModels(tt.account, "gpt-5.5", tt.requireCompact)
+			requestedModel := tt.requestedModel
+			if requestedModel == "" {
+				requestedModel = "gpt-5.5"
+			}
+			billing, upstream := resolveOpenAIForwardMappedModels(tt.account, requestedModel, tt.requireCompact)
 			if billing != tt.wantBilling {
 				t.Fatalf("billing model = %q, want %q", billing, tt.wantBilling)
 			}
 			if upstream != tt.wantUpstream {
 				t.Fatalf("upstream model = %q, want %q", upstream, tt.wantUpstream)
 			}
-			if scheduler := resolveOpenAIAccountUpstreamModelForRequest(tt.account, "gpt-5.5", tt.requireCompact); scheduler != upstream {
+			if scheduler := resolveOpenAIAccountUpstreamModelForRequest(tt.account, requestedModel, tt.requireCompact); scheduler != upstream {
 				t.Fatalf("scheduler model %q disagrees with Forward model %q", scheduler, upstream)
 			}
 		})
