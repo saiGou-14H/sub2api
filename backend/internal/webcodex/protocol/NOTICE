@@ -1,0 +1,22 @@
+WebCodex Runner protocol Go adaptation
+
+This package contains modified translations/adaptations of Apache-2.0-licensed
+WebCodex source at commit 97ad66949a859174911c2f6da2ff1063be98bfa9:
+
+  crates/webcodex-core/src/runner_protocol.rs
+  crates/webcodex-core/src/runner_operation.rs
+  crates/webcodex-runner-registry/src/protocol.rs
+  crates/webcodex-runner-registry/src/capabilities.rs
+  crates/webcodex-runner-registry/src/validation.rs
+
+The original Apache License, Version 2.0 is included in LICENSE. The fixed
+source checkout has no NOTICE file; this notice records the provenance and
+modifications of this Go port and does not replace an upstream notice.
+
+Modifications: Go wire structs and strict JSON boundary decoding, initial
+six-operation canonical subset, explicit unsupported-family errors, staged
+RawMessage metadata domains, Go numeric/Unicode/vector fidelity handling,
+registration validation helpers, and focused Go/public JSON fixtures.
+
+The package does not implement the full original Runner or execute requests.
+See README.md for source locations, API contracts, and migration limitations.
