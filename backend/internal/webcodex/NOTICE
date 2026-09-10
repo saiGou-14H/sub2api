@@ -1,0 +1,14 @@
+WebCodex Server synchronous Runner polling migration
+
+Original project: WebCodex
+Source revision: 97ad66949a859174911c2f6da2ff1063be98bfa9
+Original license: Apache License, Version 2.0 (see LICENSE)
+
+This directory contains native Go adaptations of Runner wire DTOs and portions
+of the original Server's polling authentication, node registry, synchronous
+request lifecycle, and response handling. The implementation language, host
+integration, supported operation subset, and validation tests are modified.
+The protocol and runner READMEs define the present migration scope.
+
+The Apache license applies to the adapted WebCodex material; this notice does
+not replace or relicense sub2api's repository-wide license or unrelated files.
