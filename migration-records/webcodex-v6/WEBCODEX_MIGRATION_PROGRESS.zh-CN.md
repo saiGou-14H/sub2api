@@ -1,8 +1,10 @@
 # WebCodex → sub2api / DSH：V6 实施进度
 
-> 当前阶段：原协议与轮询接入、managed token 验证器、原凭据 SQL repository／宿主用户适配和默认关闭 router／DI、正式 Host 执行基础、原生文件及 Linux 严格进程启动子集已完成各自验证；凭据签发／管理／导入、真实 PostgreSQL 验收、业务事务／派发、受限进程正向路径、可信启动回执、Job 和完整 G2 仍未完成，尚不可作为生产 Runner 启用。
+> 当前阶段：原协议与轮询接入、managed token 验证器、原凭据 SQL repository／宿主用户适配和默认关闭 router／DI、正式 Host 执行基础、原生文件及 Linux 严格进程启动子集、OS API 接受与精确目标退出回执已完成各自验证；凭据签发／管理／导入、真实 PostgreSQL 验收、业务事务／派发、受限 strict 最终目标与私有 FD 控制传输、Job 和完整 G2 仍未完成，尚不可作为生产 Runner 启用。
 
 逐项已完成／待办见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)；工程完成度估算和历史快照见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)。本页保留各阶段的具体实现与验证回执。
+
+本页以下阶段按发生顺序保留历史。旧阶段中的“无可信启动回执”“真实 127 仍未知”及“DSH 新阶段未提交”已由末尾 DSH OS API 回执阶段更新；不据旧快照判断当前行为。
 
 ## 开发位置与范围
 
@@ -11,7 +13,7 @@
 | sub2api | `mpc-server` | `integration/sub2api` | `d9f5b7d75ecb9b8bd944326a0f3b161b1c217ee1` |
 | DSH | `mcp-runner` | `integration/deepseek-harness` | `b733bc9c812b0202d137ebd7b238f52fab7ad81f` |
 
-用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 12 条本地 Git 提交（Server 5 条、DSH 7 条），Server 当前代码基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
+用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 13 条本地 Git 提交（Server 5 条、DSH 8 条），Server 当前代码基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`，DSH 为 `4c3570bd5b103e956c88f6a38bf9140bec1a4e85`；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
 
 ## 本批代码
 
@@ -19,7 +21,7 @@
 |---|---|---|
 | [Go protocol](../../backend/internal/webcodex/protocol/README.md) | 原注册、视图、poll、result、offline DTO；27 项 RunnerRequest 顶层字段；严格 required/null/default、整数和 Unicode 解码；六类直接请求的闭合 Invocation | 全部 family/nested domain 已验证或可以执行 |
 | [Go runner](../../backend/internal/webcodex/runner/README.md) | 原 Bearer 凭据类型/scope/client/owner/group 检查；managed token 原哈希、撤销／到期及宿主不可变身份验证；原 12 字段 SQL repository／迁移和当前宿主用户适配；内存 registry；四条轮询路由已接默认关闭配置／DI | 真实 PostgreSQL 约束／事务已验收、公开签发／管理／导入、业务派发或持久执行记录 |
-| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、请求/结果编解码及进程内保留；可选 `./files` 原生文件和 `./native` 文件／Linux 严格进程组合入口；能力位依据 provider 支持 | 完整 generation-2 准入、受限进程正向执行、可信启动回执、shell/script、process profile／环境／Windows 等价、持久 Host 审批与 Job 所有权 |
+| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、请求/结果编解码及进程内保留；可选 `./files` 原生文件和 `./native` 文件／Linux 严格进程组合入口；OS API 接受与精确目标退出回执；能力位依据 provider 支持 | 完整 generation-2 准入、受限 strict 最终目标／私有 FD 传输、shell/script、process profile／环境／Windows 等价、持久 Host 审批与 Job 所有权 |
 | [Go↔TS 检查](../../backend/internal/webcodex/runner/interop_test.go) | 六类请求跨语言往返、64 位整数极值、真实 Go 接口拒绝 DSH 部分能力注册 | ChatGPT 原生 Connector、真实文件/命令执行的端到端成功 |
 
 六类直接请求为 `run_shell`、`run_process`、`run_script`、`file_read`、`file_write`、`file_list`。六类均有协议/分发入口；原生执行已覆盖后三类文件操作及当前 Linux `run_process` 子集（受限路径仍拒绝）。不将传输测试中的 fake executor 或 fabricated result 计为真实执行能力，也不将当前 process 子集记为完整跨平台等价。其他已知 family 明确返回 unsupported；全量能力仍保留在迁移计划中。
@@ -203,7 +205,7 @@ Runner 根据真实 provider 支持声明 `structured_process_argv`，不再无�
 ## 后续顺序与完成条件
 
 1. 正式 Host scope、guard、文件观察、sandbox 与前台进程基础已落地；保持不满足原完整能力基线时不能注册。
-2. 先补受限 strict 进程的兼容控制传输和可信启动事实，再实现原 Job FIFO／停止／双流快照／更新／库存闭环；继续补齐 process profile／环境／Windows 行为及 script 语义，落实正式 Host 交互/审批审计。直接调用的模型调用数保持为零。
+2. OS API 接受与精确目标退出回执已落地；先补受限 strict 最终目标原语与私有 FD 控制传输，再实现原 Job FIFO／停止／双流快照／更新／库存闭环；继续补齐 process profile／环境／Windows 行为及 run_shell／run_script 语义，落实正式 Host 交互/审批审计。直接调用的模型调用数保持为零。
 3. Server 已接入既有宿主用户解析、managed 凭据 repository／迁移及默认关闭 router／DI；下一步补公开签发／管理／显式导入、真实 PostgreSQL 迁移验收和原项目／任务／执行／审批事务与业务派发，继续禁止按可变展示用户名绑定。
 4. 随后补齐 generation-2 所需全部 22 项基础能力及测试、原业务表与事务、registry 持久投影、MCP/OAuth、Generic ToolRuntime 和 ProjectConnector 的独立调用路径；全量准入前持续保留真实受限执行与恢复验证。
 5. 接入 `compatibility` / `web_mcp` 模式；后者不调用 Prompt Tool bridge，不静默降级或重复执行。
@@ -245,3 +247,25 @@ WEBCODEX_RUNNER_ENABLED=true GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOMODCACH
 config 1.028s、server 2.818s，退出码 0；覆盖真实 SQL repository＋测试 User 的 mounted 认证生命周期、缺失／非 Agent／禁用用户／错误脱敏／大小上限／G2 拒绝、真实 CORS 开关矩阵和无 DB 查询计数、关闭 waiter，以及既有六项 HTTP ingress 检查。真实宿主 User 路径另由任务 408 覆盖。另以同一离线工具链执行 `go test -run '^$' ./cmd/server`，实际入口编译通过（0.021s，`no tests to run`）；这是生成后 Wire 装配的编译证据，不是启动服务或生产验收。`gofmt`、最终 diff 检查通过，相关任务输出已收取。
 
 累计功能提交现为 12 条（Server 5、DSH 7），当前 Server 代码基线为上述路由提交。前面十条历史阶段记录保持原样；DSH 新回执尚在进行／未提交，未计入本次能力或提交统计。真实 PostgreSQL 验收、公开凭据生命周期、导入、多记录业务事务、项目授权／派发、持久 registry／结果、完整 G2 和 G0 继续保留；未推送、部署、使用真实凭据／模型／数据库。整体约 15% 的评估口径不变。
+
+## DSH OS API 接受与精确目标退出回执（本阶段验证完成）
+
+本地功能提交 `4c3570bd5b103e956c88f6a38bf9140bec1a4e85` 修改 59 文件，任务 450 提交成功；累计 13 条功能提交（Server 5、DSH 8）。Server 当前基线 `9e4683d19c6d716592bdfb680af2a16cb4f263d0` 不变。前文各阶段保留当时事实，缺少启动回执、真实 127 尚未知及回执未提交的旧描述由本节更新。
+
+实际 native spawn（工作区引用：`integration/deepseek-harness/native/system/packages/entry/src/spawn.c`） 通过 Node addon 调用 posix_spawn；supervisor（工作区引用：`integration/deepseek-harness/packages/subprocess/subprocess-local/src/native-supervisor.ts`） 保留精确子进程并回报 OS API 接受与目标退出。Runner consumer（工作区引用：`integration/deepseek-harness/packages/runner/runner/src/process.ts`） 使用可选且不 reject 的 started 回执，区分 started／not-started／unknown；只有 typed C 已证实拒绝并确认受管范围退出后才给出 not_started。发生效果后的 errno 外形错误不能成为未启动证据，也不继续 PATH 重放。真实目标退出 127 返回 completed／127；首次 target-exit 锁存，之后文件丢失或 carrier 迟到错误不撤销结果。目标终态和范围清理仍独立，未知结果不能自动重放。
+
+私有 status 限 256 B、startup error 限 16 KiB；有界读取采用 nofollow／nonblock，允许已打开后 unlink 的 inode 链接数为 0，拒绝硬链接数大于 1。支持范围是 Linux glibc 2.34+ x64／arm64，实际运行证明仅覆盖 x64。回执是 OS API 接受事实，不是 exec 观察、目标 main／就绪或模型行为保证，不使用 ptrace。
+
+已收取的最终验证回执如下；保存进度文档不重复运行已通过的功能测试：
+
+- 完整 local provider 测试集与 Runner 测试合计 340 通过、11 项平台／confinement 跳过（最终任务 448）；其中 Runner process 37 通过、native composition 14 通过／2 跳过，均已包含在合计中。
+- 重建后的实际 Node source／built 入口 4／4；C tag 修正后的 native C＋host packed entry 32／32（任务 443）另行通过，仍适用于最终提交。
+- TypeScript 与完整 type-aware lint 0 错误，双语配对 772、JSDoc／diff 检查通过。提交 staged lint 有 3 项既有 disable comment 警告，位置为 index.ts:248、spawn-runner.ts:290、spawn.ts:602；对应注释不在本功能 diff 中，无错误，不能称提交零警告。
+- 第三方 generator 已运行且无净 diff；任务 450 提交完成后代码工作树干净。
+- 较早 type-equiv 418 个块＋418 个派生块、Note 格式 307、mdlinks 1533 通过；最终进度快照另行核验生成器内容、manifest、相对路径与锚点，和此前 11 份 Markdown／160 个链接的阶段回执区分。
+
+最终 x64 构建的 readelf 仅列出 GLIBC_2.2.5／2.4／2.15，没有 GLIBC_2.34 加载依赖；这不等于真实旧 glibc 运行。完整 musl／macOS／Windows／E2B、完整平台 tarball、真实 user-systemd／confinement 验收仍缺。原 Linux scope fixture 不替代真实 manager／cgroup。read-only／workspace-write 继续在 Runner 策略解析后拒绝，不能把此次回执功能算作受限执行恢复。
+
+下一项 D2 需实现受限 strict 最终目标原语与私有 FD 控制传输。当前 Subprocess strict 仅作用于 argv[0]，Sandbox confine 返回包装 argv 而没有控制 FD 保留／内侧 helper 语义；Linux stdio 仅有三条标准流，bwrap workspace-write 的 tmpfs /tmp 会遮蔽宿主请求路径。只读设计建议由 provider 将受信 helper 放在 wrapper 内侧，传递独立有界控制 FD，再由 helper 严格启动最终目标并关闭目标的 FD ≥3；不开放宿主临时目录为可写。相关描述符／能力 API 尚是提案，需由 Sandbox 定义／local provider、Subprocess 定义／local provider 和 Runner consumer 同步实现并证明真实 backend／scope 组合；未知／partial／不支持组合继续拒绝。之后仍需原 Job、profile／环境、run_shell／run_script 闭环。
+
+Native 在实际支持时仍仅 3／22，file-only 2／22；File 3 项与剩余 17 项不变。整体约 15%、13 个工作包尚无一个满足全部退出条件、22 行待办及完整 G2／G0 目标不变。此前 docs 快照提交 `4ae8b0231`／`1bc5f42614` 只记录第十二条阶段；十三条功能的进度通过相同生成器保存到两侧最新 docs 提交，manifest 与 Git 历史共同标定来源及代码基线。

@@ -10,7 +10,7 @@
     },
     "DSH Runner": {
       "branch": "mcp-runner",
-      "commit": "cf374cda9bc06a08e6d548d8e4f6cf32b19339bb"
+      "commit": "4c3570bd5b103e956c88f6a38bf9140bec1a4e85"
     }
   },
   "transformation": "Preserve prose and fenced evidence; rehome same-repository links and spell external workspace references as text.",
@@ -18,8 +18,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "fc39fe144b39f43576bca88ce904b8d4c90f298abc4abdce9d1be2b18a235df7",
-      "snapshot_sha256": "7ace1a5a2dda7c2120d96727c3aabb1704a36995ba5dd0fa8319e941583e46bf",
+      "source_sha256": "63792ac1b43a2fbc5e658933d9bd262319ad6550ab0f4b1f9db61502d850ef6e",
+      "snapshot_sha256": "c263d57c0cd280897beeca69311d73e27cfe3e1ee384fe63e68f513d78336141",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "WEBCODEX_RUNNER_MIGRATION_MAP_V6.zh-CN.md",
@@ -29,13 +29,14 @@
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "6dbdf3cfc3f311cb42d3d2b3aeef4153f0a77626dc395228f6449efe0b09e192",
-      "snapshot_sha256": "2a949a715336f992794aed51ff70fa5ee5b2fe1eb45ab7dd6911c12ec3f3b464",
+      "source_sha256": "17a2fdcf87ad1cd7126fa8131e40017754cf8cb7eafc640c39fdb0bd787a1990",
+      "snapshot_sha256": "77d4d6b566686d198e67d63a06094ba2bc5009664911828378a97feeefe07ab2",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "integration/deepseek-harness/.agents/notes/implemented/architecture/2026-09-14-runner-polling-executor.zh.md",
         "integration/deepseek-harness/docs/config-catalog.zh.md#deepseek-aidsh-runnerfiles",
         "integration/deepseek-harness/docs/subsystems/filesystem.zh.md",
+        "integration/deepseek-harness/native/system/packages/entry/src/spawn.c",
         "integration/deepseek-harness/packages/core/scope/src/index.ts",
         "integration/deepseek-harness/packages/core/tools/src/index.ts",
         "integration/deepseek-harness/packages/fs/fs-local/README.zh.md",
@@ -56,6 +57,7 @@
         "integration/deepseek-harness/packages/shell/pwsh-local/src/index.ts",
         "integration/deepseek-harness/packages/shell/tool-bash/src/index.ts",
         "integration/deepseek-harness/packages/shell/tool-pwsh/src/index.ts",
+        "integration/deepseek-harness/packages/subprocess/subprocess-local/src/native-supervisor.ts",
         "integration/deepseek-harness/packages/subprocess/subprocess/src/types.ts",
         "source-sync/webcodex/crates/webcodex-core/src/runner_operation.rs",
         "source-sync/webcodex/crates/webcodex-process/tests/managed_child.rs",
@@ -68,8 +70,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "dce83c886845a10b2a84d6f34029e68a77476e5eb596e05a757930220ea4d857",
-      "snapshot_sha256": "44fc92c755dce1323bc109523a2ae6781752a1fe8387272f04a80f5a346487d6",
+      "source_sha256": "f25ee454b24858f89095ba1457367459546951a0d2b761aa5e0bf821800e7a99",
+      "snapshot_sha256": "4565a23b9ca7d1f9492b9fdfe04cf89f9113a52dbbc5638ef8c908b5d9504cc0",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",
         "WEBCODEX_SERVER_MIGRATION_MAP_V6.zh-CN.md",

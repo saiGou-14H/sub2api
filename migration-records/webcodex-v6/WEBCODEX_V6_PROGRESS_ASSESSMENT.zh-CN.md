@@ -1,6 +1,6 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-本报告第 1–8 节保留文件适配器阶段的历史评估快照，第 9–11 节记录后续进程、认证及 Linux 启动修复，第 12 节记录 Server 凭据持久化与默认关闭路由装配。当前累计 12 条功能提交（Server 5、DSH 7），Server 基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`；DSH 仍以第 11 节的已提交行为为准。当前逐项状态见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，详细验证见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。目标是将 WebCodex Server 原生迁入 sub2api、Runner 原生迁入 DSH，覆盖 V6 完整功能并完成真实原生 MCP 验收。历史区间是人工工程估算，不能把旧快照中的能力描述当作当前行为；本次文档保存未重新运行功能测试或连接生产数据库。
+本报告第 1–8 节保留文件适配器阶段的历史评估快照，第 9–11 节记录后续进程、认证及 Linux 启动修复，第 12 节记录 Server 凭据持久化与默认关闭路由装配，第 13 节记录 DSH OS API 接受与精确目标退出回执。当前累计 13 条功能提交（Server 5、DSH 8），Server 基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`，DSH 基线为 `4c3570bd5b103e956c88f6a38bf9140bec1a4e85`；第 1–12 节中的未提交、无可信启动回执及歧义 127 描述均是当时快照，当前对应行为以第 13 节为准。当前逐项状态见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，详细验证见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。目标是将 WebCodex Server 原生迁入 sub2api、Runner 原生迁入 DSH，覆盖 V6 完整功能并完成真实原生 MCP 验收。历史区间是人工工程估算，不能把旧快照中的能力描述当作当前行为；本次文档保存未重新运行功能测试或连接生产数据库。
 
 ## 1. 结论与统计口径
 
@@ -270,3 +270,17 @@ G0 使用不进入 prompt 的随机文件内容，验证真实 ChatGPT 调用、
 当前 Server 后续顺序为：凭据签发／管理／显式导入与真实 PostgreSQL 迁移验收；原项目／任务／run／执行／审批事务及真实业务派发；registry 持久投影、其他凭据族、MCP／Generic ToolRuntime／ProjectConnector。单语句撤销不代表多记录事务，独立认证查询不保证与并发撤销原子；不取消已经派发的远端工作。DSH 新阶段仍在进行且未计入提交或能力统计，当前限制继续按第 11 节和状态总表保留。
 
 整体仍按约 15%、10%～20% 粗略管理，未重算权重；13 个大工作包尚无一个满足全部退出条件，22 项待办及剩余 17 项 File 操作均不缩减。历史第 1–11 节保留各阶段当时的未完成描述；当前 Server 状态以上述提交和[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)为准。未推送、部署、连接真实凭据／模型／数据库；详细源映射和命令见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。
+
+## 13. 后续开发：DSH OS API 接受与精确目标退出回执
+
+第十三条本地功能提交为 `4c3570bd5b103e956c88f6a38bf9140bec1a4e85`（DSH，59 文件，任务 450 提交成功）。累计功能提交 13 条（Server 5、DSH 8）；Server 基线仍为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`。第 1–12 节保留历史原文；其中未提交、缺启动回执、真实目标 127 尚未知的判断不再代表当前 DSH。
+
+可选且不 reject 的 started 回执提供 OS API 接受／已证实拒绝／未知，目标退出另由精确子进程结果报告。仅 typed C 证明拒绝并确认受管范围退出后才返回 not_started；已发生效果后的 errno 外形错误仍是 unknown，不继续 PATH 重放。真实目标退出 127 返回 completed／127。首次 target-exit 锁存后，即使交换文件丢失或 carrier 迟到错误也保留结果；目标终态与范围清理继续分别报告。私有状态与启动错误读取分别限 256 B／16 KiB，nofollow／nonblock；允许已打开后 unlink 的 inode 链接数为 0，拒绝硬链接数大于 1。
+
+实现通过实际 Node addon 的 posix_spawn，支持范围为 Linux glibc 2.34+ x64／arm64，真实运行验证仅有 x64。回执证明 OS API 接受，不保证 exec 观察、目标 main／就绪或模型行为，不使用 ptrace。旧 flock 符号 ABI 兼容检查不等于实跑旧 glibc；完整 musl／macOS／Windows／E2B、完整 tarball、真实 systemd／confinement 矩阵未完成。
+
+最终 local provider 与 Runner 测试合计 340 通过／11 项平台或 confinement 跳过（任务 448），其中 Runner process 37 通过、native composition 14 通过／2 跳过均包含在合计内；重建后的实际 Node source／built 入口 4／4，C tag 修正后的 native C＋host packed entry 32／32（任务 443）另行通过。各组不相加为总覆盖率。TypeScript／完整 type-aware lint 0 错误；配对 772、JSDoc／diff 通过。提交 staged lint 有 3 项既有 disable comment 警告（index.ts:248、spawn-runner.ts:290、spawn.ts:602），对应注释不在本功能 diff 中，不能称提交零警告。第三方 generator 无净 diff，提交后代码工作树干净。较早 type-equiv 418 块＋418 派生块、Note 格式 307、mdlinks 1533 均为已收取的独立回执；最新进度快照另行核验内容、manifest、路径和锚点。最终 x64 addon 的 readelf 只列出 GLIBC_2.2.5／2.4／2.15，没有 GLIBC_2.34 加载依赖，仍不宣称实跑旧 glibc。
+
+下一项 D2 仍是受限 strict 最终目标原语与私有 FD 控制传输。read-only／workspace-write 继续拒绝；现有 strict 仅约束 argv[0]，外包 wrapper 不能证明最终目标。bwrap 的 tmpfs /tmp 会遮蔽宿主交换路径；现有 Sandbox confine 与 Linux Subprocess stdio 没有保留控制 FD／内侧 helper 的完整约定。只读设计建议由 provider 安排 wrapper 内的受信 helper，再对最终目标保留 closefrom(3) 并独立回传事实；相关 API 是提案，不是现有能力。实现与真实 backend／scope 证明完成前，不移除此待办；随后仍需 Job／profile／run_shell／run_script 闭环。
+
+Native 仅在能力可用时声明 3／22，file-only 2／22；三项 File 操作与剩余 17 项不变。整体仍按约 15%、10%～20% 粗略管理，13 个工作包尚无一个完成全部退出条件，22 行待办完整保留。本功能不代表完整 G2、原生 MCP 闭环或生产可替换。此前快照 docs 提交 `4ae8b0231`／`1bc5f42614` 仅记录第十二条阶段；最新十三条快照按状态总表的生成与校验机制保存，具体提交以各分支 Git 历史及 manifest 为准，docs 提交不增加功能数。
