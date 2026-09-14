@@ -6,7 +6,7 @@
   "code_baselines": {
     "sub2api Server": {
       "branch": "mpc-server",
-      "commit": "861bb9e78fe1ba7fe1192c7514ada97733bb12e9"
+      "commit": "9e4683d19c6d716592bdfb680af2a16cb4f263d0"
     },
     "DSH Runner": {
       "branch": "mcp-runner",
@@ -18,8 +18,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "68b1b809fd461b400723aa7f3e058645c4479a0736dda11c53985d6aa317109d",
-      "snapshot_sha256": "0b694ef5beeabe6c48c5b2dba7611ef79159860d5bdd3573b267d48f86be42ec",
+      "source_sha256": "fc39fe144b39f43576bca88ce904b8d4c90f298abc4abdce9d1be2b18a235df7",
+      "snapshot_sha256": "7ace1a5a2dda7c2120d96727c3aabb1704a36995ba5dd0fa8319e941583e46bf",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "WEBCODEX_RUNNER_MIGRATION_MAP_V6.zh-CN.md",
@@ -29,8 +29,8 @@
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "39c61ac379459f8884e3d09323a92f80e26e010274c20c47f337038697c30102",
-      "snapshot_sha256": "24401ab192f46ec95e8ad5b86f5420ab26974178422ec7c823685bfa6dc34338",
+      "source_sha256": "6dbdf3cfc3f311cb42d3d2b3aeef4153f0a77626dc395228f6449efe0b09e192",
+      "snapshot_sha256": "2a949a715336f992794aed51ff70fa5ee5b2fe1eb45ab7dd6911c12ec3f3b464",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "integration/deepseek-harness/.agents/notes/implemented/architecture/2026-09-14-runner-polling-executor.zh.md",
@@ -68,8 +68,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "04f58e34ec637fe25c2bb61740ea18b58fea97641cc24b5120b2b27b8ec26a1d",
-      "snapshot_sha256": "59b159b99d5fe6f534906af0f802d0925b1f410f0d0e3f81bceb72ac6c3138b5",
+      "source_sha256": "dce83c886845a10b2a84d6f34029e68a77476e5eb596e05a757930220ea4d857",
+      "snapshot_sha256": "44fc92c755dce1323bc109523a2ae6781752a1fe8387272f04a80f5a346487d6",
       "external_workspace_references": [
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",
         "WEBCODEX_SERVER_MIGRATION_MAP_V6.zh-CN.md",
@@ -84,7 +84,7 @@
       ]
     }
   ],
-  "index_sha256": "6b477ae1806eb93b45458b629d05b1ca81462da79d70bf0b51799fe67fbc5f02",
+  "index_sha256": "ce023f4111b89f835128c7fa06ce8af6319348ab98baf5940812a3a4012f47e6",
   "maintenance_script_workspace_path": "sync_webcodex_progress.py",
-  "maintenance_script_sha256": "c5d7200d921345bb1e90e391914c7c7f46331fae2e9ca6caa280469dd2e5ba8d"
+  "maintenance_script_sha256": "26ce0af6b570ff57169d890af42ca858df8aeb9c1e13e89b275d661aab0cecf0"
 }

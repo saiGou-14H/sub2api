@@ -4,11 +4,11 @@
 
 ## 1. 当前结论与代码版本
 
-整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 10 条功能提交（Server 3、DSH 7），但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
+整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 12 条功能提交（Server 5、DSH 7），但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
 
 | 对象 | 开发分支 | 本次核对的代码版本 |
 |---|---|---|
-| sub2api Server | `mpc-server` | `861bb9e78fe1ba7fe1192c7514ada97733bb12e9` |
+| sub2api Server | `mpc-server` | `9e4683d19c6d716592bdfb680af2a16cb4f263d0` |
 | DSH Runner | `mcp-runner` | `cf374cda9bc06a08e6d548d8e4f6cf32b19339bb` |
 | 冻结 WebCodex 参考 | `source-sync/webcodex` | `97ad66949a859174911c2f6da2ff1063be98bfa9` |
 
@@ -26,12 +26,12 @@
 | Project 子操作 | 0／7 | 尚未迁入完整操作 |
 | Computer 子操作 | 0／19 | 尚未迁入完整操作 |
 | G2 必需能力声明 | 支持 native-image 的 Linux 3／22；file-only 2／22 | 合规 Go registry 仍返回 400，不能伪报其余能力 |
-| Server polling handler | 4／4 组件已实现 | register／poll／result／offline 尚未挂正式 router |
-| managed Agent Token 验证 | 算法与注入接口已完成 | 实际数据库 repository／宿主用户 resolver／DI 未接线 |
+| Server polling handler | 4／4 已接默认关闭 router／DI | 显式启用才挂载 register／poll／result／offline；无业务派发／持久结果 |
+| managed Agent Token 验证 | 原 12 字段 SQL repository／迁移、当前宿主用户与认证装配已完成 | 真实 PostgreSQL 约束／事务未验收；公开签发／管理／导入未实现 |
 | 业务持久化、导入和持久结果 | 未完成 | registry 及去重保留为进程内状态 |
 | 真实 G0 与生产替换 | 未完成 | 配置发现与 mock 不替代真实原生 MCP 验收 |
 
-## 3. 已完成的十个功能提交
+## 3. 已完成的十二个功能提交
 
 | 序号 | 仓库 | 功能 | 提交 |
 |---|---|---|---|
@@ -45,6 +45,8 @@
 | 8 | DSH | opt-in HTTP polling、进程内请求／结果保留及三项原生文件执行 | `74b24600ad` |
 | 9 | DSH | 字面 argv、stdin、双流上限、超时／取消／退出／清理的原生进程基础 | `1435db0d70` |
 | 10 | DSH | Linux ENOEXEC 无隐式 shell、按实际支持声明能力、歧义 127 保留未知 | `cf374cda9b` |
+| 11 | Server | 原 12 字段 managed 凭据 SQL repository／迁移及当前宿主 User 适配 | `b3614bba3` |
+| 12 | Server | 四条原 polling 路由默认关闭配置、实际 router／DI 与退出回调 | `9e4683d19` |
 
 原生文件操作已经覆盖范围读取、编码／字节限制、完整 hash、观察后写入、目录创建控制、权限拒绝、符号链接分类、排序和整体结果上限。FS 提供方接口已适配并不代表远端 E2B 真实执行或并发外部写入下的所有原子保证已经验收。
 
@@ -55,15 +57,16 @@
 3. 没有可信启动回执。缺少启动错误报告的退出码 127 无法区分 bootstrap 与真实目标退出，因此两者保守返回 outcome_unknown；其他非零退出事实保留。
 4. 当前 Runner 未知结果分支不返回双流，低层 collector 仍可保留已收集内容。未知结果不能触发盲重试，清理结束不等于原执行从未开始。
 5. managed Token 记录按规范字符串 sub2api_user_<正整数宿主ID> 解析，按不可变 ID 核对当前启用用户；旧数据必须显式映射并重写关联 owner／subject，不能按展示用户名自动合并。
-6. 原 kind=user／空 kind 验证后仍是非 Runner transport 身份；全部已存 scope 原样拆分，额外／admin scope 不能越过精确授权。真实凭据存储、导入和路由挂载未实现。
+6. 原 kind=user／空 kind 验证后仍是非 Runner transport 身份；全部已存 scope 原样拆分，额外／admin scope 不能越过精确授权。原凭据 SQL repository／嵌入迁移及默认关闭路由装配已实现，公开签发／管理／导入和真实 PostgreSQL 约束／事务验收未完成。
+7. `wc_api_keys` 保留原 12 字段；物理 `user_id` 是宿主 BIGINT 外键，认证投影仍是规范 string。宿主 resolver 检查当前 User 的 ID／DeletedAt／IsActive，不从用户名或模型分组取得权限。四条路径仅在 `webcodex_runner.enabled=true` 且五项正数限制有效时挂载；CORS 204 不表示认证或启用成功。HTTP shutdown 回调异步触发幂等 Close，不等于等待回调完成，也不停止已派发远端工作。
 
 ## 5. 待开发工作逐项清单
 
 | 序号 | 工作包 | 当前基础 | 待完成与退出条件 |
 |---|---|---|---|
 | 1 | R0 原契约 | 原字段与六类 codec | 全部操作家族、嵌套 DTO、Job 更新、默认值与错误语义的 Rust／Go／TS fixture 对照 |
-| 2 | S1 身份／存储 | managed verifier 和认证接口 | 宿主用户查询、managed repository、签发／撤销／导入、OAuth／project credential 独立验证、原业务表和事务 |
-| 3 | S2 MCP／Registry | 内存 registry／四条 handler | 正式 router／DI／默认关闭启用配置、真实业务派发、原 MCP／Generic ToolRuntime、inventory 与持久投影 |
+| 2 | S1 身份／存储 | managed verifier、原 12 字段 SQL repository／迁移、当前宿主 User 适配 | 公开签发／撤销管理／显式导入、真实 PostgreSQL 约束与迁移验收、OAuth／project credential 独立验证、原业务表和多记录事务 |
+| 3 | S2 MCP／Registry | 内存 registry／四条路由默认关闭配置与正式 router／DI | 真实业务授权／派发、原 MCP／Generic ToolRuntime、inventory 与持久投影 |
 | 4 | D1 Runner core | Host owner／scope／guard／文件观察 | 其余 invocation、长期执行归属、正式人审响应与持久审计、各 direct 家族零模型验证 |
 | 5 | D2 受限 process | Linux unrestricted 严格启动 | 沙箱兼容控制传输、可信启动成功／失败回执、profile／环境快照及平台结果等价 |
 | 6 | D2 shell／script | 已有 wire codec | 原 shell 路由／policy、解释器选择、临时脚本与清理、内部 POSIX、SSH 不回退本地 |
@@ -110,8 +113,8 @@
 
 | 顺序 | Runner 主线 | Server 主线 |
 |---|---|---|
-| 1 | 受限严格启动、可信启动事实 | 真实宿主用户与 managed 凭据 repository |
-| 2 | 原 process Job／stop／update／库存闭环 | 默认关闭 router／DI、真实业务派发 |
+| 1 | 受限严格启动、可信启动事实 | 凭据签发／管理／显式导入及真实 PostgreSQL 迁移验收 |
+| 2 | 原 process Job／stop／update／库存闭环 | 原业务授权／派发与持久 registry／结果 |
 | 3 | shell／script、编辑／删除／产物等 G2 基础 | 原项目／任务／执行／审批事务 |
 | 4 | Validation／LSP／项目生命周期、完整 G2 | MCP／Generic ToolRuntime／ProjectConnector |
 | 5 | 真实联调、恢复、平台矩阵 | Web 模式／Connector／UI／G0 |
@@ -125,6 +128,8 @@
 - 根 Host 类型检查、最终 type-aware lint、相关包构建、普通 Node 的真实 Loader／HTTP 文件／进程／ENOEXEC／127 冒烟通过。
 - 两项最新 Go↔DSH race 通过，覆盖原六类及 64 位整数往返和部分 G2 注册仍被拒绝，不代表完整执行链路成功。
 - 七组双语文档配对及相关文档检查通过；正常功能提交 hooks 通过，较窄 staged lint 有 4 项既有 unused suppression 警告、0 错误。
+- Server 原凭据／迁移结构／真实 User repository＋Ent SQLmock race 通过（任务 408）；默认关闭配置／真实 CORS／mounted 认证及既有 HTTP ingress 聚焦 race 通过（任务 423）。父代理报告实际 cmd/server 编译通过（任务 421，no-tests）；这些不替代真实 PostgreSQL 约束／事务、业务派发或生产服务验收。
+- DSH 新阶段仍在进行且未提交，本表继续保留 `cf374cda9b` 的既有行为和限制，不计入新增能力或提交数。
 - 这些检查范围有重叠，不累加成全项目覆盖率。本次状态整理只核对文档、源码映射与 Git，没有重跑功能测试、模型或外部 API。
 
 ## 8. 本地与 Git 保存方式

@@ -1,6 +1,6 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-本报告第 1–8 节保留文件适配器阶段的历史评估快照，第 9–11 节记录后续进程、认证及 Linux 启动修复。当前逐项状态见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，详细验证见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。目标是将 WebCodex Server 原生迁入 sub2api、Runner 原生迁入 DSH，覆盖 V6 完整功能并完成真实原生 MCP 验收。历史区间是人工工程估算，不能把旧快照中的能力描述当作当前行为；本次文档保存未重新运行功能测试或连接生产数据库。
+本报告第 1–8 节保留文件适配器阶段的历史评估快照，第 9–11 节记录后续进程、认证及 Linux 启动修复，第 12 节记录 Server 凭据持久化与默认关闭路由装配。当前累计 12 条功能提交（Server 5、DSH 7），Server 基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`；DSH 仍以第 11 节的已提交行为为准。当前逐项状态见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，详细验证见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。目标是将 WebCodex Server 原生迁入 sub2api、Runner 原生迁入 DSH，覆盖 V6 完整功能并完成真实原生 MCP 验收。历史区间是人工工程估算，不能把旧快照中的能力描述当作当前行为；本次文档保存未重新运行功能测试或连接生产数据库。
 
 ## 1. 结论与统计口径
 
@@ -251,3 +251,22 @@ G0 使用不进入 prompt 的随机文件内容，验证真实 ChatGPT 调用、
 最终五组相关回归合计 174 通过、2 因真实沙箱后端不可用而跳过；根 Host 类型检查、最后 type-aware lint、相关包构建和普通 Node 真实 Loader／HTTP 冒烟通过。冒烟覆盖文件、正常进程、ENOEXEC 拒绝及真实目标 127 的未知结果。两项 Go↔DSH 跨语言 race 在最新开发代码上补跑通过，证明原六类 wire 往返和部分能力注册仍被拒绝；不证明真实凭据数据库接线或完整 G2 执行。七组文档配对、链接／换行／预算／Note 格式检查通过；完整仓库测试、完整 doc-sync 与真实 G0 未运行。正常 pre-commit hooks 通过，较窄 staged lint 有 4 项既有 unused suppression 警告、0 错误。
 
 后续优先恢复受限 strict 执行并补可信启动事实，再接原 Job 队列／停止／更新／库存；Server 并行补现有宿主用户和 managed 凭据 repository、迁移与默认关闭路由接线。详细回执与未完成项见[最新实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。不重算此前约 15%、10%～20% 的粗略工程评估，不把独立修复称为迁移全量完成；未推送、部署、读取真实凭据或调用模型。
+
+## 12. 后续开发：Server 原凭据存储与默认关闭路由
+
+在前十条功能提交之后，Server 增加两条独立本地功能提交，累计 12 条（Server 5、DSH 7）：
+
+| 提交 | 已完成范围 |
+|---|---|
+| `b3614bba306253eb53299f7bb2abbeb6274d7329` | 原 managed 凭据 SQL repository／嵌入迁移、当前宿主 User 适配 |
+| `9e4683d19c6d716592bdfb680af2a16cb4f263d0` | 四条原 polling 路由的默认关闭配置、实际 router／Wire 装配与退出回调 |
+
+原 `api_keys` 以 `wc_api_keys` 命名迁入，保留全部 12 个字段及 NULL／有符号 Unix 秒生命周期。物理 `user_id` 是既有宿主 `users(id)` 的 BIGINT 外键，在 repository 边界投影为 `sub2api_user_<正整数ID>`；原认证 `UserID` string 契约不变，无第二套用户或模型 key 授权域。实现原 Insert／GetByID／GetByHash／首次撤销时间保留／last-used 更新，并通过真实 `UserRepository.GetByID` 检查同 ID、`DeletedAt` 与 `IsActive()`。这不等于已实现公开签发、管理或导入流程。
+
+四个 `/api/shell/agent/{register,poll,result,offline}` 路径已进入正常 Server 装配；默认 `webcodex_runner.enabled=false` 时不创建 registry，也不挂这些路由。显式启用必须提供五项正数限制：`max_runners`、`max_pending_per_runner`、`online_window_seconds`、`max_body_bytes`、`max_token_bytes`；秒数还须可表示为 Go duration，没有任意生产运行默认值。允许来源的 CORS OPTIONS 在开／关状态都可返回 204，不授予认证；未认证 POST 分别为 401／404。退出使用 `RegisterOnShutdown` 异步调用幂等 `Close`，不宣称 HTTP Shutdown 等待回调完成；测试另行等待 registry waiter 结算。
+
+最终证据为原凭据 repository／迁移结构与真实 User repository＋Ent 的 SQLmock race（任务 408）、配置环境隔离／真实 CORS／mounted 认证／全部既有 HTTP ingress 聚焦 race（任务 423），以及父代理报告的实际 `cmd/server` 编译成功（任务 421，no-tests）。SQLmock 使用假记录；无真实 PostgreSQL DDL／外键／并发事务执行，无生产服务启动。这些回执证明已实现范围和宿主类型装配，不证明完整业务权限、持久结果或 G0。
+
+当前 Server 后续顺序为：凭据签发／管理／显式导入与真实 PostgreSQL 迁移验收；原项目／任务／run／执行／审批事务及真实业务派发；registry 持久投影、其他凭据族、MCP／Generic ToolRuntime／ProjectConnector。单语句撤销不代表多记录事务，独立认证查询不保证与并发撤销原子；不取消已经派发的远端工作。DSH 新阶段仍在进行且未计入提交或能力统计，当前限制继续按第 11 节和状态总表保留。
+
+整体仍按约 15%、10%～20% 粗略管理，未重算权重；13 个大工作包尚无一个满足全部退出条件，22 项待办及剩余 17 项 File 操作均不缩减。历史第 1–11 节保留各阶段当时的未完成描述；当前 Server 状态以上述提交和[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)为准。未推送、部署、连接真实凭据／模型／数据库；详细源映射和命令见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。

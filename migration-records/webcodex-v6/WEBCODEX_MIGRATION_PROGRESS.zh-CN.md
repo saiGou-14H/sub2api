@@ -1,6 +1,6 @@
 # WebCodex → sub2api / DSH：V6 实施进度
 
-> 当前阶段：原协议与轮询接入、managed token 验证器、正式 Host 执行基础、原生文件及 Linux 严格进程启动子集已完成各自验证；真实凭据数据库／路由接线、受限进程正向路径、可信启动回执、Job 和完整 G2 仍未完成，尚不可作为生产 Runner 启用。
+> 当前阶段：原协议与轮询接入、managed token 验证器、原凭据 SQL repository／宿主用户适配和默认关闭 router／DI、正式 Host 执行基础、原生文件及 Linux 严格进程启动子集已完成各自验证；凭据签发／管理／导入、真实 PostgreSQL 验收、业务事务／派发、受限进程正向路径、可信启动回执、Job 和完整 G2 仍未完成，尚不可作为生产 Runner 启用。
 
 逐项已完成／待办见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)；工程完成度估算和历史快照见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)。本页保留各阶段的具体实现与验证回执。
 
@@ -11,14 +11,14 @@
 | sub2api | `mpc-server` | `integration/sub2api` | `d9f5b7d75ecb9b8bd944326a0f3b161b1c217ee1` |
 | DSH | `mcp-runner` | `integration/deepseek-harness` | `b733bc9c812b0202d137ebd7b238f52fab7ad81f` |
 
-用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 10 条本地 Git 提交（Server 3 条、DSH 7 条），文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
+用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 12 条本地 Git 提交（Server 5 条、DSH 7 条），Server 当前代码基线为 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
 
 ## 本批代码
 
 | 位置 | 当前实现 | 尚不代表 |
 |---|---|---|
 | [Go protocol](../../backend/internal/webcodex/protocol/README.md) | 原注册、视图、poll、result、offline DTO；27 项 RunnerRequest 顶层字段；严格 required/null/default、整数和 Unicode 解码；六类直接请求的闭合 Invocation | 全部 family/nested domain 已验证或可以执行 |
-| [Go runner](../../backend/internal/webcodex/runner/README.md) | 原 Bearer 凭据类型/scope/client/owner/group 检查；managed token 原哈希、撤销／到期及宿主不可变身份验证器；内存 registry；四条轮询 handler 与单次派发／结果／替换／下线闭环 | 已接入 sub2api 实际凭据数据库、公开 router 或持久执行记录 |
+| [Go runner](../../backend/internal/webcodex/runner/README.md) | 原 Bearer 凭据类型/scope/client/owner/group 检查；managed token 原哈希、撤销／到期及宿主不可变身份验证；原 12 字段 SQL repository／迁移和当前宿主用户适配；内存 registry；四条轮询路由已接默认关闭配置／DI | 真实 PostgreSQL 约束／事务已验收、公开签发／管理／导入、业务派发或持久执行记录 |
 | DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、请求/结果编解码及进程内保留；可选 `./files` 原生文件和 `./native` 文件／Linux 严格进程组合入口；能力位依据 provider 支持 | 完整 generation-2 准入、受限进程正向执行、可信启动回执、shell/script、process profile／环境／Windows 等价、持久 Host 审批与 Job 所有权 |
 | [Go↔TS 检查](../../backend/internal/webcodex/runner/interop_test.go) | 六类请求跨语言往返、64 位整数极值、真实 Go 接口拒绝 DSH 部分能力注册 | ChatGPT 原生 Connector、真实文件/命令执行的端到端成功 |
 
@@ -204,10 +204,44 @@ Runner 根据真实 provider 支持声明 `structured_process_argv`，不再无�
 
 1. 正式 Host scope、guard、文件观察、sandbox 与前台进程基础已落地；保持不满足原完整能力基线时不能注册。
 2. 先补受限 strict 进程的兼容控制传输和可信启动事实，再实现原 Job FIFO／停止／双流快照／更新／库存闭环；继续补齐 process profile／环境／Windows 行为及 script 语义，落实正式 Host 交互/审批审计。直接调用的模型调用数保持为零。
-3. Server 并行接入既有宿主用户解析、managed 凭据 repository／迁移及默认关闭的 router／DI；当前注入式验证器不替代真实接线，不按可变展示用户名绑定。
+3. Server 已接入既有宿主用户解析、managed 凭据 repository／迁移及默认关闭 router／DI；下一步补公开签发／管理／显式导入、真实 PostgreSQL 迁移验收和原项目／任务／执行／审批事务与业务派发，继续禁止按可变展示用户名绑定。
 4. 随后补齐 generation-2 所需全部 22 项基础能力及测试、原业务表与事务、registry 持久投影、MCP/OAuth、Generic ToolRuntime 和 ProjectConnector 的独立调用路径；全量准入前持续保留真实受限执行与恢复验证。
 5. 接入 `compatibility` / `web_mcp` 模式；后者不调用 Prompt Tool bridge，不静默降级或重复执行。
 6. 按两份 V6 源码映射继续原可选功能：SSH、persistent shell、AgentTask/ACP、MCP/plugin、memory/skills、computer、恢复与取消等；分期不表示删除功能。
 7. G0 需要真实 ChatGPT 原生 Connector 的随机文件、项目/节点/窗口隔离、续接、审批/撤销、取消及结果回传证据；配置发现和 mock 不算通过。当前没有进行这一外部验证，也未申请部署。
 
 完整产品验收不能由“codec 有类型”“fake executor 返回成功”“服务能启动”替代。本文件记录阶段进展，不覆盖 V6 全功能目标，也不宣称可交付生产。
+
+## Server 原 managed 凭据持久化（本阶段验证完成）
+
+本地功能提交 `b3614bba306253eb53299f7bb2abbeb6274d7329`（`feat(webcodex): persist managed credentials with host users`）将原 managed `api_keys` 的 12 个字段保留在 `wc_api_keys`，使用宿主 SQL pool 和嵌入迁移机制。实现为 [repository](../../backend/internal/repository/webcodex_api_key_repo.go)、[User resolver](../../backend/internal/repository/webcodex_host_user.go)及[迁移 238](../../backend/migrations/238_webcodex_api_keys.sql)，完整原字段／生命周期出处见[存储说明](../../backend/internal/webcodex/runner/CREDENTIAL_STORAGE.md)。
+
+字段为 `id,user_id,name,key_hash,key_prefix,created_at,last_used_at,revoked_at,scopes,expires_at,kind,allowed_client_id`。原 string 凭据 ID、唯一 hash、NULL 与有符号 Unix 秒、全部 scope／原 kind／nullable client 绑定保留。仅物理 `user_id` 改为既有 `users(id)` 的 BIGINT 外键，repository 向认证器投影规范 string `sub2api_user_<正整数ID>`；原 `AgentCredentialRecord.UserID` 契约不变，无影子用户、明文模型 key 或新计费／授权分组。
+
+原 `Insert`／`GetByID`／`GetByHash`／`Revoke`／`UpdateLastUsed` 已实现；撤销用原 `COALESCE` 保留首次时间，通过 PostgreSQL `UPDATE RETURNING` 合并原更新／读取。宿主 resolver 每次调用真实 `UserRepository.GetByID`，检查同 ID、`DeletedAt == nil` 与 `IsActive()`，即使跳过 Ent 软删除过滤也不放行已删除用户。没有公开签发／撤销管理／导入流程；旧用户和关联 owner／subject 必须显式映射重写。各 SQL 方法不加入外层 Ent 事务，不宣称认证查询与并发撤销原子，也不广播取消已派发工作。
+
+任务 408 的最终离线命令从 `integration/sub2api/backend` 运行并通过：
+
+```sh
+GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOMODCACHE=/root/project-development/A2AMesh/source-sync/toolchains/gomodcache /root/project-development/A2AMesh/source-sync/toolchains/go1.27.1/go/bin/go test -race -count=1 ./internal/repository ./migrations -run '^TestWebCodex'
+```
+
+repository 1.065s、migrations 1.009s，退出码 0。覆盖完整 NULL Insert／GetByID 往返、零／负值／int64 极值、原字段、精确查询参数、撤销／last-used SQL、规范身份投影、错误／取消、实际 User repository＋Ent 的 SQLmock 适配。DDL 检查仅为嵌入结构检查；没有执行真实 PostgreSQL 迁移、外键或并发事务验证。`gofmt` 与 diff 空白检查通过。
+
+## Server 默认关闭的 polling 路由装配（本阶段验证完成）
+
+本地功能提交 `9e4683d19c6d716592bdfb680af2a16cb4f263d0`（`feat(webcodex): mount authenticated polling routes`）通过 [ProvideWebCodexRunner](../../backend/internal/server/webcodex_runner.go)、既有 router／HTTP server 及实际生成的 Wire 图接入四条原 `/api/shell/agent/{register,poll,result,offline}` 路径。使用同一宿主数据库／User repository 和同一 runtime；不引入模型 APIKey 或 JWT 的替代 Runner 权限，也不提供业务 dispatch endpoint。
+
+`webcodex_runner.enabled` 默认 false；关闭时不创建 registry 或执行凭据查询、不挂四条路由。启用必须显式配置 `webcodex_runner.max_runners`、`max_pending_per_runner`、`online_window_seconds`、`max_body_bytes`、`max_token_bytes` 五项正数；这些项均位于 `webcodex_runner` 下，默认 0 在启用时无效，秒数另检查 duration 溢出。完整环境变量映射见[Runner README](../../backend/internal/webcodex/runner/README.md)。原 scope／kind／owner／client 和完整 G2 准入未放宽。
+
+真实全局 CORS 中间件允许来源的 OPTIONS 可在启用／关闭时都返回 204，但无认证 POST 分别为 401／404，预检不授予认证、不产生凭据查询。HTTP `RegisterOnShutdown` 异步调用幂等 registry `Close`；测试在 Shutdown 之后另行等待 waiter 结算，不能声称 Shutdown 等待 callback 完成。当前 registry 无独立进程／连接／后台任务；硬 Close、启动 panic 和生产停机没有独立验收，也不据此宣称持久恢复或远端工作已停止。
+
+任务 423 的最终离线命令通过，并特意带入外部启用变量验证测试隔离：
+
+```sh
+WEBCODEX_RUNNER_ENABLED=true GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOMODCACHE=/root/project-development/A2AMesh/source-sync/toolchains/gomodcache /root/project-development/A2AMesh/source-sync/toolchains/go1.27.1/go/bin/go test -tags unit -race -count=1 ./internal/config ./internal/server -run '^Test(WebCodex|ProvideHTTPServer|ConfigureTrustedProxies|HTTPServer)'
+```
+
+config 1.028s、server 2.818s，退出码 0；覆盖真实 SQL repository＋测试 User 的 mounted 认证生命周期、缺失／非 Agent／禁用用户／错误脱敏／大小上限／G2 拒绝、真实 CORS 开关矩阵和无 DB 查询计数、关闭 waiter，以及既有六项 HTTP ingress 检查。真实宿主 User 路径另由任务 408 覆盖。另以同一离线工具链执行 `go test -run '^$' ./cmd/server`，实际入口编译通过（0.021s，`no tests to run`）；这是生成后 Wire 装配的编译证据，不是启动服务或生产验收。`gofmt`、最终 diff 检查通过，相关任务输出已收取。
+
+累计功能提交现为 12 条（Server 5、DSH 7），当前 Server 代码基线为上述路由提交。前面十条历史阶段记录保持原样；DSH 新回执尚在进行／未提交，未计入本次能力或提交统计。真实 PostgreSQL 验收、公开凭据生命周期、导入、多记录业务事务、项目授权／派发、持久 registry／结果、完整 G2 和 G0 继续保留；未推送、部署、使用真实凭据／模型／数据库。整体约 15% 的评估口径不变。
