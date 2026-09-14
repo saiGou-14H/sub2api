@@ -10,4 +10,11 @@ repository boundary, host-user identity projection, supported credential subset,
 operational token-size bound and tests are modified for native Go integration.
 See README.md for source references and differences from the original verifier.
 
+../../repository/webcodex_api_key_repo.go and
+../../../migrations/238_webcodex_api_keys.sql adapt the original api_keys record,
+DDL and lifecycle from crates/webcodex-store/src/{accounts,models,schema}.rs.
+Changes include PostgreSQL SQL, wc_ table namespace, existing host User foreign
+key with canonical string auth projection, and atomic revoke UPDATE RETURNING.
+See CREDENTIAL_STORAGE.md for the complete field and lifecycle source map.
+
 This notice supplements ../NOTICE and does not relicense unrelated sub2api code.
