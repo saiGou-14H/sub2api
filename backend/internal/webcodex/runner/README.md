@@ -1,6 +1,6 @@
 # Runner polling registry
 
-This reference describes the synchronous polling portion of the WebCodex Server migration. Its original wire DTOs are owned by [protocol](../protocol/README.md). The package is not mounted by sub2api's router and does not execute commands.
+This reference describes the synchronous polling portion of the WebCodex Server migration. Its original wire DTOs are owned by [protocol](../protocol/README.md). The package is mounted by sub2api's router only when explicitly enabled and does not execute commands.
 
 ## Admission and ownership
 
@@ -45,7 +45,20 @@ All WebCodex references below refer to frozen revision `97ad66949a859174911c2f6d
 
 The repository and user resolver remain trusted host adapters: they must return authoritative snapshots, apply explicit import mapping and exclude project-derived records. This package cannot make independently queried data transactionally atomic against a concurrent revoke, or stop a call in a dependency that ignores its context. It revalidates on every request and retains no positive authorization cache; in-flight work remains subject to the existing registry's dispatch-evidence rules. This feature neither cancels already-dispatched work nor implements a revocation broadcast.
 
-Future application mounting must be explicitly enabled (proposed `webcodex.runner.enabled=false` by default). Disabled configuration must not construct the registry or register routes. Enabling requires a real credential repository, current host-user resolver and positive registry/body/token bounds, with registry `Close` in application cleanup. The native repository, migration and current host-user adapter are implemented as described in [managed credential storage](CREDENTIAL_STORAGE.md). The flag and Wire/router mounting are **not implemented**; actual app routes remain absent. Preserve the original root `/api/shell/agent/...` paths rather than `/api/v1`, and keep model APIKey middleware out of the Runner credential path.
+The opt-in application integration is implemented by `server.ProvideWebCodexRunner`: `webcodex_runner.enabled` defaults to false, disabled configuration constructs no registry or credential dependency, and enabled configuration mounts the four original root paths during router assembly. The application passes the same runtime to `ProvideRouter` and `ProvideHTTPServer`; shutdown closes the in-memory registry. Preserve the original root `/api/shell/agent/...` paths rather than `/api/v1`, and keep model APIKey middleware out of the Runner credential path. Global host middleware, including CORS handling for `OPTIONS`, may run before the Runner handler.
+
+The exact configuration keys are listed below. Enabling requires all five bounds to be supplied explicitly; their zero defaults are invalid when enabled, not operational recommendations. Environment variables use the shown names.
+
+| Configuration key | Environment variable | Default / requirement when enabled |
+|---|---|---|
+| `webcodex_runner.enabled` | `WEBCODEX_RUNNER_ENABLED` | `false`; explicitly set `true` to mount |
+| `webcodex_runner.max_runners` | `WEBCODEX_RUNNER_MAX_RUNNERS` | `0`; require a positive integer |
+| `webcodex_runner.max_pending_per_runner` | `WEBCODEX_RUNNER_MAX_PENDING_PER_RUNNER` | `0`; require a positive integer |
+| `webcodex_runner.online_window_seconds` | `WEBCODEX_RUNNER_ONLINE_WINDOW_SECONDS` | `0`; require positive seconds representable as a Go duration |
+| `webcodex_runner.max_body_bytes` | `WEBCODEX_RUNNER_MAX_BODY_BYTES` | `0`; require positive bytes for the complete body |
+| `webcodex_runner.max_token_bytes` | `WEBCODEX_RUNNER_MAX_TOKEN_BYTES` | `0`; require positive token bytes |
+
+Allowed-origin CORS preflight can return 204 whether Runner is enabled or disabled. This does not authenticate a request or create a route: a subsequent unauthenticated POST returns 401 when enabled and 404 when disabled.
 
 ## Synchronous requests and lifecycle
 
@@ -79,7 +92,7 @@ The opt-in cross-language tests launch the test-only DSH stdin driver through `n
 
 ## Migration limitations
 
-The native managed-credential verifier now has a host SQL credential repository, embedded migration and current User repository adapter; see [storage integration](CREDENTIAL_STORAGE.md) for the original field map and offline SQL fixture checks. Router/composition mounting remains absent. WebSocket/QUIC, provider policy sanitization, paged project inventories, Jobs/recovery, Generic ToolRuntime, ProjectConnector/OAuth/MCP and UI are not implemented here. Registration carrying policy/provider/recovery inventory is explicitly rejected until those owned semantics are migrated. A database, transaction and outbox are required before claiming persistent result receipt, restart recovery or durable idempotency. A full generation-2 DSH execution provider with its real non-Agent guard/approval/filesystem/sandbox owner remains required. No package option disables that generation check.
+The native managed-credential verifier now has a host SQL credential repository, embedded migration and current User repository adapter; see [storage integration](CREDENTIAL_STORAGE.md) for the original field map and offline SQL fixture checks. The four polling routes have default-off router/DI mounting; enabling them does not add business dispatch or persistent registry/results. WebSocket/QUIC, provider policy sanitization, paged project inventories, Jobs/recovery, Generic ToolRuntime, ProjectConnector/OAuth/MCP and UI are not implemented here. Registration carrying policy/provider/recovery inventory is explicitly rejected until those owned semantics are migrated. A database, transaction and outbox are required before claiming persistent result receipt, restart recovery or durable idempotency. A full generation-2 DSH execution provider with its real non-Agent guard/approval/filesystem/sandbox owner remains required. No package option disables that generation check.
 
 ## Source and licensing
 

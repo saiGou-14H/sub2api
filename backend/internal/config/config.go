@@ -66,6 +66,7 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 const DefaultModelsListReadMaxBytes int64 = 8 * 1024 * 1024
 
 type Config struct {
+	WebCodexRunner          WebCodexRunnerConfig          `mapstructure:"webcodex_runner"`
 	Server                  ServerConfig                  `mapstructure:"server"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
@@ -1987,6 +1988,13 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 }
 
 func setDefaults() {
+	// Register disabled Runner keys so Viper also discovers environment-only configuration.
+	viper.SetDefault("webcodex_runner.enabled", false)
+	viper.SetDefault("webcodex_runner.max_runners", 0)
+	viper.SetDefault("webcodex_runner.max_pending_per_runner", 0)
+	viper.SetDefault("webcodex_runner.online_window_seconds", int64(0))
+	viper.SetDefault("webcodex_runner.max_body_bytes", int64(0))
+	viper.SetDefault("webcodex_runner.max_token_bytes", 0)
 	viper.SetDefault("run_mode", RunModeStandard)
 
 	// Server
@@ -2646,6 +2654,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := c.WebCodexRunner.Validate(); err != nil {
+		return err
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

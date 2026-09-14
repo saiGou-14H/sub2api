@@ -22,6 +22,7 @@ import (
 
 // ProviderSet 提供服务器层的依赖
 var ProviderSet = wire.NewSet(
+	ProvideWebCodexRunner,
 	ProvideRouter,
 	ProvideHTTPServer,
 )
@@ -42,6 +43,7 @@ func ProvideRouter(
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
 	redisClient *redis.Client,
+	webCodexRunner *WebCodexRunner,
 ) *gin.Engine {
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -87,7 +89,7 @@ func ProvideRouter(
 		service.SetWebSearchManager(websearch.NewManager(configs, redisClient))
 	})
 
-	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
+	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient, webCodexRunner)
 }
 
 func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
@@ -110,7 +112,7 @@ func configureTrustedProxies(r *gin.Engine, cfg config.ServerConfig) {
 }
 
 // ProvideHTTPServer 提供 HTTP 服务器
-func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
+func ProvideHTTPServer(cfg *config.Config, router *gin.Engine, webCodexRunner *WebCodexRunner) *http.Server {
 	httpHandler := http.Handler(router)
 	server := &http.Server{
 		Addr:           cfg.Server.Address(),
@@ -123,6 +125,8 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 		// 注意：不设置 WriteTimeout，因为流式响应可能持续十几分钟
 		// 不设置 ReadTimeout，因为大请求体可能需要较长时间读取
 	}
+
+	server.RegisterOnShutdown(webCodexRunner.Close)
 
 	globalMaxSize := cfg.Server.MaxRequestBodySize
 	if globalMaxSize <= 0 {
