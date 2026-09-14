@@ -1,0 +1,13 @@
+WebCodex managed Runner agent-token verifier adaptation
+
+Original project: WebCodex
+Source revision: 97ad66949a859174911c2f6da2ff1063be98bfa9
+Original license: Apache License, Version 2.0 (see ../LICENSE)
+
+credential.go adapts behavior from src/auth/{pat,tokens,scopes}.rs and
+crates/webcodex-store/src/{accounts,models}.rs. The implementation language,
+repository boundary, host-user identity projection, supported credential subset,
+operational token-size bound and tests are modified for native Go integration.
+See README.md for source references and differences from the original verifier.
+
+This notice supplements ../NOTICE and does not relicense unrelated sub2api code.
