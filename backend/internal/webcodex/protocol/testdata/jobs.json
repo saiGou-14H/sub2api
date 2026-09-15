@@ -95,6 +95,7 @@
  {"name":"seq_update_nested_duplicate_struct_field","type":"update","provenance":"source:2821-2854","wire":"{\"client_id\":\"c\",\"agent_instance_id\":\"i\",\"job_id\":\"j\",\"status\":\"running\",\"log_snapshot\":[{\"tail\":\"\",\"tail\":\"\"},[]]}","error":true},
  {"name":"seq_update_shared_unit_nonnull","type":"update","provenance":"source:1939-1946,2075-2119","wire":"{\"client_id\":\"c\",\"agent_instance_id\":\"i\",\"job_id\":\"j\",\"status\":\"running\",\"command_execution_state\":{\"completed\":0}}","error":true},
  {"name":"seq_stream_u64_overflow","type":"stream","provenance":"source:2821-2830","wire":"[\"\",18446744073709551616]","error":true},
+ {"name":"seq_stream_integer_decimal","type":"stream","provenance":"source:2821-2830","wire":"[\"\",1.0]","error":true},
  {"name":"seq_stream_integer_exponent","type":"stream","provenance":"source:2821-2830","wire":"[\"\",1e0]","error":true},
  {"name":"seq_stream_null_default","type":"stream","provenance":"source:2821-2830","wire":"[null]","error":true},
  {"name":"seq_snapshot_context_truncated_preview","type":"snapshot","provenance":"source:2790-2889","wire":"[\"j\",\"r\",\"s\",0,0,null,null,null,null,null,null,[]]","error":true},
