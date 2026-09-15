@@ -19,11 +19,13 @@ import (
 // Registry owns in-memory polling leases and synchronous request waiters. It does
 // not execute commands or persist results. Callers own durable request identities.
 type Registry struct {
-	mu      sync.Mutex
-	options Options
-	nodes   map[string]*node
-	pending map[string]*request
-	closed  bool
+	mu           sync.Mutex
+	options      Options
+	nodes        map[string]*node
+	pending      map[string]*request
+	jobs         map[string]*jobRecord
+	requestToJob map[string]string
+	closed       bool
 }
 
 // Options bounds the registry's retained nodes and requests. The caller supplies
@@ -32,6 +34,8 @@ type Options struct {
 	MaxRunners          int
 	MaxPendingPerRunner int
 	OnlineWindow        time.Duration
+	// MaxJobsPerRunner bounds active and retained terminal Jobs together; zero disables Job dispatch.
+	MaxJobsPerRunner int
 }
 
 const retiredInstanceLimit = 16
@@ -59,6 +63,7 @@ type request struct {
 	clientID   string
 	instanceID string
 	kind       string
+	jobID      string
 	wire       []byte
 	dispatched bool
 	settled    bool
@@ -83,10 +88,10 @@ type Pending struct {
 
 // NewRegistry validates limits without starting timers or goroutines.
 func NewRegistry(options Options) (*Registry, error) {
-	if options.MaxRunners <= 0 || options.MaxPendingPerRunner <= 0 || options.OnlineWindow <= 0 {
+	if options.MaxRunners <= 0 || options.MaxPendingPerRunner <= 0 || options.OnlineWindow <= 0 || options.MaxJobsPerRunner < 0 {
 		return nil, fmt.Errorf("Runner registry limits must be positive")
 	}
-	return &Registry{options: options, nodes: make(map[string]*node), pending: make(map[string]*request)}, nil
+	return &Registry{options: options, nodes: make(map[string]*node), pending: make(map[string]*request), jobs: make(map[string]*jobRecord), requestToJob: make(map[string]string)}, nil
 }
 
 // Register enforces transport identity, generation-2 capabilities and ownership
@@ -178,6 +183,7 @@ func (r *Registry) Register(principal Principal, input protocol.RunnerRegisterRe
 		return empty, err
 	}
 	if prior != nil && prior.registration.AgentInstanceID != body.AgentInstanceID {
+		r.loseClientJobsLocked(body.ClientID, "runner_instance_replaced", "runner instance was replaced", now)
 		r.failClientLocked(body.ClientID, ErrStale)
 		view.PendingRequests = 0
 	}
@@ -248,7 +254,7 @@ func (r *Registry) Enqueue(access Access, input protocol.RunnerRequest) (*Pendin
 	if !supports(n.registration.Capabilities, body.Kind) {
 		return nil, fmt.Errorf("Runner capability not advertised")
 	}
-	if _, ok := r.pending[body.RequestID]; ok {
+	if _, ok := r.pending[body.RequestID]; ok || r.requestToJob[body.RequestID] != "" {
 		return nil, fmt.Errorf("request_id is already pending")
 	}
 	count := 0
@@ -295,6 +301,11 @@ func (r *Registry) Poll(principal Principal, body protocol.RunnerPollPayload) (*
 			continue
 		}
 		if !supports(n.registration.Capabilities, p.kind) {
+			if p.jobID != "" {
+				if j := r.jobs[p.jobID]; j != nil {
+					r.loseJobLocked(j, "runner_capability_withdrawn", "Runner capability withdrawn", time.Now())
+				}
+			}
 			r.settleLocked(p, Outcome{Err: fmt.Errorf("Runner capability withdrawn")})
 			continue
 		}
@@ -303,6 +314,19 @@ func (r *Registry) Poll(principal Principal, body protocol.RunnerPollPayload) (*
 			return nil, err
 		}
 		p.dispatched = true
+		if p.jobID != "" {
+			if p.kind != "stop_job" {
+				if job := r.jobs[p.jobID]; job != nil {
+					job.dispatched = true
+					if jobLifecycle(job) == protocol.JobQueued {
+						job.info.Status = protocol.JobRunnerQueued.AsWire()
+						job.changed()
+					}
+				}
+			}
+			// Ownership now lives on the Job and requestToJob, with no waiter.
+			r.settleLocked(p, Outcome{})
+		}
 		return &request, nil
 	}
 	return nil, nil
@@ -331,6 +355,12 @@ func (r *Registry) Complete(principal Principal, input protocol.RunnerResultPayl
 	if err != nil {
 		return err
 	}
+	if id := r.requestToJob[body.RequestID]; id != "" {
+		if j := r.jobs[id]; j != nil && (j.info.ClientID != body.ClientID || j.instanceID != body.AgentInstanceID) {
+			return ErrForbidden
+		}
+		return fmt.Errorf("%w: Job results require job_update", protocol.ErrUnsupported)
+	}
 	p := r.pending[body.RequestID]
 	if p == nil {
 		return ErrUnknown
@@ -340,6 +370,9 @@ func (r *Registry) Complete(principal Principal, input protocol.RunnerResultPayl
 	}
 	if !p.dispatched {
 		return fmt.Errorf("Runner request has not been dispatched")
+	}
+	if p.jobID != "" {
+		return fmt.Errorf("%w: Job results require job_update", protocol.ErrUnsupported)
 	}
 	if strings.HasPrefix(p.kind, "file_") && body.CommandExecutionState != nil {
 		return fmt.Errorf("command_execution_state is only valid for command requests")
@@ -379,6 +412,7 @@ func (r *Registry) Offline(principal Principal, body protocol.RunnerOfflineReque
 	now := time.Now().Unix()
 	n.disconnectedAt = &now
 	n.lastSeen = time.Now().Add(-r.options.OnlineWindow - time.Second)
+	r.loseClientJobsLocked(body.ClientID, "runner_disconnected_without_reconciliation", "Runner disconnected", time.Now())
 	r.failClientLocked(body.ClientID, fmt.Errorf("Runner disconnected"))
 	n.queue = nil
 	return nil
@@ -424,7 +458,9 @@ func (r *Registry) settleLocked(p *request, outcome Outcome) {
 		}
 	}
 	p.wire = nil
-	close(p.done)
+	if p.done != nil {
+		close(p.done)
+	}
 }
 
 func (r *Registry) failClientLocked(clientID string, err error) {
@@ -478,10 +514,16 @@ func (r *Registry) Close() {
 		r.settleLocked(p, Outcome{Err: ErrClosed})
 	}
 	r.nodes = make(map[string]*node)
+	r.jobs = make(map[string]*jobRecord)
+	r.requestToJob = make(map[string]string)
 }
 
 func supports(c protocol.RunnerCapabilities, kind string) bool {
 	switch kind {
+	case "start_process_job":
+		return (c.AsyncJobs || c.AsyncShellJobs) && c.StructuredExecutionJobs && c.StructuredProcessArgv
+	case "stop_job":
+		return c.AsyncJobs || c.AsyncShellJobs
 	case "run_shell":
 		return c.Shell
 	case "run_process":

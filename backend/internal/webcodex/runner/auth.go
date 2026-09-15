@@ -24,12 +24,13 @@ type Principal struct {
 
 // Original WebCodex transport credential kinds and scopes.
 const (
-	AgentToken    = "agent_token"
-	SharedKey     = "shared_key"
-	Bootstrap     = "bootstrap"
-	ScopeRegister = "agent:register"
-	ScopePoll     = "agent:poll"
-	ScopeResult   = "agent:result"
+	AgentToken     = "agent_token"
+	SharedKey      = "shared_key"
+	Bootstrap      = "bootstrap"
+	ScopeRegister  = "agent:register"
+	ScopePoll      = "agent:poll"
+	ScopeResult    = "agent:result"
+	ScopeJobUpdate = "agent:job_update"
 )
 
 // Access is the existing non-secret owner/group projection for trusted dispatchers.

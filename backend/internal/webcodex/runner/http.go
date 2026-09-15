@@ -39,7 +39,7 @@ func NewHTTPHandler(registry *Registry, authenticate Authenticate, maxBodyBytes 
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/api/shell/agent/"
 	action := strings.TrimPrefix(r.URL.Path, prefix)
-	if r.URL.Path != prefix+action || (action != "register" && action != "poll" && action != "result" && action != "offline") {
+	if r.URL.Path != prefix+action || (action != "register" && action != "poll" && action != "result" && action != "offline" && action != "job_update") {
 		writeError(w, http.StatusNotFound, "unknown Runner endpoint")
 		return
 	}
@@ -111,6 +111,18 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, protocol.RunnerResultResponse{Success: true})
+	case "job_update":
+		body, err := protocol.ReadJobUpdateRequest(data)
+		if err != nil {
+			writeDecodeError(w)
+			return
+		}
+		job, err := h.registry.UpdateJob(principal, body)
+		if err != nil {
+			writeRegistryError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, protocol.RunnerJobUpdateResponse{Success: true, Job: &job})
 	case "offline":
 		body, err := protocol.ReadOfflineRequest(data)
 		if err != nil {

@@ -1,6 +1,6 @@
 # Managed credential storage
 
-Native sub2api persistence supplies the [managed verifier](README.md#managed-database-agent-token-authentication) and the original Runner credential management lifecycle. The existing default-off `webcodex_runner.enabled` setting gates polling and management together; normal configuration validation still requires its five positive transport limits.
+Native sub2api persistence supplies the [managed verifier](README.md#managed-database-agent-token-authentication) and the original Runner credential management lifecycle. The existing default-off `webcodex_runner.enabled` setting gates polling and management together; normal configuration validation requires six positive registry/transport limits, including the separate `max_jobs_per_runner` retention budget.
 
 ## Storage decision and source map
 

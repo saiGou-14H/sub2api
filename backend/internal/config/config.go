@@ -1992,6 +1992,7 @@ func setDefaults() {
 	viper.SetDefault("webcodex_runner.enabled", false)
 	viper.SetDefault("webcodex_runner.max_runners", 0)
 	viper.SetDefault("webcodex_runner.max_pending_per_runner", 0)
+	viper.SetDefault("webcodex_runner.max_jobs_per_runner", 0)
 	viper.SetDefault("webcodex_runner.online_window_seconds", int64(0))
 	viper.SetDefault("webcodex_runner.max_body_bytes", int64(0))
 	viper.SetDefault("webcodex_runner.max_token_bytes", 0)

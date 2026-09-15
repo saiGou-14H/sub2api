@@ -30,7 +30,7 @@ const webCodexFixtureOwner = "sub2api_user_42"
 
 func webCodexTestConfig() *config.Config {
 	return &config.Config{WebCodexRunner: config.WebCodexRunnerConfig{Enabled: true,
-		MaxRunners: 2, MaxPendingPerRunner: 4, OnlineWindowSeconds: 30, MaxBodyBytes: 8192, MaxTokenBytes: 1024}}
+		MaxRunners: 2, MaxPendingPerRunner: 4, MaxJobsPerRunner: 2, OnlineWindowSeconds: 30, MaxBodyBytes: 8192, MaxTokenBytes: 1024}}
 }
 
 type webCodexTestUsers struct {

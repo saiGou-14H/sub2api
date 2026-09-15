@@ -48,7 +48,8 @@ func ProvideWebCodexRunner(cfg *config.Config, db *sql.DB, users service.UserRep
 	}
 	registry, err := runner.NewRegistry(runner.Options{
 		MaxRunners: options.MaxRunners, MaxPendingPerRunner: options.MaxPendingPerRunner,
-		OnlineWindow: time.Duration(options.OnlineWindowSeconds) * time.Second,
+		OnlineWindow:     time.Duration(options.OnlineWindowSeconds) * time.Second,
+		MaxJobsPerRunner: options.MaxJobsPerRunner,
 	})
 	if err != nil {
 		return nil, err
@@ -61,13 +62,13 @@ func ProvideWebCodexRunner(cfg *config.Config, db *sql.DB, users service.UserRep
 	return &WebCodexRunner{registry: registry, handler: handler, tokens: &webCodexAgentTokens{keys: keys, users: users, maxBodyBytes: options.MaxBodyBytes}}, nil
 }
 
-// mount registers exactly the four original paths, without model-key or JWT middleware.
+// mount registers the original Runner transport paths, without model-key or JWT middleware.
 // Runner handler method behavior is preserved; global router middleware may handle OPTIONS first.
 func (r *WebCodexRunner) mount(router *gin.Engine) {
 	if r == nil || r.handler == nil {
 		return
 	}
-	for _, action := range []string{"register", "poll", "result", "offline"} {
+	for _, action := range []string{"register", "poll", "result", "offline", "job_update"} {
 		router.Any("/api/shell/agent/"+action, gin.WrapH(r.handler))
 	}
 }
