@@ -60,6 +60,12 @@ The exact configuration keys are listed below. Enabling requires all five bounds
 
 Allowed-origin CORS preflight can return 204 whether Runner is enabled or disabled. This does not authenticate a request or create a route: a subsequent unauthenticated POST returns 401 when enabled and 404 when disabled.
 
+## Managed Runner credential lifecycle
+
+When `webcodex_runner.enabled=true`, the host also mounts the original POST `/api/agent-tokens/{create,register_hash,list,revoke}` routes under actual panel JWT authentication, backend-mode guard, the shared per-user panel rate limiter and management audit. Current host admin/self authorization uses immutable ID; request `username` and response owner fields carry canonical `sub2api_user_<id>`, never mutable profile usernames. Runner tokens, model API keys and non-JWT admin credentials cannot manage tokens. The original `account:manage` surface is mapped to the host's full panel account authority for this slice; scoped WebCodex PAT/account/OAuth/bootstrap authentication remains separate and unavailable.
+
+Create returns `wc_agent_` plaintext once after a hash-only INSERT. Hash registration never accepts plaintext. Lists/revokes select safe metadata only; revocation is an atomic user-and-kind-scoped UPDATE with the original first timestamp. Management bodies reuse the explicitly configured `webcodex_runner.max_body_bytes`, and list size remains 200. All four management request bodies are entirely omitted from audit, while the one-time response and policy errors use `Cache-Control: no-store`. Original request/response fields, scope/null defaults, validation, error/status behavior, collision and retry limits, current user checks, and the unimplemented cross-family account-credential hash check are specified in [managed credential storage](CREDENTIAL_STORAGE.md#host-authorized-management-routes). This slice creates no UI or model tool and adds no Job authority beyond retaining the original scope value.
+
 ## Synchronous requests and lifecycle
 
 Trusted host callers use `Enqueue` only after establishing the original project and operation scopes. The HTTP adapter has no dispatch endpoint. The caller supplies the durable unique `request_id`; this memory registry does not replace the Connector execution record or idempotency transaction.

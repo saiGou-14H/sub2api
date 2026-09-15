@@ -91,7 +91,7 @@ func SetupRouter(
 	}
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
+	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient, webCodexRunner)
 	webCodexRunner.mount(r)
 
 	return r
@@ -114,6 +114,7 @@ func registerRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	webCodexRunner *WebCodexRunner,
 ) {
 	// 通用路由（健康检查、状态等）
 	routes.RegisterCommonRoutes(r)
@@ -124,6 +125,7 @@ func registerRoutes(
 	// 面板 API 限流器：认证接口按用户 ID、公开接口按安全客户端 IP，
 	// 防止高频刷管理面接口打爆数据库（阈值可在系统设置中调整）。
 	panelRateLimiter := middleware2.NewPanelRateLimiter(redisClient, settingService)
+	webCodexRunner.mountManagement(r, jwtAuth, middleware2.BackendModeUserGuard(settingService), panelRateLimiter.Global(), auditLog)
 
 	// 注册各模块路由
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService, panelRateLimiter)

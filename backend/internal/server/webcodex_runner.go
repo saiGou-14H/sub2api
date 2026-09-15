@@ -12,12 +12,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WebCodexRunner owns the opt-in polling registry and its authenticated handler.
+// WebCodexRunner owns opt-in polling and panel-JWT credential management.
 // Credentials use the host SQL pool; leases and pending results remain in memory.
-// It does not issue credentials, grant projects or dispatch business operations.
+// It does not grant projects or dispatch business operations.
 type WebCodexRunner struct {
 	registry *runner.Registry
 	handler  *runner.HTTPHandler
+	tokens   *webCodexAgentTokens
 }
 
 // ProvideWebCodexRunner assembles the original transport with current host identity.
@@ -36,8 +37,9 @@ func ProvideWebCodexRunner(cfg *config.Config, db *sql.DB, users service.UserRep
 	if db == nil || users == nil {
 		return nil, errors.New("enabled WebCodex Runner requires host database and users")
 	}
+	keys := repository.NewWebCodexAPIKeyRepository(db)
 	authenticate, err := runner.NewAgentTokenAuthenticator(
-		repository.NewWebCodexAPIKeyRepository(db),
+		keys,
 		repository.NewWebCodexHostUserResolver(users),
 		runner.AgentTokenOptions{MaxTokenBytes: options.MaxTokenBytes, Now: time.Now},
 	)
@@ -56,7 +58,7 @@ func ProvideWebCodexRunner(cfg *config.Config, db *sql.DB, users service.UserRep
 		registry.Close()
 		return nil, err
 	}
-	return &WebCodexRunner{registry: registry, handler: handler}, nil
+	return &WebCodexRunner{registry: registry, handler: handler, tokens: &webCodexAgentTokens{keys: keys, users: users, maxBodyBytes: options.MaxBodyBytes}}, nil
 }
 
 // mount registers exactly the four original paths, without model-key or JWT middleware.

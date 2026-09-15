@@ -17,4 +17,15 @@ Changes include PostgreSQL SQL, wc_ table namespace, existing host User foreign
 key with canonical string auth projection, and atomic revoke UPDATE RETURNING.
 See CREDENTIAL_STORAGE.md for the complete field and lifecycle source map.
 
+../../server/webcodex_agent_tokens.go and ../protocol/agent_tokens.go adapt
+src/runner_tokens_http.rs, src/runner_tokens_http/{routes,responses}.rs,
+src/auth/{pat,scopes,middleware}.rs and src/route_metadata/account.rs.
+../../repository/webcodex_agent_tokens.go adapts the managed lifecycle in
+crates/webcodex-store/src/accounts.rs. Modifications include native panel-JWT
+admin/self authorization using canonical immutable host IDs, bounded metadata
+SQL, user/kind-scoped revoke, crypto/rand generation preserving original token
+format, reuse of the configured Runner body bound, host backend-mode/rate-limit/
+audit guards, whole-body audit omission and sanitized dependency errors.
+Original account-credential collision lookup awaits that separate store/verifier.
+
 This notice supplements ../NOTICE and does not relicense unrelated sub2api code.
