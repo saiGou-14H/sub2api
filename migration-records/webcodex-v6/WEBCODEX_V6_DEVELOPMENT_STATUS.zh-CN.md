@@ -4,15 +4,15 @@
 
 ## 1. 当前结论与代码版本
 
-整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 26 条代码／功能修复提交（Server 11、DSH 15），另有 3 条仅补 fixture 的 test 验证提交，不增加功能数；原 R0／Job 共享 fixture 为 91 DTO／16 families／12 operations（见第 11 节），新增独立 skill-file fixture 不混入此计数（见第 16 节）。但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
+整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 27 条代码／功能修复提交（Server 11、DSH 16），另有 3 条仅补 fixture 的 test 验证提交，不增加功能数；原 R0／Job 共享 fixture 为 91 DTO／16 families／12 operations（见第 11 节），新增独立 skill-file fixture 不混入此计数（见第 16 节）。但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
 
 | 对象 | 开发分支 | 本次核对的代码版本 |
 |---|---|---|
 | sub2api Server | `mpc-server` | `746e98015112dfdd67837d2b72fa60015a96b0e4` |
-| DSH Runner | `mcp-runner` | `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea` |
+| DSH Runner | `mcp-runner` | `a6bb656769050a320bb8046e7bc43b903b831135` |
 | 冻结 WebCodex 参考 | `source-sync/webcodex` | `97ad66949a859174911c2f6da2ff1063be98bfa9` |
 
-后续保存进度文档产生的 docs 提交不增加功能提交数，也不提高工程完成度。DSH 行为基线为上表bd5216，后继纯文档HEAD `32eea451266c00303c8bf23ea90319eb4e6364d9`已核对且不增加功能；已包含类型 fixture 提交 `45487eef33e72103f97813a95e5f313840949b94`（parent 944634，2 文件、+8／-3），作为第三条 fixture-only，不增加功能。Host type build 与修后 doc-typecheck 完整该叶已通过；历史 doc-sync 33／34 未重跑 aggregate。只在 integration 开发副本工作，未推送、部署、修改生产或使用真实模型／凭据测试。
+后续保存进度文档产生的 docs 提交不增加功能提交数，也不提高工程完成度。DSH行为基线为上表a6bb656；既有bd5216 Skill read祖先修复与32eea45计数文档保留在历史，后续进度docs只是documentation successor。已包含类型 fixture 提交 `45487eef33e72103f97813a95e5f313840949b94`（parent 944634，2 文件、+8／-3），作为第三条 fixture-only，不增加功能。Host type build 与修后 doc-typecheck 完整该叶已通过；历史 doc-sync 33／34 未重跑 aggregate。只在 integration 开发副本工作，未推送、部署、修改生产或使用真实模型／凭据测试。
 
 ## 2. 可核实的完成维度
 
@@ -20,9 +20,9 @@
 |---|---|---|
 | 架构与全范围映射 | 已形成 V6 设计及逐族映射 | 完整机器 fixture 尚未迁完 |
 | RunnerRequest 顶层字段 | 27／27 保留 | 嵌套业务槽位不代表已验证／可执行 |
-| 同步请求编解码 | Go八类；DSH七类 | Go File codec5／20，DSH新增Skill reader及共享read fixture，listing执行未实现 |
-| 原生实际执行 | 四项文件＋Linux process 子集 | Skill reader及ENOTDIR错误码修复已提交；shell／script尚无原Runner执行适配 |
-| File 子操作 | 4／20 | read／write／list／skill read，剩余16项（listing＋其他15项）待执行 |
+| 同步请求编解码 | Go八类；DSH八类 | 两端File codec5／20，共享read35／listing38 fixture；原wire27／File9／Job12状态不变 |
+| 原生实际执行 | 五项文件＋Linux process 子集 | basic3＋Skill read＋Skill list；旧Skill read空cwd／间接ENOTDIR差异仍待验证，非本片修复 |
+| File 子操作 | 5／20 | read／write／list／skill read／skill list，剩余15项待执行 |
 | Project 子操作 | 0／7 | 尚未迁入完整操作 |
 | Computer 子操作 | 0／19 | 尚未迁入完整操作 |
 | G2 必需能力声明 | 支持 native-image 的 Linux 3／22；file-only 2／22 | 合规 Go registry 仍返回 400，不能伪报其余能力 |
@@ -32,7 +32,7 @@
 | 业务持久化、导入和持久结果 | 未完成 | registry 及去重保留为进程内状态 |
 | 真实 G0 与生产替换 | 未完成 | 配置发现与 mock 不替代真实原生 MCP 验收 |
 
-## 3. 已完成的二十六个代码／功能修复提交
+## 3. 已完成的二十七个代码／功能修复提交
 
 | 序号 | 仓库 | 功能 | 提交 |
 |---|---|---|---|
@@ -62,6 +62,7 @@
 | 24 | Server | file_skill_list_packages 第八类同步 codec／FileRead 路由及独立 fixture | `746e98015112dfdd67837d2b72fa60015a96b0e4` |
 | 25 | DSH | 原Skill包文件读取、严格范围扫描／完整hash、最终成功观察及共享fixture | `33c456f3a9ba487265cac42c70b473c2f5fbffbd` |
 | 26 | DSH | 区分Skill非目录祖先与真正缺失，修复确定性错误码 | `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea` |
+| 27 | DSH | 通用有界nofollow目录扫描及原生Skill package listing | `a6bb656769050a320bb8046e7bc43b903b831135` |
 
 原生文件操作已经覆盖范围读取、编码／字节限制、完整 hash、观察后写入、目录创建控制、权限拒绝、符号链接分类、排序和整体结果上限。FS 提供方接口已适配并不代表远端 E2B 真实执行或并发外部写入下的所有原子保证已经验收。
 
@@ -79,14 +80,14 @@
 
 | 序号 | 工作包 | 当前基础 | 待完成与退出条件 |
 |---|---|---|---|
-| 1 | R0 原契约 | 原字段与两端七类codec，Go另有listing第八类codec；read35共享fixture已核验 | 全部操作家族、嵌套 DTO、Job 更新、默认值与错误语义的 Rust／Go／TS fixture 对照；DSH listing镜像／执行待验收，Skill reader ENOTDIR错误码差异已修复 |
+| 1 | R0 原契约 | 双方八类同步codec；read35／list38共享fixture核验，原wire27／File9／Job12状态不变 | 全部操作家族、嵌套 DTO、Job 更新、默认值与错误语义的 Rust／Go／TS fixture 对照；source-derived fixture不是Rust oracle，旧Skill read空cwd／间接ENOTDIR差异待验证 |
 | 2 | S1 身份／存储 | managed verifier、原 12 字段 SQL repository／迁移、当前宿主 User 适配及公开凭据管理 | 显式旧凭据全量导入、真实 PostgreSQL 约束与迁移验收、OAuth／project／其他 account family 独立验证、原业务表和多记录事务 |
 | 3 | S2 MCP／Registry | 内存 registry／五条 transport 路由、legacy process Job 与同实例已知 process Job 库存对账 | 真实业务授权／派发、原 MCP／Generic ToolRuntime、其他库存家族、重启与持久投影 |
 | 4 | D1 Runner core | Host owner／scope／guard／文件观察 | 其余 invocation、长期执行归属、正式人审响应与持久审计、各 direct 家族零模型验证 |
 | 5 | D2 受限 process | Linux actual bwrap／full＋显式 process-group 的 prepareNativeImage／provider／Runner consumer 已提交，source／plain Node 已验证 | linux-scope FD、auto owner、pkg confined、profile／环境快照及平台结果等价；保留脱组与未知结果限制 |
 | 6 | D2 shell／script | 已有 wire codec | 原 shell 路由／policy、解释器选择、临时脚本与清理、内部 POSIX、SSH 不回退本地 |
 | 7 | D2 Job | Server process Job 管理／同实例恢复，以及 Runner FIFO／真实 native process／stop／legacy job_update 单发送者已提交 | Runner 库存／sequenced reconciliation、script／detached／SSH／validation Job、真实 G2 跨端闭环、持久化与恢复待完成；进程内身份抑制不恢复结果 |
-| 8 | D2／W1／E1 File | read／write／list／skill read实际执行，Go listing codec／FileRead路由已提交 | File4／20，剩余16项及恢复语义待验收；Skill reader ENOTDIR误报not_found已由26修复；冻结 files.rs:581–659 的 listing 以 read_dir／file_type 不 follow、遍历全部候选而仅保留 Rust 字符串序最小 limit（1–257）的目录／软链，invalid UTF-8 名字计 candidate_count 但不返回、truncated 按 candidate_count>limit，现 fs-local/fsio.ts:284–322 的全量 readdir 数组＋子目标 resolve／probe 与 fs-e2b/index.ts:475–500 的全量 SDK files.list＋follow 均不足以忠实完成有界 nofollow 扫描，需后续最小 FS provider 支持再接 Runner，不能只截数组，也不计入 Go746 的真实执行 |
+| 8 | D2／W1／E1 File | read／write／list／skill read／skill list实际5／20；通用scanDir完整directdir nofollow扫描与最小limit保留已接Runner，不是截全量listDir数组 | 剩余15项及恢复语义待验收；真实E2B未跑，旧Skill read空cwd／间接ENOTDIR差异待验证；listing不产生FsObserved、不授写权，原无max_bytes／maxOutput／512KB限制，仅额外Host完整结果预算 |
 | 9 | S3 Connector | 全范围映射 | task／run／审批／command／check／finish／review，审批消费与执行预留／审计同事务，不重复执行 |
 | 10 | W1 Workspace／Artifacts | 底层 FS／进程基础 | 七项 Project 操作、Git／worktree／checkpoint、完整产物上传下载／发布／恢复、项目禁用清理 |
 | 11 | V1 Validation | 可复用 subprocess | 原固定 argv／adapter／结构化报告，Cargo 测试计数与 Go JSON／tool／packages，零测试与基础设施失败不混淆 |
@@ -104,7 +105,7 @@
 
 以上 22 行是对 13 个 V6 工作包的进一步拆分，不是新加的 22 个功能包，也不应与 G2 的 22 个能力位混为一谈。可选扩展保留在全量目标中，分期不等于永久删除。
 
-### 5.1 剩余 16 项 File 操作
+### 5.1 剩余 15 项 File 操作
 
 1. file_project_overview
 2. file_delete_project_files
@@ -121,13 +122,12 @@
 13. file_artifact_upload_abort
 14. file_checkpoint_create
 15. file_checkpoint_restore
-16. file_skill_list_packages
 
 ## 6. 优先顺序
 
 | 顺序 | Runner 主线 | Server 主线 |
 |---|---|---|
-| 1 | process Job legacy 执行已提交；继续库存／sequenced 更新与恢复、script 及受限平台缺口 | Skill reader及ENOTDIR修复26已提交；listing仍需有界nofollow FS支持；显式旧凭据导入及真实 PostgreSQL 验收 |
+| 1 | process Job legacy 执行已提交；继续库存／sequenced 更新与恢复、script 及受限平台缺口 | Skill read／listing已提交；继续剩余15项File并验证旧read差异；显式旧凭据导入及真实 PostgreSQL 验收 |
 | 2 | 原 process Job／stop／update／库存闭环 | 原业务授权／派发与持久 registry／结果 |
 | 3 | shell／script、编辑／删除／产物等 G2 基础 | 原项目／任务／执行／审批事务 |
 | 4 | Validation／LSP／项目生命周期、完整 G2 | MCP／Generic ToolRuntime／ProjectConnector |
@@ -136,7 +136,7 @@
 
 ## 7. 已有验证（十三条及更早阶段历史回执）
 
-本节保持当时测试和工作树状态；当前第二十六条阶段见第 19 节。历史“提交后干净”不表示目前两仓库没有其他 agent 未提交工作，历史沙箱不可用也不否定本轮 bwrap 实测。
+本节保持当时测试和工作树状态；当前第二十七条阶段见第 20 节。历史“提交后干净”不表示目前两仓库没有其他 agent 未提交工作，历史沙箱不可用也不否定本轮 bwrap 实测。
 
 - 认证新增 17 个顶层行为测试，Go Runner／protocol 两包完整本地 race 通过；最终认证增例后聚焦 race 通过。
 - `cf374cda9b` 阶段五组相关回归 174 通过、2 跳过；跳过项是因本机沙箱后端不可用而未执行的普通共享消费者正向验证，严格 Runner 拒绝回归实际通过。
@@ -158,7 +158,7 @@
 
 快照仅重定位 Markdown 引用：同批文档互相链接；本仓库源码使用仓库内相对链接；另一仓库、冻结源码和未随快照导入的设计文档保留明确的工作区路径文字。这些工作区引用不是独立克隆内已经包含的文件。更新根文档后需显式重新同步和核验，manifest 与 Git diff 提供对照，不声明后台自动同步。
 
-本次保存二十六条功能／修复＋三条 fixture-only 阶段，原脚本同步与默认检查每仓库五文件，正常提交实际四个变更文件（3 Markdown＋manifest），INDEX不强写。既有 docs20 为 Go `18056603442a4001ca0d6a6fc7ab72dc7b9876e3`、DSH `ba6e42579504c21e3a7494a83d48bf34467a4fdc`。本快照固定顶部源码基线；第 9–18 节为历史，第 19 节为当前阶段，不声明整个工作树干净。
+本次保存二十七条功能／修复＋三条 fixture-only 阶段，原脚本同步与默认检查每仓库五文件，正常提交实际四个变更文件（3 Markdown＋manifest），INDEX不强写。既有 docs20 为 Go `18056603442a4001ca0d6a6fc7ab72dc7b9876e3`、DSH `ba6e42579504c21e3a7494a83d48bf34467a4fdc`。本快照固定顶部源码基线；第 9–19 节为历史，第 20 节为当前阶段，不声明整个工作树干净。
 
 ## 9. 本轮三条提交与真实探针（十六条阶段历史快照）
 
@@ -292,7 +292,7 @@ FS provider处理cwd／package lstat／拒最终package软链／canonical contai
 
 read35共享fixture双端cmp／SHA `3441d675f3765b7bc88f50e3d75b6a3e1bf31c2469497bf24e2a8e4d2ba100f9`通过，9accept＋另16historicaldeferred／2源码例，无Rustoracle／Go执行证据；oldjobs91／16families／12operations与39oracle不变。详见[第二十五阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十五条阶段dsh-原生-skill-包文件读取)。13大包none完整、15%（10%～20%）、G2file2／native最多3of22硬拒400不变；仅准备sync／default／mirror diff check，不stage／commit、不重复产品tests、不poll26、不改rootmap，待26最终回执保存。
 
-## 19. 当前二十六条阶段：非目录Skill祖先错误码已修复
+## 19. 二十六条阶段历史：非目录Skill祖先错误码已修复
 
 DSH行为基线 `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`，`fix(runner): distinguish non-directory Skill ancestors`，parent33c456，5files+46／-4。后继HEAD `32eea451266c00303c8bf23ea90319eb4e6364d9`仅三份Note计数文档校正，不增功能。Go746不变，总26＝Server11＋DSH15、test-only3；File实际4／20、DSH同步7／Go同步8／Go Filecodec5。当前无ENOTDIR pending，listing仍未真实执行。
 
@@ -301,3 +301,17 @@ DSH行为基线 `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`，`fix(runner): disti
 最新policy44＋Loader11＝55 PASS；Runner tsc-b／typedlint2 PASS；tsdown＋plainNode built同Skill request三policy PASS；named Note pairwrite/check／diff及正常fix commit pair／2filelint／whitespace PASS。未重复520codec／84range，不把25的policy42与最新44相加，Loader亦重合。后继32eea45修remaining16 including Skill listing（中文包括Skill列表内其余16），4＋16＝20；namedpair／diff／normal hooks PASS、未重复产品checks。源码及执行者job回执见[第二十六阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十六条阶段skill非目录祖先错误码修复与最终保存)。
 
 本次按原脚本同步和核验各侧五文件，仅正常提交实际四个镜像变更（3md＋manifest），INDEX未改不强写；不纳入NOTICE／scratch／日志／rootmap，不改sync脚本。不重跑产品tests／doc-sync aggregate，不push／部署或使用真实凭据。整体15%粗10–20%、13大包无一完整、File4／20、Project0／7、Computer0／19、G2file2native最多3of22合规HTTP400不变，SkillList有界nofollow FS缺口留待后续。
+
+## 20. 当前二十七条阶段：原生Skill列表已提交
+
+DSH `a6bb656769050a320bb8046e7bc43b903b831135`，`feat(runner): list native Skill packages`，63files+1555／-64。总27＝Server11＋DSH16，fixture-only3另计；Go746行为基线不变，后继docs不加功能。File实际5／20、剩余15项，两侧同步codec8／8，Go Filecodec5不变。
+
+通用FS scanDir Definition／local／fs-sandbox继承／E2B provider与真实Runner consumer已接通：完整directdir扫描，不follow子项／resolve子目标／读内容；目录与symlink候选先计数再跳invalidUTF8／tuple去重，只retain limit最小UTF8名字／种类，BOM保留，truncated=count>limit，exact path／limit1–257／对象或exact1array保持；EOF前无partial success。原SkillList无max_bytes／maxOutput／512KB限制，只有Host maxResultBytes完整FSmetadata及outer预算；任何outcome不发FsObserved，不授写。FS／E2B owned清理，真实E2B未跑。
+
+同commit修listing .agents→ordinary/child间接ENOTDIR：local FS_NOT_FOUND保留cause，Runner不吞空，真missinglink仍empty，空cwd拒unavailable；不额外计功能。历史bd5216保留，旧Skill read空cwd／间接ENOTDIR仍待验证，不能说被本片修复。list38共享fixture逐字同Go，SHA a445511e3884b382e9179bb365577f47d8e6612a7a323e0c7371d59779fb3050，38＝10accept／18invalid／1unknown／9wireReject，另15deferred／3源码例，无Rustoracle；旧read35／jobs字节未改，旧read历史listing deferred现consumer接受，原wire27／File9／Job12状态不变。
+
+验证分列：codec604＝85＋79＋162＋278；最末listpolicy25＋Loader14＝39 PASS，先前client28独立不是67一次aggregate。localscan13 PASS后仅测试void→undefined类型修正；resolve／旧listDir选中26 PASS、123未按selector运行。E2Bfilesystem75／helper44各PASS，使用本地fake carrier而非真实E2B。Host typebuild（143）／最终fs-local与Runner leaves（153）／E2B tsc PASS；新15files typedlint首轮仅一test的5处类型报错，修后该文件（162）PASS、其余14首轮无错；Runner／E2B lint及commit11pairs／26TS／whitespace／vendor PASS。
+
+有效built为programmatic tsdown五target（159），真实typertPlugin host、ESM/es2024/.js与exports一致，Runner三entry；先前CLI154／157未匹配及158.mjs不作为有效built证据。普通Node built-files-smoke（161）同request[2]/max_bytes0三policy PASS：list后blindwrite拒、旧Skillread后write；source另maxOutput1。不是全Hostbundle或平台矩阵。424type-equiv／paired derivatives、API99fresh、exportJSDoc、doc-typecheck80blocks使用built types/noEmit、namedpairs／links1543／wrap1550／Notes312／README-subsystem／budgets8（163）PASS，无34gate aggregate。精确配置、源链接及各回执见[第二十七阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十七条阶段原生skill-package-listing与有界目录扫描)。
+
+整体15%（10%～20%）、13大包无一完整、Project0／7／Computer0／19、native3／file-only2of22与合规G2HTTP400保持，下一步剩余15File与旧read差异验证。本轮只root／mirrors同步核验、正常docs-only提交，不重跑产品tests、不改业务／Notes／API／rootmap，不push／实际服务／凭据／模型／E2B。

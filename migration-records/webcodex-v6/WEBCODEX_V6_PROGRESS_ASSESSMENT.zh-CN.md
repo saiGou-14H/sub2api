@@ -1,6 +1,6 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-本报告第1–23节保留历史，第24节记录非目录Skill祖先错误码修复后的第26阶段。累计26条代码／功能修复（Server11、DSH15）＋3条fixture-only，Go `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH行为基线 `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`，后继纯文档HEAD `32eea451266c00303c8bf23ea90319eb4e6364d9`不增加功能。ENOTDIR差异已解决，非目录祖先返回skill_path_invalid，真正缺失仍skill_file_not_found；最新policy44＋Loader11＝55通过。File实际4／20，DSH同步7，Go同步8／Filecodec5；listing仍Go-only，DSH有界nofollow扫描缺口保留。13大包none fully complete、整体15%（10%～20%）、Project0／7、Computer0／19、G2file2／native最多3of22硬拒400，无完整持久MCP／生产替换。当前见第24节和[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，证据见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存两侧进度docs，不重复产品检查或doc-sync aggregate，不将重合测试累加。
+本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。当前见第25节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -435,7 +435,7 @@ candidate call id观察在最终ToolRuntime与outer预算通过、owner/call未a
 
 read35fixture Go／DSH cmp＋SHA `3441d675f3765b7bc88f50e3d75b6a3e1bf31c2469497bf24e2a8e4d2ba100f9`已通过，含9accept／另16historicaldeferred与2源码例，无Rustoracle／Go执行证据；oldjobs91／16／12与39oracle不变。源引用与最终分组回执见[第二十五阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十五条阶段dsh-原生-skill-包文件读取)。整体15%粗10–20%、13大包无一完整、Project0／7／Computer0／19／G2file2native最多3of22硬拒400、无生产替换／持久MCP闭环不变。仅root／mirrors准备与检查，不stage／commit、不重跑产品checks、不poll26、不改rootmap，待修复SHA最终保存。
 
-## 24. 当前二十六条阶段：Skill非目录错误码修复
+## 24. 二十六条阶段历史：Skill非目录错误码修复
 
 DSH `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`（fix(runner): distinguish non-directory Skill ancestors），parent33c456，5files+46／-4，为第26条代码／修复；后继 `32eea451266c00303c8bf23ea90319eb4e6364d9`仅三份Note文档计数，不加功能。Go746不变，总26＝Server11＋DSH15、test-only3，File实际4／20／DSH同步7／Go同步8／Go Filecodec5不因错误码修复增加。
 
@@ -444,3 +444,17 @@ DSH `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`（fix(runner): distinguish non-di
 最新policy44＋Loader11＝55 PASS；Runner tsc-b、typedlint2、tsdown／plainNodebuilt同request三policy、named Note pairwrite/check／diff、normal fixcommit pair／2filelint／whitespace PASS。无重复520codec／84range，与25的policy42不相加，Loader也有重合。32eea45将Note表述改为remaining16 including Skill listing／包括Skill列表在内其余16项，4＋16＝20，namedpair／diff／precommit pair／whitespace PASS，无额外产品checks。精确源引用与job回执见[第二十六阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十六条阶段skill非目录祖先错误码修复与最终保存)。
 
 工程估计保持15%（10%～20%）、13大包none fully complete、Project0／7／Computer0／19、G2file2native最多3of22合规HTTP400、无完整持久MCP／生产替换。SkillList仍Go-only，FS有界nofollow支持仍为下一缺口。本次核验root／mirrors后各正常保存实际四个镜像变更（3md＋manifest），不强写INDEX、不包含NOTICE／scratch／日志／rootmap，不改原同步脚本，不重跑产品tests或34项doc-sync aggregate，无push／部署／真实凭据操作。
+
+## 25. 当前二十七条阶段：Skill列表真实执行
+
+DSH `a6bb656769050a320bb8046e7bc43b903b831135`，63files+1555／-64，`feat(runner): list native Skill packages`。总27＝Server11＋DSH16、fixture-only3，Go746行为基线保持；docs仅successor。File实际5／20、剩余15，两侧同步codec8／8，GoFilecodec5不变；不将provider fake四调用者适配或同commit P2另加功能。
+
+FS scanDir完整Definition／local／fs-sandbox继承／E2B provider／Runner consumer完成directdir nofollow全扫描，不resolve子目标或读取内容。目录／symlink候选先计数、再invalidUTF8跳过与tuple去重，仅保留UTF8名字／种类最小limit，BOM保留，truncated=count>limit，原exactpath／limit1–257／对象或exact1array、EOF无partial success。原listing无max_bytes／maxOutput／512KB限制，额外Host maxResultBytes约束完整FSmetadata及outerresult；任何outcome无FsObserved／不授权写，owned清理，真实E2B未验收。
+
+listing间接ENOTDIR吞空已在同commit修复，local FS_NOT_FOUND保留cause，真正missinglink仍empty，空cwd拒unavailable；旧Skill read空cwd／间接ENOTDIR差异仍待验证，bd5216历史保持。listing38fixture同Go、SHA a445511e3884b382e9179bb365577f47d8e6612a7a323e0c7371d59779fb3050，10accept／18invalid／1unknown／9wireReject及另15deferred／3源码输出例，无Rustoracle。旧read35／jobs字节不变，历史read listing deferred现consumer接受但不改旧snapshot，原wire27／File9／Job12状态保持。
+
+验证范围不累加：codec604（85＋79＋162＋278）；最末listpolicy25＋Loader14＝39，先前client28独立。localscan13、resolve／oldlistDir选中26与123未运行分清；E2Bfilesystem75／remotehelper44分别PASS，仅owned local Linux fake carrier。Hosttypebuild143／fs-local和Runner leaves153／E2Btsc PASS；typedlint新15仅一个test5处void报错，改undefined后1file162PASS，其余14首轮无错，Runner／E2B及正常commit11pairs／26TS lint／whitespace／vendor PASS。
+
+有效built为159 programmatic tsdown精确五targets、真实host typertPlugin、.js匹配exports／Runner三entry；154／157 CLI未匹配、158.mjs无效built已分析纠正，不计有效证据。161普通Node built-files-smoke同request[2]/max_bytes0三policy PASS，list→blindwrite拒→Skillread→write，source另maxOutput1。不称全Hostbundle／平台矩阵。424type-equiv与paired derivatives／99catalogfresh／exportJSDoc／doc-typecheck80blocks（USE_BUILD_OUTPUT=1，无Emit）、pairs／mdlinks1543／wrap1550／Notes312／README-subsystem gates／budgets8(163)PASS，非34gate aggregate。完整配置、来源与准确回执见[第二十七阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十七条阶段原生skill-package-listing与有界目录扫描)。
+
+工程估计15%（10%～20%）不变，13大包none complete、Project0／7／Computer0／19、native3/file2of22与完整G2HTTP400不变。后续剩余15File和旧read差异，仍无完整持久MCP闭环／生产替换。本轮仅root三页及镜像sync／default／diff／cached／正常docs提交，不修改业务／Notes／生成API或rootmap，不重跑产品checks，不push／服务／秘密／模型／E2B。
