@@ -566,7 +566,7 @@ func supports(c protocol.RunnerCapabilities, kind string) bool {
 		return c.StructuredProcessArgv
 	case "run_script":
 		return c.StructuredScriptPayload
-	case "file_read", "file_list":
+	case "file_read", "file_list", "file_skill_read_file":
 		return c.FileRead
 	case "file_write":
 		return c.FileWrite

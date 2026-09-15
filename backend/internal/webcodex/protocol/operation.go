@@ -185,7 +185,7 @@ func (r RunnerRequest) decodeOperation() (Operation, error) {
 		s := *r.Script
 		s.Args = append([]string{}, s.Args...)
 		return ScriptOperation{r.Cwd, s, r.Stdin, r.TimeoutSecs}, nil
-	case "file_read", "file_write", "file_list":
+	case "file_read", "file_write", "file_list", "file_skill_read_file":
 		if r.JobID != nil || r.Stdin != nil || present(r.JobContext) || r.Command != "" {
 			return nil, fmt.Errorf("file operation contains incompatible execution fields")
 		}
@@ -201,9 +201,9 @@ func (r RunnerRequest) decodeOperation() (Operation, error) {
 		if r.Kind == "file_write" && r.Content == nil {
 			return nil, fmt.Errorf("file_write requires content")
 		}
-		if r.Kind == "file_read" {
+		if r.Kind == "file_read" || r.Kind == "file_skill_read_file" {
 			if (r.StartLine != nil || r.EndLine != nil) && (r.StartLine == nil || r.EndLine == nil || *r.StartLine == 0 || *r.EndLine < *r.StartLine) {
-				return nil, fmt.Errorf("file_read line range is invalid")
+				return nil, fmt.Errorf("%s line range is invalid", r.Kind)
 			}
 		} else if r.StartLine != nil || r.EndLine != nil {
 			return nil, fmt.Errorf("line range incompatible with file operation")
@@ -218,7 +218,7 @@ func (r RunnerRequest) decodeOperation() (Operation, error) {
 func knownDeferredKind(k string) bool {
 	switch k {
 	case "run_internal_posix_script", "start_job", "start_validation_job", "start_process_job", "start_detached_process_job", "start_script_job", "stop_job",
-		"file_project_overview", "file_delete_project_files", "file_write_project_file", "file_apply_text_edits", "file_apply_patch", "file_save_project_artifact", "file_read_project_artifact_metadata", "file_read_project_artifact", "file_read_project_artifact_export_chunk", "file_artifact_upload_begin", "file_artifact_upload_chunk", "file_artifact_upload_finish", "file_artifact_upload_abort", "file_checkpoint_create", "file_checkpoint_restore", "file_skill_list_packages", "file_skill_read_file",
+		"file_project_overview", "file_delete_project_files", "file_write_project_file", "file_apply_text_edits", "file_apply_patch", "file_save_project_artifact", "file_read_project_artifact_metadata", "file_read_project_artifact", "file_read_project_artifact_export_chunk", "file_artifact_upload_begin", "file_artifact_upload_chunk", "file_artifact_upload_finish", "file_artifact_upload_abort", "file_checkpoint_create", "file_checkpoint_restore", "file_skill_list_packages",
 		"register_project", "create_project", "resolve_or_register_project", "prepare_managed_worktree", "project_lifecycle_enable", "project_lifecycle_disable", "project_lifecycle_unregister",
 		"computer_list_windows", "computer_list_applications", "computer_launch_application", "computer_list_displays", "computer_snapshot_display", "computer_read_clipboard", "computer_write_clipboard", "computer_pointer_move", "computer_pointer_click", "computer_snapshot", "computer_snapshot_region", "computer_accessibility_status", "computer_accessibility_tree", "computer_element_state", "computer_activate_window", "computer_control", "computer_scroll_to_element", "computer_key_input", "computer_input_text",
 		"validation", "lsp", "persistent_shell", "mcp_gateway", "plugin_gateway", "coding_agent", "skill_store", "ssh_resource", "runner_config":

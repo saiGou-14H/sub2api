@@ -41,4 +41,11 @@ transfer remain refused. Legacy cursor replacement and optional sequence behavio
 are preserved; dispatch-based stop and liveness gates are strengthened. README.md
 records exact limits and incomplete source surfaces.
 
+registry.go additionally classifies file_skill_read_file under the original
+FileRead capability for synchronous polling, following the file operation in
+crates/webcodex-core/src/runner_operation.rs:283-355 and the skill consumer in
+src/tool_runtime/skills.rs:1234-1272. The Go adaptation preserves opaque content
+and does not implement skill filesystem execution, a SkillStore, or MCP tools.
+Registration still requires the complete original generation-2 baseline.
+
 This notice supplements ../NOTICE and does not relicense unrelated sub2api code.

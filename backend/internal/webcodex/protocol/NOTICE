@@ -31,5 +31,12 @@ also accept arrays. This adaptation uses the isolated serde 1.0.228 /
 serde_json 1.0.150 oracle and frozen source annotations; general non-Job alternate
 forms remain outside this bounded expansion.
 
+The file_skill_read_file expansion adds one synchronous canonical kind, retains
+opaque content and the original range/non-write compatibility rules, and keeps
+Job decoding separate. testdata/skill-file-read.json is a new source-derived
+fixture; no Rust oracle was run for it. Its independent executor output examples
+are adapted from crates/webcodex-runner/src/webcodex_runner/files.rs:508-529,
+662-795 and are not Go execution tests. The historical R0 fixture is unchanged.
+
 The package does not implement the full original Runner or execute requests.
 See README.md for source locations, API contracts, and migration limitations.

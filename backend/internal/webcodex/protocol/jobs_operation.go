@@ -65,7 +65,7 @@ func (r RunnerRequest) DecodeJobInvocation() (JobInvocation, error) {
 	empty := JobInvocation{}
 	if r.Kind != "start_process_job" && r.Kind != "stop_job" {
 		switch r.Kind {
-		case "run_shell", "run_process", "run_script", "file_read", "file_write", "file_list":
+		case "run_shell", "run_process", "run_script", "file_read", "file_write", "file_list", "file_skill_read_file":
 			return empty, fmt.Errorf("%w: %s", ErrUnsupported, r.Kind)
 		}
 		if knownDeferredKind(r.Kind) {
