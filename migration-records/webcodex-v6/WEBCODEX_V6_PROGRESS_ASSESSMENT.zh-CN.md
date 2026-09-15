@@ -1,6 +1,6 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-本报告第 1–17 节保留阶段历史，第 18 节记录当前已提交的受限 native 执行成果。累计 20 条代码／功能修复（Server 8、DSH 12）＋2 条 fixture-only 验证补充；Server 代码基线 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 代码基线 `655b2a643e49020f32641839753d45edf631ff06`。Server legacy process Job 已提交，正式 Linux bwrap／full＋显式 process-group 的 Service／provider／Runner consumer 也已提交。Go 854 reconciliation 与 DSH dc745 JobManager／FIFO／update 集成进行中、未提交，不计功能；固定 Server 基线仍拒 inventory／reconciliation／log_snapshot。共享 fixture 保持 91 DTO／16 families／12 operations，39 serde probes 不变。历史“RO／WW 一概拒绝”“正式 bwrap 在研”“Job 尚未开始”不代表当前状态；当前以第 18 节和[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)为准，详细回执见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。整体约 15%（10%～20%），13 个工作包无一全部完成；持久化／跨进程恢复、用户 dispatch HTTP／MCP 与完整 G2／G0 未完成，外层 RunnerRequest 数组／general 非 Job 替代形式 gap 不变。本次仅同步及保存双仓库 docs-only 本地提交，不重跑产品测试。
+本报告第1–23节保留历史，第24节记录非目录Skill祖先错误码修复后的第26阶段。累计26条代码／功能修复（Server11、DSH15）＋3条fixture-only，Go `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH行为基线 `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`，后继纯文档HEAD `32eea451266c00303c8bf23ea90319eb4e6364d9`不增加功能。ENOTDIR差异已解决，非目录祖先返回skill_path_invalid，真正缺失仍skill_file_not_found；最新policy44＋Loader11＝55通过。File实际4／20，DSH同步7，Go同步8／Filecodec5；listing仍Go-only，DSH有界nofollow扫描缺口保留。13大包none fully complete、整体15%（10%～20%）、Project0／7、Computer0／19、G2file2／native最多3of22硬拒400，无完整持久MCP／生产替换。当前见第24节和[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，证据见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存两侧进度docs，不重复产品检查或doc-sync aggregate，不将重合测试累加。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -347,7 +347,7 @@ Host project／scope 授权仍前置；没有新增用户 dispatch HTTP 或 MCP�
 
 根三文档和镜像保存为 19 功能／修复＋2 fixture 验证阶段，原脚本同步及默认／diff 检查后不 stage／commit，等待 parent 协调最终快照。无产品测试重跑、push／deploy／model／DB／production。
 
-## 18. 当前二十条阶段：受限 native 执行已提交
+## 18. 二十条阶段历史：受限 native 执行已提交
 
 第 20 个独立功能／修复为 DSH `655b2a643e49020f32641839753d45edf631ff06`，`feat(runner): execute confined native images through private bootstrap`，62 文件、+1230／-88，normal hooks 本地提交。累计 Server 8、DSH 12，共 20；另 2 fixture-only 不计功能。Server 固定 code `efa85831ef08995c54ab63dd33bc57afd7106acb`，第十九阶段 docs 已保存于 Go `4a58b994def92dec8372dc0725f4b31f62bdb69b` 和 DSH `d017b44b6eccba005c0d0126cb3b1f2042343002`；后续并行源码即使提交也不暗增此快照计数。私有 target channel 是既有功能，此次新增正式受限集成。
 
@@ -360,3 +360,87 @@ D2 尚未完整完成：pkg 不支持 confined，unconfined 保留；已验 sour
 候选从 d017 导入 exact owned files 并排除 Job，通过 Runner／subprocess-local／sandbox-local／E2B 相关 tsc；Cordis 99 artifacts 0 change＋freshness、config freshness、421 type-equiv pairs／export JSDoc 通过，10 generated 与 main 相同，五包 artifacts 支持 smoke；候选 cleanup 后仅 main worktree。文档 mdlinks 1537、mdwrap 1544、budgets 8、doc-typecheck 80 blocks 通过；doc-quick 历史 15／16 的 heading anchor 失败修正后 doc-standard 12／12 成功，不能称 doc-quick 全组重跑通过。normal hooks 13 pairs、16 文件 staged lint 0 errors／3 旧 unused-disable warnings，notices／whitespace／vendor 通过。详细回执与源路径见[第二十阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十条阶段正式受限-native-执行已提交)。
 
 不因一个功能重新加百分比：整体仍约 15%（10%～20%），13 大工作包无一全部完成。File 3／20、Project 0／7、Computer 0／19、G2 native 最多 3／22／file-only 2／22、真实 Go 注册 HTTP 400 不变；R0 91 DTO／16 families／12 operations 与原 39 serde probes 不变，无持久 MCP 闭环及生产替换。本次由未修改的原同步脚本保存两侧各五文件白名单镜像，默认及镜像 diff 核验后 normal hooks docs-only 本地提交；不重跑产品测试，不 push／deploy／真实 E2B／model／credential／service。
+
+## 19. 二十一条阶段历史：Server 同实例 process Job 对账
+
+Go `40817b71370bea996e21519a24268fae03b87338`（`feat(webcodex): reconcile same-instance process Jobs`）已本地提交，15 文件、+1544／-34。当前功能 21＝Server 9＋DSH 12，另 2 fixture-only 不计功能；DSH 仍固定 `655b2a643e49020f32641839753d45edf631ff06`，dc745 Runner Job 执行／FIFO／update 集成进行中、未提交，不计第 22 项。
+
+S2／D2 Job 新增已提交子集是同 Server／同实例、已知已授权且已派发 process Job 的原库存与快照恢复。`job_recovery_grace_seconds` 独立显式正数才允许 reconciliation，默认 0 拒绝；MaxJobs／MaxPending 各自独立。全量 typed inventory 预检后，锁内原子核对 owner／group／client／instance／request／context 再应用。active 在 terminal 前，最多 64＋64＝128 条，完整 Rust 等价 JSON 含 metadata 上限 1 MiB，HTML／U+2028／U+2029 与字面反斜杠转义计数正确；每 snapshot stream 64 KiB，饱和 cursor 算术且不倒退。
+
+sequenced 状态只接受 canonical Runner-owned 状态与正序号，finished 等于 terminal，completed 要求 exit 0，active 无 exit／duration；terminal 不可改，旧序号忽略，snapshot 与 chunk／tail 互斥，同实例 capability 降级拒绝。显式 offline 或观测 stale 从首次观测开启固定 grace；每 Job 一个有界可取消 timer，恢复／terminal／Close 取消，迟到合法 snapshot 也不能逃过过期 lost。无效授权／库存 shape 不修改状态；恢复期间 stop 拒绝，authoritative running 恢复后可再 stop。Get／List（包括过滤）／Log 显示 recovering，内部原 12 states 保留，terminal 优先；900 秒 TTL 从 Server first terminal observation 起算。
+
+仍缺退出条件：未知／过期／Server restart／workflow／validation／SSH／detached 跨实例库存拒绝，无持久恢复。cap=false 保留原 inventory／log_snapshot 拒绝与 legacy optional sequence／tail reset／finished fallback，不能泛称所有库存仍拒绝或完整 Job 闭环已成。G2 原 22 位未放宽，真实 DSH native 3／22 注册仍 HTTP 400；真实跨端 G2／MCP／持久结果未验收。
+
+验证回执分开记录：原主体离线 Go 1.27.1 `-tags unit -race -count=1` runner 78 top＋182 sub PASS、2 条原 DSH opt-in interop SKIP；protocol 30 top＋176 sub PASS；server／config 的 `^TestWebCodexRunner` 分别 17 top＋23 sub、4 top＋17 sub PASS。新增 reconciliation 测试主体 17 runner top＋最后 public overlay 1＝18 runner top，路由 1 top＋6 sub、config 1 top＋5 sub，包含于对应选择范围，不另加为总覆盖。最后 overlay 窄 race 为 15 top＋18 sub、无 skip、1.338s，验证 Get／List／Log 经 inventory／snapshot 恢复及 terminal、内部状态不变；不累加为全套总数，protocol／config 未为 overlay 重跑。gofmt／diff checks 与正常提交通过，提交收尾 index 空；本轮文档准备不重跑产品测试。源引用与详情见[第二十一阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十一条阶段server-同实例-process-job-对账)。
+
+整体仍约 15%（10%～20%），13 大包 none fully complete；File 3／20、Project 0／7、Computer 0／19、R0 91 DTO／16 families／12 operations、原 39 serde probes 不变。未做真实 DB、外部模型、生产或 push。本次仅准备根三文档和每侧五文件镜像，sync／default／diff 核验后不 stage／commit；既有 docs20 为 Go `18056603442a4001ca0d6a6fc7ab72dc7b9876e3`、DSH `ba6e42579504c21e3a7494a83d48bf34467a4fdc`。后续收到完整第 22 阶段资料才统一保存两条 docs 提交。
+
+## 20. 二十二条阶段历史：Runner process Job 执行已提交
+
+DSH `944634f0b1b311f0ecba124ceb9681bc12f15322`（`feat(runner): execute and deliver structured process Jobs`），33 文件、+1870／-115，previous 为 docs20 `ba6e42579504c21e3a7494a83d48bf34467a4fdc`。累计功能 22＝Server 9＋DSH 13，fixture-only 仍 2；Go 固定 `40817b71370bea996e21519a24268fae03b87338`。Go file_skill_read_file 下一片与两份外包 type fixture 修正尚无最后提交回执，不计第 23 项或新 test 提交。
+
+D2 Job 已有原 start_process_job／stop_job、独立 provider、HTTP poll／FIFO／private Host ToolRuntime／actual native process／legacy job_update 单发送者链路，无 Agent／Session／ctx.jobs／模型。processJobs 显式可选对象，省略关闭；Schemastery optional union 的 source／Loader 验证通过。Job timeout 1–3600 秒、独立 local max 3600000 ms，不受 sync 1–120 秒限制。private onStarted 要 actual started receipt 且两个 PipeTail reader attached 才发布 running 和原 working／process_running／runner_execution；原四类进程结果映射 failed／lost／timeout／stopped／completed，terminal immutable。queued stop 先 splice 不启动；running stop 真实 cancel，受限 target-exit 丢失保留 lost／outcome_unknown，不虚 stopped。
+
+concurrency 1–64 FIFO，active 64／terminal 64 与 900 秒历史、四生命周期更新、双 stream 各 64 KiB；records／bindings／bytes／body／storage 全信封预算，首 stop binding 预留及 terminal／卸载 owner 预留释放。Symbol.for 进程内 owned identity hash／count 账本跨 provider reload／卸载／duplicate imports 保留，旧 request／Job 不再执行、冲突拒绝，aggregate maxBindings／maxBindingBytes 耗尽拒新 admit，配置降低仍识别旧 duplicate；global 无 Context／handle／snapshot。pending updates 与 snapshots 不重建，身份抑制不等于结果恢复。
+
+HTTP 单 worker 发送 immutable replacement tails／null chunks，同 body retry 不执行第二次；无 inventory／log_snapshot／reconciliation 广告，legacy 无 seq fence，超时旧 HTTP 仍可能晚到。因此 Go21 与本片尚非跨端 sequenced 闭环。永久 poll／send 失败 abort 并 await cleanup，硬容量耗尽可能只有 local sanitized status，poll 保 stop，不承诺 Server 拒绝 ACK。script／detached／SSH／validation Job 未实现，structured_execution_jobs 仍 false。
+
+最后 primary 88／88 零 skip＝manager 33＋jobs client 4＋actual source Loader 8＋process 43；官方 bwrap RO／WW 由 Python owned subreaper 收全 no final children。latest plain Node built full／unrestricted、RO、WW 三 policy smoke 均 PASS，含 Job 121 秒 decoder、literal argv／stdin、真实 exit127、queued／running stop、dup／unload cleanup／受限 unknown；同实例 main Loader HMR 后旧 marker／running 仍 once，新 Job 可执行。较早 216 pass（162＋26＋7＋21）零 skip 为另一范围且部分重合，不与 88 相加。
+
+421 type-equiv／export JSDoc／相关 tsc 通过，API99 catalog／config／paired zh／subsystem 同步。doc-sync 原 33／34，唯一 doc-typecheck 的 Host 测试类型问题；Job 自身和两份旧 Runner fixture 已随 944 修复，余下 pwsh-sandbox constructor Config 与 subprocess-local exactOptional／terminal env 两份外包测试修正待最终回执，不能称叶检查修后 PASS 或 aggregate 全绿；正常 Job hooks 最终细节待 receipt。源码及完整证据见[第二十二阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十二条阶段runner-process-jobs-执行与-legacy-发送)。
+
+整体约 15%（10%～20%）不变，13 大包 none fully complete，File 3／20、Project 0／7、Computer 0／19，G2 files 2／22／native 最多 3／22 硬拒400；R0 91 DTO／16 families／12 operations、原 39 probes 不变，无持久 MCP 闭环／生产替换。仅准备根三文档与镜像，sync／default／diff check 后不 stage／commit，等待后续 File 成对完成最后统一保存；不重跑产品 tests，不读真实 credentials，无外部模型／DB／E2B／生产／push。
+
+## 21. 二十三条阶段历史：Go skill-file 路由已提交
+
+Go `32f2d5fb45770f0bfc86a9bf38e237ccf7d3eeec`，`feat(webcodex): route native skill file reads`，10文件、+393／-11。功能23＝Server10＋DSH13、fixture-only增至3（后续45487类型修正），DSH基线固定944634f0b1b311f0ecba124ceb9681bc12f15322。本片仅新增 file_skill_read_file 第七类同步 codec／Invocation 与 FileRead 路由；原27字段请求／九字段File payload保留，content opaque、options／path业务验证在Runner执行层，Jobdecoder仍ErrUnsupported。DSH镜像与执行准备中，File实际3／20，不计4／20或第24项。
+
+新增独立schema1 skill-file-read.json为source-derived、no Rust oracle，35 cases含9 accept，另16 deferred File kinds与2 source output examples；SHA-256为`3441d675f3765b7bc88f50e3d75b6a3e1bf31c2469497bf24e2a8e4d2ba100f9`。这份表不混入原R0／Jobs91 DTO／16 families／12 operations与39 oracle probes，输出示例不代表执行能力。原20项File分母与原wire名称保留。
+
+离线Go1.27.1普通-count1：初次protocol／runner特定File／Generation／Job分类selector PASS 0.008s／0.007s；最后fixture变更后3 top TestSkillFileRead protocol PASS 0.004s，35 cases／16 deferred由subtest覆盖。无新增并发，因此本片未跑-race；聚焦重跑不累加。gofmt／diff／cached检查及正常10文件白名单提交通过；源码与fixture链接见[第二十三阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十三条阶段go-skill-file-同步-codec-与路由)。
+
+仍约15%（10%～20%）、13大包none fully complete，File3／20、Project0／7、Computer0／19、G2files2／native最多3of22硬拒400，无完整MCP／持久结果／生产替换。未做真实credentials／DB／models／G2互操作／push；doc-typecheck修后叶检查与Job hooks最终回执见下文，aggregate未重跑。仅root／mirrors同步检查，不stage／commit、不重复产品tests，待DSHFile24再统一保存。
+
+### 第三条 fixture-only 与最终检查补充
+
+DSH `45487eef33e72103f97813a95e5f313840949b94`（`test: align subprocess fixtures with typed configuration`），parent944634，2files+8／-3，只改pwsh-sandbox constructor fixture type与subprocess-local native confinement的executionMode省略／PTYfields。它是第三条fixture-only，不增加23功能，DSH行为基线保留944634。constructor初次compilefail已按union实配型修复，max-len失败换行修复，最终无未解决失败。
+
+Host `pnpm exec tsc -b tsconfig.host.json` PASS；`pnpm run doc-typecheck`完整该叶（含build:lib:host＋contracts-ready）PASS：80blocks compiled、78ignored、798type-equiv-catalog、956paired derivatives。native confinement15／15 PASS，typed lint两file0error0warn，normalhooks／diffcheck通过；历史doc-sync33／34后的单叶成功不等于aggregate重跑。pwsh spec收集需要真实PowerShell，未运行其spec，Host type build覆盖type-only改动。执行者jobs88–94已全收、index空、仅父四mirror dirty是提交收尾事实。
+
+Job944 normalhooks准确为6 named stagedtranslationpairs、14 stagedsource lint0warn0error、whitespace/vendor全过；33files+1870／-115。DSHFile dab配套实现已开始，未有第24项SHA／验收，不计功能或File4／20。本轮只记录已收回执，不重复产品检查；rootmap两行源行为校正为单独文档更正，不加功能。
+
+## 22. 二十四条阶段历史：Go Skill package listing codec／路由
+
+Go `746e98015112dfdd67837d2b72fa60015a96b0e4`，`feat(webcodex): route native Skill package listings`，parent32f2d5、11files+373／-11。功能24＝Server11＋DSH13，test-only3；DSH功能基线944634、fixtureHEAD45487不变。Go同步八类、File codec5／20；DSH已提交仍六类同步，reader尚未提交，File实际3／20，不计第25项或File5／20。
+
+产品四行变化使listing进入同步Invocation并移出deferred，Job decoder仍ErrUnsupported，registry使用FileRead gate。原RunnerRequest27／FilePayload9保留，options为opaque字符串；path必须.agents/skills与limit1–257在未来executor检查，wire不提前检查业务。non-null range、write-only hash／prefix、create_dirs=true拒绝，unknown kind独立分类。Server enqueue／poll／result fixture与file_read=false gate已验证，原generation准入不变，无包扫描实现。
+
+独立skill-packages-list.json schema1／source-derived／noRustoracle：38cases＝10accept＋18canonicalinvalid＋1unknown＋9wirereject，另15deferred与3executor-only outputexamples，SHA `a445511e3884b382e9179bb365577f47d8e6612a7a323e0c7371d59779fb3050`。旧read35fixture摘要3441d675f…与字节未变，Go read测试仅更新listing的同步支持／JobUnsupported预期，DSHread镜像未提交不能称双端验证。原R0jobs91／16／12与39oracle保持独立。
+
+离线Go1.27.1普通-count1指定selector，protocol PASS0.015s／runner PASS0.007s；无新增并发，不跑-race或full，gofmt／diff／cached／normalcommit通过，执行者jobs101／102全收。精确命令与11路径引用见[第二十四阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十四条阶段go-skill-package-listing-路由)。不将DSHreader开发中source／built检查加入完成证据。
+
+工程估算仍15%（10%～20%）、13大包none fully complete、Fileactual3／20、Project0／7、Computer0／19、G2原bits／native最多3／file2of22硬拒400，无完整MCP／持久闭环或生产替换。本轮只准备root三文档与五文件镜像，不stage／commit、不碰DSHindex、不改rootmap或sync脚本、不重跑产品tests，无生产／模型／DB／凭据／push；待DSH SkillFile25正式SHA／验证再统一docs保存。
+
+## 23. 二十五条阶段历史：DSH Skill reader已提交
+
+以下保留33c456时点证据；当时ENOTDIR差异已由后继bd5216修复，Note计数已由32eea45校正，最新见第24节。
+
+DSH `33c456f3a9ba487265cac42c70b473c2f5fbffbd`，`feat(runner): read native Skill package files`，parent45487、30files+969／-134。功能25＝Server11＋DSH14、fixture-only3，Go746不变；File实际4／20、DSH同步codec7、Go同步8／Filecodec5。listing仍Go-only，需最小FS provider有界nofollow扫描，实际未达5／20；剩余listing＋其他15项共16项。
+
+原27wire／9payload／11stdout保持，generic content opaque、具体options exact两位置array／object／known duplicate拒／unknown忽略／整数词法u64。私有RangeScan共用basic与Skill，旧basic六字段／legacy输出／whole maxbudget未改；Skill48KiB默认选区、min(policy,192KiB)无floor、完整stdout min(policy,512KiB)。fullrawsha／严格UTF8含范围外、BOM／NUL／CRLF／尾CR／空行／1-based2000／u64sat。FS cwd／package lstat／拒最终package软链／canonical containment／requested与canonical秘密规则，允许包内资源软链；file_bytes为prestat、stable-version retry为明确宿主加强，无快照承诺。
+
+candidate call id观察在最终ToolRuntime与outer预算通过、owner/call未abort才emit，finally drop、失败无absence；同Host成功可写、异Host／postexec取消／outeroverflow不授。旧basic观察时机不改，不能声称所有read早emit修复。无FSseam／Agent／Session／ctx.jobs／capbits／默认composition增量；Job业务不变。已知P2 ENOTDIR被FS_LOCAL折叠NOTFOUND，普通文件/child及package父普通文件错回skill_file_not_found，原应skill_path_invalid；独立26尚未提交，33不含review修复。
+
+验证分组不相加重复：codec520（79＋279＋162）；newrange10＋basic74；Skillpolicy42覆盖取消／写观察／metadata retry／iterator cleanup／owner drain；旧filepolicy25＋deadline5；realLoaderfiles11含同request三policy；client27含readbitfalse／baseline22／G2400。Runner tsc-b／tsdown／plainNode built三策略PASS，typedlint9changed及追加2files0error／precommit10fileslintPASS；doc-typecheck80blocks／type-equiv421／API99fresh／exportJSDoc PASS。named5pairs＋modulepair／precommit6pairs、mdlinks1539／mdwrap1546／budgets／readme318／noteformat／classification310 PASS。modulegraph基线漏Runner，补三生成docs后freshpass，包含本功能不另计；无完整doc-sync aggregate重跑。
+
+read35fixture Go／DSH cmp＋SHA `3441d675f3765b7bc88f50e3d75b6a3e1bf31c2469497bf24e2a8e4d2ba100f9`已通过，含9accept／另16historicaldeferred与2源码例，无Rustoracle／Go执行证据；oldjobs91／16／12与39oracle不变。源引用与最终分组回执见[第二十五阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十五条阶段dsh-原生-skill-包文件读取)。整体15%粗10–20%、13大包无一完整、Project0／7／Computer0／19／G2file2native最多3of22硬拒400、无生产替换／持久MCP闭环不变。仅root／mirrors准备与检查，不stage／commit、不重跑产品checks、不poll26、不改rootmap，待修复SHA最终保存。
+
+## 24. 当前二十六条阶段：Skill非目录错误码修复
+
+DSH `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`（fix(runner): distinguish non-directory Skill ancestors），parent33c456，5files+46／-4，为第26条代码／修复；后继 `32eea451266c00303c8bf23ea90319eb4e6364d9`仅三份Note文档计数，不加功能。Go746不变，总26＝Server11＋DSH15、test-only3，File实际4／20／DSH同步7／Go同步8／Go Filecodec5不因错误码修复增加。
+
+当时ENOTDIR P2已解决：私有checkAncestors使用已有provider lstat检查包／资源祖先，symlink resolve＋stat确认目录，非目录skill_path_invalid，真正缺失skill_file_not_found，最终package symlink仍escape。两新增真实FS fixtures覆盖普通文件SKILL.md/child与package父.skills普通文件，并覆盖symlink-to-file/child、目录symlink资源允许／true missing／失败无观察与write拒绝。没有公共FS API／Nodefs业务IO改变，也未改变旧basic read早观察。
+
+最新policy44＋Loader11＝55 PASS；Runner tsc-b、typedlint2、tsdown／plainNodebuilt同request三policy、named Note pairwrite/check／diff、normal fixcommit pair／2filelint／whitespace PASS。无重复520codec／84range，与25的policy42不相加，Loader也有重合。32eea45将Note表述改为remaining16 including Skill listing／包括Skill列表在内其余16项，4＋16＝20，namedpair／diff／precommit pair／whitespace PASS，无额外产品checks。精确源引用与job回执见[第二十六阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十六条阶段skill非目录祖先错误码修复与最终保存)。
+
+工程估计保持15%（10%～20%）、13大包none fully complete、Project0／7／Computer0／19、G2file2native最多3of22合规HTTP400、无完整持久MCP／生产替换。SkillList仍Go-only，FS有界nofollow支持仍为下一缺口。本次核验root／mirrors后各正常保存实际四个镜像变更（3md＋manifest），不强写INDEX、不包含NOTICE／scratch／日志／rootmap，不改原同步脚本，不重跑产品tests或34项doc-sync aggregate，无push／部署／真实凭据操作。
