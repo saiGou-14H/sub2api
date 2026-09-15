@@ -7,18 +7,21 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/webcodex/protocol"
 )
 
-// UpdateJob accepts only original legacy updates for an admitted process Job.
-// Capability-gated sequencing and authoritative inventories/snapshots remain
-// unsupported; optional legacy update_seq is recorded, not used as a replay key.
+// UpdateJob accepts original legacy updates and capability-gated sequenced
+// updates for admitted process Jobs. Legacy update_seq remains informational.
 func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdateRequest) (protocol.ShellJobInfo, error) {
 	var empty protocol.ShellJobInfo
 	access, err := principal.authorize(input.ClientID, ScopeJobUpdate)
 	if err != nil {
 		return empty, err
+	}
+	if s := input.LogSnapshot; s != nil && (!utf8.ValidString(s.Stdout.Tail) || !utf8.ValidString(s.Stderr.Tail)) {
+		return empty, fmt.Errorf("job snapshot stream must be valid UTF-8")
 	}
 	body, err := copyJSON(input)
 	if err != nil {
@@ -31,9 +34,6 @@ func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdate
 		if err := validateID(*body.RequestID, 80, true); err != nil {
 			return empty, err
 		}
-	}
-	if body.LogSnapshot != nil {
-		return empty, fmt.Errorf("%w: log_snapshot requires job_state_reconciliation", protocol.ErrUnsupported)
 	}
 	lifecycle, err := protocol.ParseRunnerJobLifecycle(strings.TrimSpace(body.Status))
 	if err != nil {
@@ -55,7 +55,18 @@ func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdate
 	if body.RequestID != nil && (j.info.RequestID == nil || *body.RequestID != *j.info.RequestID) {
 		return empty, fmt.Errorf("job update request_id does not match job_id")
 	}
+	sequenced := n.registration.Capabilities.JobStateReconciliation
+	if err := validateSequencedUpdate(body, lifecycle, sequenced); err != nil {
+		return empty, err
+	}
 	now := time.Now()
+	if sequenced && j.recoveringSince != nil && body.LogSnapshot == nil {
+		return empty, fmt.Errorf("recovering job update requires authoritative log_snapshot")
+	}
+	if sequenced && body.UpdateSeq != nil && j.info.LastUpdateSeq != nil && *body.UpdateSeq <= *j.info.LastUpdateSeq {
+		n.lastSeen, n.disconnectedAt = now, nil
+		return j.view(now), nil
+	}
 	// Original terminal latch precedes per-field lifecycle validation and mutation.
 	if jobLifecycle(j).IsTerminal() {
 		n.lastSeen = now
@@ -65,6 +76,18 @@ func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdate
 	if !j.dispatched || r.requestToJob[*j.info.RequestID] != body.JobID {
 		return empty, fmt.Errorf("Runner Job request has not been dispatched")
 	}
+	if body.LogSnapshot != nil && (body.LogSnapshot.Stdout.NextLine < j.stdout.nextLine || body.LogSnapshot.Stderr.NextLine < j.stderr.nextLine) {
+		return empty, fmt.Errorf("job update authoritative log snapshot regresses an absolute cursor")
+	}
+	// Authorization and snapshot shape/cursor checks precede deadline mutation.
+	// A timer callback may be waiting for this mutex; an update cannot win that
+	// race by clearing an already elapsed recovery interval.
+	if sequenced && j.recoveringSince != nil && now.Sub(*j.recoveringSince) >= r.options.JobRecoveryGrace {
+		r.loseJobLocked(j, "runner_recovery_deadline_exceeded", "runner did not reconcile before recovery deadline", now)
+		n.lastSeen, n.disconnectedAt = now, nil
+		return j.view(now), nil
+	}
+	wasRecovering := j.recoveringSince != nil
 	before, _ := copyJSON(j.info)
 	oldOut, oldErr := j.stdout, j.stderr
 	if code := jobUpdateViolation(j, body, lifecycle); code != "" {
@@ -77,10 +100,15 @@ func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdate
 		}
 		j.info.CommandExecutionState = &state
 	} else {
-		j.stdout.replace(body.StdoutTail)
-		j.stderr.replace(body.StderrTail)
-		j.stdout.append(body.StdoutChunk)
-		j.stderr.append(body.StderrChunk)
+		if body.LogSnapshot != nil {
+			j.stdout = logFromSnapshot(body.LogSnapshot.Stdout)
+			j.stderr = logFromSnapshot(body.LogSnapshot.Stderr)
+		} else {
+			j.stdout.replace(body.StdoutTail)
+			j.stderr.replace(body.StderrTail)
+			j.stdout.append(body.StdoutChunk)
+			j.stderr.append(body.StderrChunk)
+		}
 		if body.Activity != nil {
 			j.info.Activity = body.Activity
 		}
@@ -114,6 +142,12 @@ func (r *Registry) UpdateJob(principal Principal, input protocol.RunnerJobUpdate
 				terminal = protocol.JobCompleted
 			}
 			r.finishJobLocked(j, terminal, "", now)
+		}
+		if wasRecovering {
+			j.reconciled(now, "same_instance_update_reconciliation")
+		}
+		if sequenced && body.LogSnapshot != nil && lifecycle.IsRunnerActive() {
+			j.stopRegistered = lifecycle == protocol.JobStopRequested
 		}
 	}
 	if body.UpdateSeq != nil {

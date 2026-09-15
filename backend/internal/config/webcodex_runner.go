@@ -10,13 +10,14 @@ import (
 // Disabled is the default. Enabled installations supply every operational bound;
 // these are host resource limits, not additions to the Runner wire protocol.
 type WebCodexRunnerConfig struct {
-	Enabled             bool  `mapstructure:"enabled"`
-	MaxRunners          int   `mapstructure:"max_runners"`
-	MaxPendingPerRunner int   `mapstructure:"max_pending_per_runner"`
-	MaxJobsPerRunner    int   `mapstructure:"max_jobs_per_runner"`
-	OnlineWindowSeconds int64 `mapstructure:"online_window_seconds"`
-	MaxBodyBytes        int64 `mapstructure:"max_body_bytes"`
-	MaxTokenBytes       int   `mapstructure:"max_token_bytes"`
+	Enabled                 bool  `mapstructure:"enabled"`
+	MaxRunners              int   `mapstructure:"max_runners"`
+	MaxPendingPerRunner     int   `mapstructure:"max_pending_per_runner"`
+	MaxJobsPerRunner        int   `mapstructure:"max_jobs_per_runner"`
+	JobRecoveryGraceSeconds int64 `mapstructure:"job_recovery_grace_seconds"`
+	OnlineWindowSeconds     int64 `mapstructure:"online_window_seconds"`
+	MaxBodyBytes            int64 `mapstructure:"max_body_bytes"`
+	MaxTokenBytes           int   `mapstructure:"max_token_bytes"`
 }
 
 // Validate requires explicit positive bounds before exposing any Runner route.
@@ -28,6 +29,7 @@ func (c WebCodexRunnerConfig) Validate() error {
 		name  string
 		valid bool
 	}{
+		{"job_recovery_grace_seconds", c.JobRecoveryGraceSeconds >= 0 && c.JobRecoveryGraceSeconds <= math.MaxInt64/int64(time.Second)},
 		{"max_runners", c.MaxRunners > 0},
 		{"max_pending_per_runner", c.MaxPendingPerRunner > 0},
 		{"max_jobs_per_runner", c.MaxJobsPerRunner > 0},

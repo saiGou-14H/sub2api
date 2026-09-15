@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Adapted from WebCodex 97ad66949a859174911c2f6da2ff1063be98bfa9,
-// runner-registry/{job_updates,jobs,state,reconciliation}.rs. Legacy process Jobs only.
+// runner-registry/{job_updates,jobs,state,reconciliation}.rs. Process Jobs only.
 package runner
 
 import (
@@ -29,6 +29,8 @@ type jobRecord struct {
 	groupID          string
 	stdout, stderr   jobLogState
 	observedTerminal *time.Time
+	recoveringSince  *time.Time
+	recoveryTimer    *time.Timer
 	epoch            string
 	revision         uint64
 }
@@ -109,6 +111,12 @@ func (r *Registry) StartProcessJob(access Access, input protocol.JobInvocation) 
 	}
 	context := process.Context
 	context.CommandPreview = jobProcessPreview(process.Process.Executable, process.Process.Args)
+	if n.registration.Capabilities.JobStateReconciliation {
+		emptyStream := protocol.ShellJobStreamSnapshot{FirstRetainedLine: 1, NextLine: 1}
+		if err := validateInventorySnapshot(wire.ClientID, protocol.ShellJobSnapshot{JobID: process.JobID, RequestID: wire.RequestID, Status: "agent_queued", UpdateSeq: 1, CreatedAt: now.Unix(), Context: context, Stdout: emptyStream, Stderr: emptyStream}); err != nil {
+			return empty, err
+		}
+	}
 	contextBytes, err := json.Marshal(context)
 	if err != nil {
 		return empty, err
@@ -145,8 +153,18 @@ func jobLifecycle(j *jobRecord) protocol.RunnerJobLifecycle {
 	v, _ := protocol.ParseRunnerJobLifecycle(j.info.Status)
 	return v
 }
+
+// publicStatus overlays recovery availability without changing the Runner lifecycle.
+func (j *jobRecord) publicStatus() string {
+	if jobLifecycle(j).IsRunnerActive() && j.info.RecoveryState != nil && *j.info.RecoveryState == "recovering" {
+		return "recovering"
+	}
+	return j.info.Status
+}
+
 func (j *jobRecord) view(now time.Time) protocol.ShellJobInfo {
 	result, _ := copyJSON(j.info) // only validated owned DTOs, never live Host references
+	result.Status = j.publicStatus()
 	if result.DurationMS != nil {
 		result.ElapsedSecs = jobPtr(*result.DurationMS / 1000)
 	} else if result.StartedAt != nil {
@@ -213,7 +231,7 @@ func (r *Registry) ListJobs(access Access, clientID *string, status *string, lim
 	r.sweepJobsLocked(now)
 	jobs := make([]protocol.ShellJobInfo, 0)
 	for _, j := range r.jobs {
-		if r.jobVisibleLocked(access, j) && (clientID == nil || *clientID == j.info.ClientID) && (status == nil || *status == j.info.Status) {
+		if r.jobVisibleLocked(access, j) && (clientID == nil || *clientID == j.info.ClientID) && (status == nil || *status == j.publicStatus()) {
 			jobs = append(jobs, j.view(now))
 		}
 	}
@@ -280,6 +298,9 @@ func (r *Registry) StopJob(access Access, jobID, requestedBy string) (protocol.S
 	n := r.nodes[j.info.ClientID]
 	if n == nil || !permitted(access, n) {
 		return empty, ErrForbidden
+	}
+	if j.recoveringSince != nil {
+		return empty, fmt.Errorf("runner_unavailable_recovering")
 	}
 	if j.stopRegistered {
 		return j.view(now), nil
@@ -360,6 +381,8 @@ func (r *Registry) finishJobLocked(j *jobRecord, state protocol.RunnerJobLifecyc
 	if jobLifecycle(j).IsTerminal() {
 		return
 	}
+	j.stopRecoveryTimer()
+	j.recoveringSince = nil
 	j.info.Status = state.AsWire()
 	j.info.EndedAt = jobPtr(now.Unix())
 	j.observedTerminal = jobPtr(now)
@@ -379,6 +402,12 @@ func (r *Registry) loseJobLocked(j *jobRecord, reason, message string, now time.
 		j.info.CommandExecutionState = jobPtr(protocol.CommandOutcomeUnknown)
 	}
 	j.info.RecoveryReasonCode = &reason
+	j.recoveringSince = nil
+	if reason == "runner_inventory_missing" || reason == "runner_recovery_deadline_exceeded" {
+		j.info.RecoveryState = jobPtr("lost_after_reconcile")
+	} else {
+		j.info.RecoveryState = nil
+	}
 	j.changed()
 }
 func (r *Registry) loseClientJobsLocked(clientID, reason, message string, now time.Time) {
@@ -394,8 +423,15 @@ func (r *Registry) sweepJobsLocked(now time.Time) {
 		if state.IsActive() && j.dispatched {
 			n := r.nodes[j.info.ClientID]
 			if n == nil || n.disconnectedAt != nil || now.Sub(n.lastSeen) > r.options.OnlineWindow {
-				r.loseJobLocked(j, "runner_disconnected_without_reconciliation", "runner went offline before the job completed", now)
+				if n != nil && n.registration.Capabilities.JobStateReconciliation {
+					r.beginRecoveryLocked(j, now, "runner_transport_stale")
+				} else {
+					r.loseJobLocked(j, "runner_disconnected_without_reconciliation", "runner went offline before the job completed", now)
+				}
 			}
+		}
+		if j.recoveringSince != nil && now.Sub(*j.recoveringSince) >= r.options.JobRecoveryGrace {
+			r.loseJobLocked(j, "runner_recovery_deadline_exceeded", "runner did not reconcile before recovery deadline", now)
 		}
 		if j.observedTerminal != nil && now.Sub(*j.observedTerminal) >= jobTerminalRetention {
 			r.removeJobRequestsLocked(id)

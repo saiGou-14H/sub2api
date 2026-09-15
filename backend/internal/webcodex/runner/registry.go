@@ -36,6 +36,8 @@ type Options struct {
 	OnlineWindow        time.Duration
 	// MaxJobsPerRunner bounds active and retained terminal Jobs together; zero disables Job dispatch.
 	MaxJobsPerRunner int
+	// JobRecoveryGrace is explicit: zero refuses reconciliation-capable registrations.
+	JobRecoveryGrace time.Duration
 }
 
 const retiredInstanceLimit = 16
@@ -88,7 +90,7 @@ type Pending struct {
 
 // NewRegistry validates limits without starting timers or goroutines.
 func NewRegistry(options Options) (*Registry, error) {
-	if options.MaxRunners <= 0 || options.MaxPendingPerRunner <= 0 || options.OnlineWindow <= 0 || options.MaxJobsPerRunner < 0 {
+	if options.MaxRunners <= 0 || options.MaxPendingPerRunner <= 0 || options.OnlineWindow <= 0 || options.MaxJobsPerRunner < 0 || options.JobRecoveryGrace < 0 {
 		return nil, fmt.Errorf("Runner registry limits must be positive")
 	}
 	return &Registry{options: options, nodes: make(map[string]*node), pending: make(map[string]*request), jobs: make(map[string]*jobRecord), requestToJob: make(map[string]string)}, nil
@@ -130,8 +132,12 @@ func (r *Registry) Register(principal Principal, input protocol.RunnerRegisterRe
 		return empty, err
 	}
 	// These optional inventories need their own reconciliation before admission.
-	if body.Capabilities.JobStateReconciliation || body.Capabilities.CodingAgentRuns || body.Capabilities.NativeToolPlugins || present(body.JobInventory) || present(body.CodingAgentInventory) || present(body.CodingAgentProviders) || present(body.Policy) {
+	if body.Capabilities.CodingAgentRuns || body.Capabilities.NativeToolPlugins || present(body.CodingAgentInventory) || present(body.CodingAgentProviders) || present(body.Policy) {
 		return empty, fmt.Errorf("%w: Runner provider inventory or policy registration", protocol.ErrUnsupported)
+	}
+	inventory, err := r.registrationInventory(body)
+	if err != nil {
+		return empty, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -141,6 +147,9 @@ func (r *Registry) Register(principal Principal, input protocol.RunnerRegisterRe
 	prior := r.nodes[body.ClientID]
 	if prior != nil && (!permitted(access, prior) || prior.access.GroupKind != access.GroupKind || prior.access.GroupID != access.GroupID) {
 		return empty, ErrForbidden
+	}
+	if prior != nil && prior.registration.AgentInstanceID == body.AgentInstanceID && prior.registration.Capabilities.JobStateReconciliation && !body.Capabilities.JobStateReconciliation {
+		return empty, fmt.Errorf("same Runner instance cannot downgrade job_state_reconciliation")
 	}
 	if prior == nil && len(r.nodes) >= r.options.MaxRunners {
 		return empty, ErrCapacity
@@ -157,6 +166,11 @@ func (r *Registry) Register(principal Principal, input protocol.RunnerRegisterRe
 		}
 		if groupCount >= 16 || total >= 1024 {
 			return empty, ErrCapacity
+		}
+	}
+	if inventory != nil {
+		if err := r.preflightInventoryLocked(access, body, *inventory); err != nil {
+			return empty, err
 		}
 	}
 	now := time.Now()
@@ -187,7 +201,14 @@ func (r *Registry) Register(principal Principal, input protocol.RunnerRegisterRe
 		r.failClientLocked(body.ClientID, ErrStale)
 		view.PendingRequests = 0
 	}
+	// The same mutex serializes registration preflight, commit, ACK and updates.
+	// Inventory is a transient input; the Job records are the sole state owner.
+	current.registration.JobInventory = nil
 	r.nodes[body.ClientID] = current
+	if inventory != nil {
+		r.reconcileInventoryLocked(body, *inventory, now)
+	}
+	view.PendingRequests = uint64(len(current.queue))
 	return view, nil
 }
 
@@ -412,7 +433,18 @@ func (r *Registry) Offline(principal Principal, body protocol.RunnerOfflineReque
 	now := time.Now().Unix()
 	n.disconnectedAt = &now
 	n.lastSeen = time.Now().Add(-r.options.OnlineWindow - time.Second)
-	r.loseClientJobsLocked(body.ClientID, "runner_disconnected_without_reconciliation", "Runner disconnected", time.Now())
+	for _, j := range r.jobs {
+		if j.info.ClientID != body.ClientID {
+			continue
+		}
+		if n.registration.Capabilities.JobStateReconciliation && j.dispatched {
+			r.beginRecoveryLocked(j, time.Now(), "runner_transport_disconnected")
+		} else if n.registration.Capabilities.JobStateReconciliation && !j.dispatched {
+			r.loseJobLocked(j, "runner_request_not_dispatched", "Runner transport disconnected before queued request was dispatched", time.Now())
+		} else {
+			r.loseJobLocked(j, "runner_disconnected_without_reconciliation", "Runner disconnected", time.Now())
+		}
+	}
 	r.failClientLocked(body.ClientID, fmt.Errorf("Runner disconnected"))
 	n.queue = nil
 	return nil
@@ -502,7 +534,8 @@ func (p *Pending) Cancel(reason error) {
 	p.registry.settleLocked(p.request, Outcome{Err: reason})
 }
 
-// Close settles all waiters. It owns no processes, sockets or background tasks.
+// Close settles all waiters and cancels owned recovery deadlines. It owns no
+// remote processes or sockets.
 func (r *Registry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -512,6 +545,9 @@ func (r *Registry) Close() {
 	r.closed = true
 	for _, p := range r.pending {
 		r.settleLocked(p, Outcome{Err: ErrClosed})
+	}
+	for _, j := range r.jobs {
+		j.stopRecoveryTimer()
 	}
 	r.nodes = make(map[string]*node)
 	r.jobs = make(map[string]*jobRecord)

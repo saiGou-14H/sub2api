@@ -50,6 +50,7 @@ func ProvideWebCodexRunner(cfg *config.Config, db *sql.DB, users service.UserRep
 		MaxRunners: options.MaxRunners, MaxPendingPerRunner: options.MaxPendingPerRunner,
 		OnlineWindow:     time.Duration(options.OnlineWindowSeconds) * time.Second,
 		MaxJobsPerRunner: options.MaxJobsPerRunner,
+		JobRecoveryGrace: time.Duration(options.JobRecoveryGraceSeconds) * time.Second,
 	})
 	if err != nil {
 		return nil, err

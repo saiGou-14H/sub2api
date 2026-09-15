@@ -33,9 +33,12 @@ jobs,state,polling,reconciliation,access_control}.rs and core
 {runner_job_lifecycle,runner_protocol,job_observation,audit_preview,sensitive_text}.rs.
 The legacy structured-process slice adds native host Access APIs and authenticated
 job_update mounting. Separate Job dispatch evidence, control registration and
-bounded retained records replace synchronous waiter ownership. Reconciliation,
-inventories and log snapshots remain rejected. Legacy cursor replacement and
-optional sequence behavior are preserved; dispatch-based stop and liveness gates
-are strengthened. README.md records exact limits and incomplete source surfaces.
+bounded retained records replace synchronous waiter ownership. The reconciliation
+slice adds atomic known-Job registration inventories, sequenced updates and log
+snapshots, same-instance recovery with explicit host grace configuration and
+cancellable deadline timers. Unknown-Job reconstruction and cross-instance durable
+transfer remain refused. Legacy cursor replacement and optional sequence behavior
+are preserved; dispatch-based stop and liveness gates are strengthened. README.md
+records exact limits and incomplete source surfaces.
 
 This notice supplements ../NOTICE and does not relicense unrelated sub2api code.
