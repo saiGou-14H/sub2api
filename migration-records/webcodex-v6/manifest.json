@@ -6,11 +6,11 @@
   "code_baselines": {
     "sub2api Server": {
       "branch": "mpc-server",
-      "commit": "9e4683d19c6d716592bdfb680af2a16cb4f263d0"
+      "commit": "efa85831ef08995c54ab63dd33bc57afd7106acb"
     },
     "DSH Runner": {
       "branch": "mcp-runner",
-      "commit": "4c3570bd5b103e956c88f6a38bf9140bec1a4e85"
+      "commit": "1be7718659c239eaa9e441ba3ca064ceb6277657"
     }
   },
   "transformation": "Preserve prose and fenced evidence; rehome same-repository links and spell external workspace references as text.",
@@ -18,20 +18,24 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "63792ac1b43a2fbc5e658933d9bd262319ad6550ab0f4b1f9db61502d850ef6e",
-      "snapshot_sha256": "c263d57c0cd280897beeca69311d73e27cfe3e1ee384fe63e68f513d78336141",
+      "source_sha256": "8377d0da67de03b5530773ef185a59f34146631f0e3bf7785f705eb388eca563",
+      "snapshot_sha256": "ee7b06f7c58236d76d49a6f7829ab18200bde57acce7204be6b814d78c9be204",
       "external_workspace_references": [
+        ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "WEBCODEX_RUNNER_MIGRATION_MAP_V6.zh-CN.md",
-        "WEBCODEX_SERVER_MIGRATION_MAP_V6.zh-CN.md"
+        "WEBCODEX_SERVER_MIGRATION_MAP_V6.zh-CN.md",
+        "scratch/bwrap-probe-20260827/LIFECYCLE.md",
+        "scratch/bwrap-probe-20260827/REPORT.md"
       ]
     },
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "17a2fdcf87ad1cd7126fa8131e40017754cf8cb7eafc640c39fdb0bd787a1990",
-      "snapshot_sha256": "77d4d6b566686d198e67d63a06094ba2bc5009664911828378a97feeefe07ab2",
+      "source_sha256": "0718f92f7100d7a5e57aae338e5057a00201ea3d8144d2947a9c644a6dd96026",
+      "snapshot_sha256": "416a970d23139ad8f45a606d58ae6e2717921e30a44d620919b9ba3d89ee4711",
       "external_workspace_references": [
+        ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
         "integration/deepseek-harness/.agents/notes/implemented/architecture/2026-09-14-runner-polling-executor.zh.md",
         "integration/deepseek-harness/docs/config-catalog.zh.md#deepseek-aidsh-runnerfiles",
@@ -59,6 +63,8 @@
         "integration/deepseek-harness/packages/shell/tool-pwsh/src/index.ts",
         "integration/deepseek-harness/packages/subprocess/subprocess-local/src/native-supervisor.ts",
         "integration/deepseek-harness/packages/subprocess/subprocess/src/types.ts",
+        "scratch/bwrap-probe-20260827/LIFECYCLE.md",
+        "scratch/bwrap-probe-20260827/REPORT.md",
         "source-sync/webcodex/crates/webcodex-core/src/runner_operation.rs",
         "source-sync/webcodex/crates/webcodex-process/tests/managed_child.rs",
         "source-sync/webcodex/crates/webcodex-runner-registry/src/validation.rs",
@@ -70,9 +76,10 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "f25ee454b24858f89095ba1457367459546951a0d2b761aa5e0bf821800e7a99",
-      "snapshot_sha256": "4565a23b9ca7d1f9492b9fdfe04cf89f9113a52dbbc5638ef8c908b5d9504cc0",
+      "source_sha256": "c5a7b671e55182d7e268f9a24164487d01fc06b907db8e6b2cc7399ec4154a1a",
+      "snapshot_sha256": "1a9c9ed6136744db1d77c08e127e79aab925ec60e479f9d25db13ae1943d781f",
       "external_workspace_references": [
+        ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",
         "WEBCODEX_SERVER_MIGRATION_MAP_V6.zh-CN.md",
         "integration/deepseek-harness/packages/core/tools/src/index.ts",
@@ -81,6 +88,8 @@
         "integration/deepseek-harness/packages/runner/runner/src/file-read.ts",
         "integration/deepseek-harness/packages/runner/runner/src/files.ts",
         "integration/deepseek-harness/packages/runner/runner/src/protocol.ts",
+        "scratch/bwrap-probe-20260827/LIFECYCLE.md",
+        "scratch/bwrap-probe-20260827/REPORT.md",
         "source-sync/webcodex/crates/webcodex-core/src/runner_operation.rs",
         "source-sync/webcodex/crates/webcodex-core/src/runner_protocol.rs"
       ]
