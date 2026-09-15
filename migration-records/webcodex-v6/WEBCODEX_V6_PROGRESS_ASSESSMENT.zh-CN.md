@@ -1,6 +1,6 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-本报告第 1–16 节保留阶段历史，第 17 节记录当前 Server legacy process Job 成果。累计 19 条代码／功能修复（Server 8、DSH 11）＋2 条 fixture 验证补充，Server 基线 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 基线 `1be7718659c239eaa9e441ba3ca064ceb6277657`。Go legacy Job registry／Start／Get／List／Log／Stop 与 job_update 已提交；正式 bwrap Service／provider／consumer 仍在进行中，仅部分 source／built 验收，无最终提交，不计功能。当前共享 fixture 保持 91 DTO／16 families／12 operations。历史“Go process Job registry 在研”等描述适用于当时版本，当前以第 17 节和[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)为准，回执见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。整体约 15%（10%～20%），13 个工作包无一全部完成；无 Runner JobManager／持久化／跨进程恢复、用户 dispatch HTTP／MCP 或完整 G2／G0，外层 RunnerRequest 数组／general 非 Job 替代形式 gap 不变。本次只同步文档，不重跑产品测试，不 stage／commit。
+本报告第 1–17 节保留阶段历史，第 18 节记录当前已提交的受限 native 执行成果。累计 20 条代码／功能修复（Server 8、DSH 12）＋2 条 fixture-only 验证补充；Server 代码基线 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 代码基线 `655b2a643e49020f32641839753d45edf631ff06`。Server legacy process Job 已提交，正式 Linux bwrap／full＋显式 process-group 的 Service／provider／Runner consumer 也已提交。Go 854 reconciliation 与 DSH dc745 JobManager／FIFO／update 集成进行中、未提交，不计功能；固定 Server 基线仍拒 inventory／reconciliation／log_snapshot。共享 fixture 保持 91 DTO／16 families／12 operations，39 serde probes 不变。历史“RO／WW 一概拒绝”“正式 bwrap 在研”“Job 尚未开始”不代表当前状态；当前以第 18 节和[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)为准，详细回执见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。整体约 15%（10%～20%），13 个工作包无一全部完成；持久化／跨进程恢复、用户 dispatch HTTP／MCP 与完整 G2／G0 未完成，外层 RunnerRequest 数组／general 非 Job 替代形式 gap 不变。本次仅同步及保存双仓库 docs-only 本地提交，不重跑产品测试。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -333,7 +333,7 @@ bwrap 实测（工作区引用：`scratch/bwrap-probe-20260827/REPORT.md`）以�
 
 当前约 15%（10%～20%）估算与 13 工作包无一全量完成不变；其他并行实现仍 in progress，不计功能。根三文档与两侧五文件镜像同步保存“18 功能／修复＋2 验证”阶段并默认核验，不 stage／commit，等待 parent 审查最终 diff。
 
-## 17. 当前十九条阶段：Server legacy process Job 已提交
+## 17. 十九条阶段历史：Server legacy process Job 已提交
 
 第 19 个功能／修复是 Go `efa85831ef08995c54ab63dd33bc57afd7106acb`（`feat(webcodex): manage legacy structured process Jobs`，23 文件），父提交 `a8b34712b56172884a1256f80b1afb37665da4cb`。累计 Server 8＋DSH 11＝19，另两条 fixture test 提交不计功能。当前 Go 基线为本提交，DSH 仍为 `1be7718659c239eaa9e441ba3ca064ceb6277657`；第 1–16 节 Go Job 在研描述保留为历史。
 
@@ -346,3 +346,17 @@ Host project／scope 授权仍前置；没有新增用户 dispatch HTTP 或 MCP�
 共享 fixture 仍为 91 DTO／16 families／12 operations，SHA-256 `a5a6a41542f2e382a32ba25fd287f83a33dd310bb29fadacbec1099d776497dc`，最新 TS Job 162／162、Go fixture 0.005s／cmp／diff 回执保留；旧 487 项是新增 fixture 前历史，无 488 全组重跑。正式 bwrap 仅部分 source／built 验收、仍 in progress，无最终提交不计功能；Runner JobManager／FIFO／update 发送未开始。整体约 15%（10%～20%）、13 大工作包无一全部完成，其他能力计数与全量目标不变。
 
 根三文档和镜像保存为 19 功能／修复＋2 fixture 验证阶段，原脚本同步及默认／diff 检查后不 stage／commit，等待 parent 协调最终快照。无产品测试重跑、push／deploy／model／DB／production。
+
+## 18. 当前二十条阶段：受限 native 执行已提交
+
+第 20 个独立功能／修复为 DSH `655b2a643e49020f32641839753d45edf631ff06`，`feat(runner): execute confined native images through private bootstrap`，62 文件、+1230／-88，normal hooks 本地提交。累计 Server 8、DSH 12，共 20；另 2 fixture-only 不计功能。Server 固定 code `efa85831ef08995c54ab63dd33bc57afd7106acb`，第十九阶段 docs 已保存于 Go `4a58b994def92dec8372dc0725f4b31f62bdb69b` 和 DSH `d017b44b6eccba005c0d0126cb3b1f2042343002`；后续并行源码即使提交也不暗增此快照计数。私有 target channel 是既有功能，此次新增正式受限集成。
+
+D2 受限 process 的已完成子集为 `SandboxService.prepareNativeImage` 闭包、Linux actual bwrap／full enforcement＋显式 `nativeImageContainment: 'process-group'`、local wrapper bootstrap-only 与 Runner consumer，最终 argv／cwd／env 经 fd3。default／PTY 拒绝 defined field，E2B 两入口在远程资源前拒绝；bwrap default PATH 捕获为 absolute executable，用于 generic／exact／wrap，generic `/bin/true`。Runner 在原 signal deadline 外以 performance elapsed 检查阻塞 prepare 后、spawn 前预算，超预算 not_started 且 spawn 0。源码与 README／新增 Note／API／config／type-equiv 已同步。
+
+D2 尚未完整完成：pkg 不支持 confined，unconfined 保留；已验 source／plain Node artifact。auto／scope confined、linux-scope FD、profile／环境快照及真实 macOS／Windows／musl／arm64 仍缺。WW /tmp 遮蔽 bootstrap absolute argv／file URL／realpath 且未被 workspace bind 恢复时提前拒绝；不广 mount，不承诺找全 transitive imports，未识别依赖仍 possible unknown。无 valid target receipt 不虚成功；process-group 脱组限制保留，no live PGID 不等于 all zombies reaped，Python subreaper 仅 fixture。DSH dc745 JobManager／FIFO／update 集成正在进行、未提交；本基线 process.ts 仍四参数且无 Job onStarted。Go 854 reconciliation 进行中、未提交，固定 Server inventory／reconciliation／log_snapshot 仍拒绝；完整 Job 执行／停止／恢复及持久结果待验收。
+
+准确验证范围：source 五 specs 208 passed／0 skip（native confinement 15／sandbox 46／Runner process 39／E2B mock subprocess 72／terminal 36）；最后 `/bin/true` 后 sandbox 46 再通过、2 文件 lint 0／0，不累加。此前 matcher 仅测试修正后 10 文件 typed lint 0／0、blocking prepare 单例 1 pass／38 filtered 分列。官方 bwrap 0.11.0 plain Node Loader RO／WW 各 6 HTTP＝12 requests，TERM accepted＋unknown、no-live detection／Python no-children；bash 44 admission-only 的 owned /tmp 拒绝＋PATH capture 不计进 12，旧 source 143／289 和 scratch 72＋78 不相加。
+
+候选从 d017 导入 exact owned files 并排除 Job，通过 Runner／subprocess-local／sandbox-local／E2B 相关 tsc；Cordis 99 artifacts 0 change＋freshness、config freshness、421 type-equiv pairs／export JSDoc 通过，10 generated 与 main 相同，五包 artifacts 支持 smoke；候选 cleanup 后仅 main worktree。文档 mdlinks 1537、mdwrap 1544、budgets 8、doc-typecheck 80 blocks 通过；doc-quick 历史 15／16 的 heading anchor 失败修正后 doc-standard 12／12 成功，不能称 doc-quick 全组重跑通过。normal hooks 13 pairs、16 文件 staged lint 0 errors／3 旧 unused-disable warnings，notices／whitespace／vendor 通过。详细回执与源路径见[第二十阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十条阶段正式受限-native-执行已提交)。
+
+不因一个功能重新加百分比：整体仍约 15%（10%～20%），13 大工作包无一全部完成。File 3／20、Project 0／7、Computer 0／19、G2 native 最多 3／22／file-only 2／22、真实 Go 注册 HTTP 400 不变；R0 91 DTO／16 families／12 operations 与原 39 serde probes 不变，无持久 MCP 闭环及生产替换。本次由未修改的原同步脚本保存两侧各五文件白名单镜像，默认及镜像 diff 核验后 normal hooks docs-only 本地提交；不重跑产品测试，不 push／deploy／真实 E2B／model／credential／service。

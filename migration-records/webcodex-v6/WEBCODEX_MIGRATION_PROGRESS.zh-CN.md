@@ -1,10 +1,10 @@
 # WebCodex → sub2api / DSH：V6 实施进度
 
-> 当前阶段：累计 19 条代码／功能修复提交（Server 8、DSH 11），另有两条不增加功能数的 fixture 验证提交。Server 基线 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 基线 `1be7718659c239eaa9e441ba3ca064ceb6277657`。Server legacy 结构化 process Job 的 records／Start／Get／List／Log／Stop 和第 5 条 transport 路径 job_update 已实现，enabled 要求六项正数限制；未新增用户 dispatch HTTP 或 MCP。共享 fixture 继续 91 DTO／16 families／12 operations。正式 bwrap confinement 尚在进行中，不能计已提交功能；DSH 同步 consumer 不接 Job，Runner JobManager／FIFO／update 发送尚未开始，完整 G2／G0 和生产替换均未验收。
+> 当前阶段：累计 20 条代码／功能修复提交（Server 8、DSH 12），另有两条 fixture-only 验证提交不增加功能数。Server 代码基线 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 代码基线 `655b2a643e49020f32641839753d45edf631ff06`。Server legacy process Job records／Start／Get／List／Log／Stop 与 job_update 已提交；正式 Linux bwrap／full＋显式 process-group 的受限 native Service／provider／Runner consumer 已提交。Go 854 reconciliation 与 DSH dc745 JobManager／FIFO／update 集成仍进行中、未提交，不计完成；本快照 Server inventory／reconciliation／log_snapshot 仍拒绝。共享 fixture 保持 91 DTO／16 families／12 operations；整体约 15%（10%～20%），完整 G2／G0、持久 MCP 闭环与生产替换未完成。
 
 逐项已完成／待办见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)；工程完成度估算和历史快照见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)。本页保留各阶段的具体实现与验证回执。
 
-本页阶段按发生顺序保留历史。“无可信启动回执”“真实 127 仍未知”“公开凭据管理未实现”和“native 全部通过文件交换”等旧描述不再代表当前行为；当前以顶部摘要与末尾第十九条阶段为准。两侧都有其他 agent 未提交改动；本次按授权同步三份根文档至两侧各五文件快照，暂不 stage／commit。
+本页阶段按发生顺序保留历史，包括“RO／WW 一概拒绝”“正式 bwrap 在研”和“Job 尚未开始”；当前以顶部摘要、当前实现表与末尾第二十条阶段为准。两侧可能有其他 agent 未提交改动，本次只保存已指定代码基线的五文件白名单 docs-only 本地提交。
 
 ## 开发位置与范围
 
@@ -13,18 +13,18 @@
 | sub2api | `mpc-server` | `integration/sub2api` | `d9f5b7d75ecb9b8bd944326a0f3b161b1c217ee1` |
 | DSH | `mcp-runner` | `integration/deepseek-harness` | `b733bc9c812b0202d137ebd7b238f52fab7ad81f` |
 
-用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 19 条本地代码／功能修复提交（Server 8 条、DSH 11 条），Server 当前代码基线为 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 为 `1be7718659c239eaa9e441ba3ca064ceb6277657`（包含两条不增加功能数的 test 验证补充）；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
+用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 20 条本地代码／功能修复提交（Server 8 条、DSH 12 条），Server 当前代码基线为 `efa85831ef08995c54ab63dd33bc57afd7106acb`，DSH 为 `655b2a643e49020f32641839753d45edf631ff06`（包含两条不增加功能数的 test 验证补充）；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
 
-## 本批代码（当前十九条阶段）
+## 本批代码（当前二十条阶段）
 
 | 位置 | 当前实现 | 尚不代表 |
 |---|---|---|
 | [Go protocol](../../backend/internal/webcodex/protocol/README.md) | 原注册、视图、poll、result、offline DTO；27 项 RunnerRequest 顶层字段；严格 required/null/default、整数和 Unicode 解码；六类直接请求的闭合 Invocation；原 Job DTO／生命周期及 serde 输入形式 codec | 全部 family/nested domain 已验证或可以执行；外层 RunnerRequest 数组和 general 非 Job 替代形式仍有 gap |
 | [Go runner](../../backend/internal/webcodex/runner/README.md) | 原 Bearer 凭据类型/scope/client/owner/group 检查；managed token 原哈希、撤销／到期及宿主不可变身份验证；原 12 字段 SQL repository／迁移和当前宿主用户适配；公开 create／register_hash／list／revoke 管理；内存 registry 与 legacy process Job 独立 records／Start／Get／List／Log／Stop；五条 transport 路由（含 job_update）已接默认关闭配置／DI，另四条凭据管理共九路径；启用需六项正数限制 | 真实 PostgreSQL 约束／事务验收、显式全量导入、跨 account family 独立 hash 检查、用户 dispatch HTTP／MCP 或持久执行记录 |
-| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、同步请求/结果编解码及进程内保留；独立 Job DTO／start_process_job／stop_job codec；可选 `./files` 原生文件和 `./native` 文件／Linux 严格进程组合入口；OS API 接受与精确目标退出回执，PGID 用私有 fd3 socket、scope 仍用文件；能力位依据 provider 支持 | 完整 generation-2 准入、正式受限 strict 最终目标执行、shell/script、process profile／环境／Windows 等价、持久 Host 审批、JobManager／FIFO／update 发送或全 serde parity |
+| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、同步请求/结果编解码及进程内保留；独立 Job DTO／start_process_job／stop_job codec；可选 `./files` 原生文件和 `./native` 文件／Linux 严格进程组合入口；OS API 接受与精确目标退出回执，PGID 用私有 fd3 socket；Linux actual bwrap／full＋显式 process-group 的 prepareNativeImage／private bootstrap／Runner consumer 已提交；scope 仍用文件；能力位依据 provider 支持 | 完整 generation-2 准入、auto／scope／pkg confined、shell/script、process profile／环境／Windows 等价、持久 Host 审批；JobManager／FIFO／update 发送进行中未提交，非全 serde parity |
 | [Go↔TS 检查](../../backend/internal/webcodex/runner/interop_test.go) | 六类请求跨语言往返、64 位整数极值、真实 Go 接口拒绝 DSH 部分能力注册 | ChatGPT 原生 Connector、真实文件/命令执行的端到端成功 |
 
-六类直接请求为 `run_shell`、`run_process`、`run_script`、`file_read`、`file_write`、`file_list`。六类均有协议/分发入口；原生执行已覆盖后三类文件操作及当前 Linux `run_process` 子集（受限路径仍拒绝）。不将传输测试中的 fake executor 或 fabricated result 计为真实执行能力，也不将当前 process 子集记为完整跨平台等价。其他已知 family 明确返回 unsupported；全量能力仍保留在迁移计划中。
+六类直接请求为 `run_shell`、`run_process`、`run_script`、`file_read`、`file_write`、`file_list`。六类均有协议/分发入口；原生执行已覆盖后三类文件操作及当前 Linux `run_process` 子集（Linux actual bwrap／full＋显式 process-group 的受限 native 路径已提交，其余受限组合仍拒绝）。不将传输测试中的 fake executor 或 fabricated result 计为真实执行能力，也不将当前 process 子集记为完整跨平台等价。其他已知 family 明确返回 unsupported；全量能力仍保留在迁移计划中。
 
 ## 必须保留的源码行为
 
@@ -352,3 +352,27 @@ Server legacy process Job 已实现独立 records 与 Start／Get／List／Log�
 共享 fixture 当前仍是 91 DTO／16 families／12 operations，双端 SHA-256 `a5a6a41542f2e382a32ba25fd287f83a33dd310bb29fadacbec1099d776497dc`。最新 fixture 回执 TS Job 162／162、Go 共享 fixture 0.005s／cmp／diff 保留；487 全组是新增 fixture 前历史，未虚构 488 全组回执。外层 RunnerRequest 数组／general 非 Job 替代形式 gap 继续保留。
 
 正式 bwrap Service／provider／consumer 仍 in progress，仅有实际 source／built 部分验收，未收到最终功能 SHA，不计入 19；Runner JobManager／FIFO／update 发送未开始。根三文档与镜像同步十九条阶段，原脚本默认检查和白名单 diff 检查后暂不 stage／commit，等待 parent 协调最终快照；不重跑产品测试，无 push／deploy／model／DB／production。
+
+## 第二十条阶段：正式受限 native 执行已提交
+
+DSH `655b2a643e49020f32641839753d45edf631ff06`，`feat(runner): execute confined native images through private bootstrap`，62 文件、+1230／-88，经 normal hooks 本地提交。累计 20 个独立功能／修复（Server 8、DSH 12），另 2 条 fixture-only 不增加功能数。第十九阶段 docs 已保存为 Go `4a58b994def92dec8372dc0725f4b31f62bdb69b` 与 DSH `d017b44b6eccba005c0d0126cb3b1f2042343002`；本快照固定 Go code `efa85831ef08995c54ab63dd33bc57afd7106acb` 与上述 DSH code，不因并行提交更新计数。首次 target native private channel 已属于十九阶段内的既有成果，本次只增加正式 confined 集成这一功能。
+
+### 已提交范围与限制
+
+`SandboxService.prepareNativeImage` 提供闭包，要求 Linux actual bwrap／full enforcement 及显式 `nativeImageContainment: 'process-group'`；local provider 的 wrapper 仅包受信 private bootstrap，最终 target argv／cwd／env 通过 fd3 传递。default／PTY 对 defined field 拒绝，E2B 两个入口在远程资源获取前拒绝。bwrap 的 default PATH 捕获为 absolute executable，供 generic／exact／wrap 一致使用，generic 探测 payload 为 `/bin/true`。Runner 保留原 signal deadline，另以 performance elapsed 在阻塞 prepare 后、spawn 前复查；超预算返回 not_started，spawn 次数为 0。
+
+pkg 明确不支持 confined，unconfined 保留；已证明的是 source 与 plain Node artifact。workspace-write 的 tmpfs /tmp 遮蔽 bootstrap argv 中绝对路径／file URL 或其 realpath，且未被 workspace bind 恢复时提前拒绝；不扩大 mount，不承诺识别全部 transitive imports，未识别依赖仍 possible unknown。没有 valid target receipt 不虚报成功。auto／linux-scope 仍拒绝 confined；macOS／Windows／musl／arm64 真实未验收。process-group 无法保证约束脱组后代，no live PGID 不等于 all zombies reaped；Python subreaper 仅测试 fixture，不是产品回收保证。
+
+源位置为 Runner process（工作区引用：`integration/deepseek-harness/packages/runner/runner/src/process.ts`）、local spawn（工作区引用：`integration/deepseek-harness/packages/subprocess/subprocess-local/src/spawn.ts`）、sandbox-local（工作区引用：`integration/deepseek-harness/packages/sandbox/sandbox-local/src/index.ts`）与E2B subprocess（工作区引用：`integration/deepseek-harness/packages/e2b/subprocess-e2b/src/index.ts`）。提交包含新增 `2026-09-14-confined-native-images` Note、README、API／config／type-equiv 同步，以及 `built-confined-native-smoke.mjs`、`fixtures/native-subreaper.py`。本代码基线 process.ts 仍是四参数、没有 Job onStarted；DSH dc745 的 JobManager／FIFO／update 集成进行中未提交。Go 854 reconciliation 同样进行中未提交；固定 Server 基线仍拒 inventory／reconciliation／log_snapshot，不能将产品工作树当完成依据。
+
+### 实际验证回执（本次文档整理不重跑产品测试）
+
+- 最终 source 五 specs 共 208 passed、0 skip：native confinement 15、sandbox 46、Runner process 39、E2B mock subprocess 72、E2B mock terminal 36。最后 payload 改 `/bin/true` 后完整 sandbox 46 再通过、0 skip，随后 2 文件 lint 0 errors／0 warnings；该 46 属于重跑，不加到 208。此前 matcher 仅测试修正后 10 文件 typed lint 0／0，blocking prepare 单例 1 pass／38 filtered，分别记录不累加。
+- 官方 bwrap 0.11.0 实测（bash 38）：custom PATH-only generic／exact 捕获；plain Node Loader RO／WW 各 6 次 HTTP，共 12 requests；TERM accepted＋unknown、no-live detection 与 Python no-children 检查。bash 44 是额外 admission-only owned /tmp bootstrap 提前拒绝＋PATH capture，不能并入 12 requests。历史 source 143／旧 289、scratch probe 72＋78 均不累加。
+- 隔离候选从 d017 导入 exact owned files、排除 Job，再通过 Runner／subprocess-local／sandbox-local／E2B 相关 tsc。Cordis 99 artifacts 生成 0 change 且 freshness 通过，config freshness、421 type-equiv pairs、export JSDoc 通过；10 generated 与 main 逐字一致。候选已 cleanup，仅保留 main worktree；五包 artifacts 支持此次 smoke。这不是含未提交 Job 的全树验证。
+- 文档 mdlinks 1537、mdwrap 1544、budgets 8、doc-typecheck 80 blocks 通过。doc-quick 历史为 15／16，heading anchor 失败修正后 doc-standard 12／12 成功；没有 doc-quick 整组重跑全绿的回执。
+- normal hooks：13 pairs 一致，16 文件 staged lint 0 errors／3 项既有 unused-disable warnings；notices／whitespace／vendor 检查通过。不称零 warnings。
+
+共享 R0 fixture 仍为 91 DTO／16 families／12 operations，digest `a5a6a41542f2e382a32ba25fd287f83a33dd310bb29fadacbec1099d776497dc`；原 39 serde probes、外层 RunnerRequest arrays／general 非 Job gap 不变。整体约 15%（10%～20%）不重算；File 3／20、Project 0／7、Computer 0／19，13 大包无一全量完成；G2 支持 native 最多 3／22、file-only 2／22，真实 Go 合规注册仍 HTTP 400。无持久 MCP 闭环或生产替换，无 push／deploy／真实 E2B／model／credential／service 操作。
+
+本次根三文档由未修改的 `sync_webcodex_progress.py --write` 同步，默认模式核验每仓库五个白名单文件，并仅对镜像目录做 diff 检查；授权双仓库 normal hooks docs-only 本地提交 `docs: record confined native execution progress`。INDEX 若无差异不产生提交变更；实际 docs SHA 与变更文件数由提交回执记录，不把 docs 计成功能。

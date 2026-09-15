@@ -10,7 +10,7 @@
     },
     "DSH Runner": {
       "branch": "mcp-runner",
-      "commit": "1be7718659c239eaa9e441ba3ca064ceb6277657"
+      "commit": "655b2a643e49020f32641839753d45edf631ff06"
     }
   },
   "transformation": "Preserve prose and fenced evidence; rehome same-repository links and spell external workspace references as text.",
@@ -18,8 +18,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "8377d0da67de03b5530773ef185a59f34146631f0e3bf7785f705eb388eca563",
-      "snapshot_sha256": "ee7b06f7c58236d76d49a6f7829ab18200bde57acce7204be6b814d78c9be204",
+      "source_sha256": "8b2d6c553875759a38ced7c86d2ae095023dcb4179a6b256837fd065b32fd820",
+      "snapshot_sha256": "f22aa0a4eb14fba7643916f0bfa477d90312813f8ff313e2ac1f296c1c8a176b",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -32,8 +32,8 @@
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "0718f92f7100d7a5e57aae338e5057a00201ea3d8144d2947a9c644a6dd96026",
-      "snapshot_sha256": "416a970d23139ad8f45a606d58ae6e2717921e30a44d620919b9ba3d89ee4711",
+      "source_sha256": "2d15297c52b6239c5c49534487d0e04677a39c2ad876b41390578fc7e4db9a76",
+      "snapshot_sha256": "6df40aff9da758aa06d2eacff3e4dbc7a530ce798e68272e47cb00479681059a",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -43,6 +43,7 @@
         "integration/deepseek-harness/native/system/packages/entry/src/spawn.c",
         "integration/deepseek-harness/packages/core/scope/src/index.ts",
         "integration/deepseek-harness/packages/core/tools/src/index.ts",
+        "integration/deepseek-harness/packages/e2b/subprocess-e2b/src/index.ts",
         "integration/deepseek-harness/packages/fs/fs-local/README.zh.md",
         "integration/deepseek-harness/packages/fs/fs-observation-policy/src/index.ts",
         "integration/deepseek-harness/packages/fs/fs/src/index.ts",
@@ -56,12 +57,14 @@
         "integration/deepseek-harness/packages/runner/runner/README.zh.md#native-posix-processes",
         "integration/deepseek-harness/packages/runner/runner/src/native.ts",
         "integration/deepseek-harness/packages/runner/runner/src/process.ts",
+        "integration/deepseek-harness/packages/sandbox/sandbox-local/src/index.ts",
         "integration/deepseek-harness/packages/sandbox/sandbox-policy/src/index.ts",
         "integration/deepseek-harness/packages/shell/bash-local/src/index.ts",
         "integration/deepseek-harness/packages/shell/pwsh-local/src/index.ts",
         "integration/deepseek-harness/packages/shell/tool-bash/src/index.ts",
         "integration/deepseek-harness/packages/shell/tool-pwsh/src/index.ts",
         "integration/deepseek-harness/packages/subprocess/subprocess-local/src/native-supervisor.ts",
+        "integration/deepseek-harness/packages/subprocess/subprocess-local/src/spawn.ts",
         "integration/deepseek-harness/packages/subprocess/subprocess/src/types.ts",
         "scratch/bwrap-probe-20260827/LIFECYCLE.md",
         "scratch/bwrap-probe-20260827/REPORT.md",
@@ -76,8 +79,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "c5a7b671e55182d7e268f9a24164487d01fc06b907db8e6b2cc7399ec4154a1a",
-      "snapshot_sha256": "1a9c9ed6136744db1d77c08e127e79aab925ec60e479f9d25db13ae1943d781f",
+      "source_sha256": "ead9e1be51525c408f173a28fc69c9da864eb343e65f82ab4810177b849b14ea",
+      "snapshot_sha256": "9544b88bf7c5826786a312c2ebf29e2ad19c9eb1f35f958edabf426aa34f8c75",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",

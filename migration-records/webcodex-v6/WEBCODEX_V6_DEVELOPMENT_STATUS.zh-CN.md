@@ -4,12 +4,12 @@
 
 ## 1. 当前结论与代码版本
 
-整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 19 条代码／功能修复提交（Server 8、DSH 11），另有 2 条仅补 fixture 的 test 验证提交，不增加功能数；当前共享 fixture 为 91 DTO／16 families／12 operations（见第 11 节）。但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
+整体按约 15%、10%～20% 的粗略区间管理；没有重新计算工作量权重。累计 20 条代码／功能修复提交（Server 8、DSH 12），另有 2 条仅补 fixture 的 test 验证提交，不增加功能数；当前共享 fixture 为 91 DTO／16 families／12 operations（见第 11 节）。但 13 个 V6 大工作包尚无一个完成全部退出条件。已有真实本地文件和 Linux 进程子集，尚无完整 ChatGPT 原生 MCP → sub2api 业务授权／事务 → DSH → 持久结果回传闭环，不能替换生产 WebCodex。
 
 | 对象 | 开发分支 | 本次核对的代码版本 |
 |---|---|---|
 | sub2api Server | `mpc-server` | `efa85831ef08995c54ab63dd33bc57afd7106acb` |
-| DSH Runner | `mcp-runner` | `1be7718659c239eaa9e441ba3ca064ceb6277657` |
+| DSH Runner | `mcp-runner` | `655b2a643e49020f32641839753d45edf631ff06` |
 | 冻结 WebCodex 参考 | `source-sync/webcodex` | `97ad66949a859174911c2f6da2ff1063be98bfa9` |
 
 后续保存进度文档产生的 docs 提交不增加功能提交数，也不提高工程完成度。以上代码版本用于标定本次记录的行为，文档提交会位于其后。只在 integration 开发副本中实施功能，未推送、部署、修改生产或使用真实模型／凭据测试。
@@ -32,7 +32,7 @@
 | 业务持久化、导入和持久结果 | 未完成 | registry 及去重保留为进程内状态 |
 | 真实 G0 与生产替换 | 未完成 | 配置发现与 mock 不替代真实原生 MCP 验收 |
 
-## 3. 已完成的十九个代码／功能修复提交
+## 3. 已完成的二十个代码／功能修复提交
 
 | 序号 | 仓库 | 功能 | 提交 |
 |---|---|---|---|
@@ -55,14 +55,15 @@
 | 17 | DSH | 接受原 Job serde positional arrays／unit maps，补共享黄金 fixture | `a5ed7187a781310ae33314488b68bcb6e32d73b3` |
 | 18 | Server | 原 Job 协议数据、生命周期与输入形式保真 | `cc736b7c16d5a5325c50aed90382e1b1aa210f68` |
 | 19 | Server | legacy 结构化 process Job registry、Start／Get／List／Log／Stop 与 job_update | `efa85831ef08995c54ab63dd33bc57afd7106acb` |
+| 20 | DSH | 正式 prepareNativeImage／本地 private bootstrap／Runner 受限 native 执行 | `655b2a643e49020f32641839753d45edf631ff06` |
 
 原生文件操作已经覆盖范围读取、编码／字节限制、完整 hash、观察后写入、目录创建控制、权限拒绝、符号链接分类、排序和整体结果上限。FS 提供方接口已适配并不代表远端 E2B 真实执行或并发外部写入下的所有原子保证已经验收。
 
 ## 4. 当前进程与认证限制
 
-1. read-only／workspace-write 的 Runner 进程请求在策略解析后拒绝，不调用 sandbox.confine 或 spawn；PGID 私有 FD 传输已提交，恢复受限正向执行仍需正式 bwrap confinement Service／provider／Runner consumer 和最终目标验收。
+1. read-only／workspace-write 已支持 Linux actual bwrap／full enforcement＋显式 `nativeImageContainment: 'process-group'` 的受限 native 执行：`SandboxService.prepareNativeImage` 返回闭包，本地 provider 仅包装私有 bootstrap，最终 argv／cwd／env 经 fd3。auto／linux-scope 仍拒绝 confined；pkg 不支持 confined，仅 source／plain Node artifact 已验证。WW 的 /tmp 遮蔽 bootstrap argv 绝对路径／file URL 及 realpath 且未被 workspace bind 恢复时提前拒绝；不扩大 mount，也不承诺找全 transitive imports，未识别依赖仍可能 unknown。没有 valid target receipt 不虚报成功。
 2. native Node addon 使用 Linux glibc 2.34+ 的 posix_spawn，支持范围为 x64／arm64，实际运行验证仅覆盖 x64。macOS／Windows／E2B 与 musl 未覆盖；共享消费者省略模式时的原行为保留。显式 shebang 有效，ENOEXEC 不隐式进入 shell。
-3. 可选且不 reject 的 started 回执表达 OS API 接受、已证实拒绝或未知，另报告精确目标退出；真实目标退出 127 返回 completed／127。仅 typed C 已证实拒绝或 PGID pre-supervisor chdir 已知拒绝，且受管范围确认退出后才返回 not_started；发生效果后即使错误外形像 errno 也保留 unknown，不继续 PATH 重放。首次 target-exit 已锁存，随后文件丢失或 carrier 迟到错误不撤销目标事实。这不保证 exec 观察、目标 main／就绪或模型行为，不使用 ptrace。
+3. 可选且不 reject 的 started 回执表达 OS API 接受、已证实拒绝或未知，另报告精确目标退出；真实目标退出 127 返回 completed／127。调用 spawn 之前的策略／prepare 拒绝或阻塞 prepare 超预算可返回 not_started；进入启动后，仅 typed C 已证实拒绝或 PGID pre-supervisor chdir 已知拒绝，且受管范围确认退出后才返回 not_started；发生效果后即使错误外形像 errno 也保留 unknown，不继续 PATH 重放。首次 target-exit 已锁存，随后文件丢失或 carrier 迟到错误不撤销目标事实。这不保证 exec 观察、目标 main／就绪或模型行为，不使用 ptrace。
 4. 当前 Runner 未知结果分支不返回双流，低层 collector 仍可保留已收集内容。未知结果不能触发盲重试，清理结束不等于原执行从未开始。
 5. managed Token 记录按规范字符串 sub2api_user_<正整数宿主ID> 解析，按不可变 ID 核对当前启用用户；旧数据必须显式映射并重写关联 owner／subject，不能按展示用户名自动合并。
 6. 原 kind=user／空 kind 验证后仍是非 Runner transport 身份；全部已存 scope 原样拆分，额外／admin scope 不能越过精确授权。原凭据 SQL repository／嵌入迁移、默认关闭路由及公开签发／注册 hash／列出／撤销管理已实现；显式旧凭据全量导入、跨 account family 独立 hash 验证及真实 PostgreSQL 约束／事务验收未完成。
@@ -76,9 +77,9 @@
 | 2 | S1 身份／存储 | managed verifier、原 12 字段 SQL repository／迁移、当前宿主 User 适配及公开凭据管理 | 显式旧凭据全量导入、真实 PostgreSQL 约束与迁移验收、OAuth／project／其他 account family 独立验证、原业务表和多记录事务 |
 | 3 | S2 MCP／Registry | 内存 registry／五条 transport 路由默认关闭配置与正式 router／DI、legacy process Job 管理 | 真实业务授权／派发、原 MCP／Generic ToolRuntime、inventory 与持久投影 |
 | 4 | D1 Runner core | Host owner／scope／guard／文件观察 | 其余 invocation、长期执行归属、正式人审响应与持久审计、各 direct 家族零模型验证 |
-| 5 | D2 受限 process | Linux unrestricted 严格启动、OS API 接受／精确目标退出回执及 PGID 私有 fd3；真实 bwrap 组合探针可行 | 正式 bwrap 最终目标 confinement Service／provider／consumer（进行中）、linux-scope FD、profile／环境快照及平台结果等价 |
+| 5 | D2 受限 process | Linux actual bwrap／full＋显式 process-group 的 prepareNativeImage／provider／Runner consumer 已提交，source／plain Node 已验证 | linux-scope FD、auto owner、pkg confined、profile／环境快照及平台结果等价；保留脱组与未知结果限制 |
 | 6 | D2 shell／script | 已有 wire codec | 原 shell 路由／policy、解释器选择、临时脚本与清理、内部 POSIX、SSH 不回退本地 |
-| 7 | D2 Job | 两端原 Job DTO／codec／serde 修复及 Server legacy process Job records／Start／Get／List／Log／Stop／job_update 已提交 | Runner JobManager／FIFO／update 发送尚未开始；跨端执行／停止闭环、库存／对账、持久化与 detached durable handoff 待实现 |
+| 7 | D2 Job | 两端原 Job DTO／codec／serde 修复及 Server legacy process Job records／Start／Get／List／Log／Stop／job_update 已提交 | Runner JobManager／FIFO／update 发送由 DSH dc745 进行中、未提交；Go 854 库存／对账也进行中、未计数；跨端执行／停止闭环、持久化与 detached durable handoff 待验收 |
 | 8 | D2／W1／E1 File | read／write／list | 剩余 17 项原 File 子操作及匹配、hash、配额、部分失败、恢复语义 |
 | 9 | S3 Connector | 全范围映射 | task／run／审批／command／check／finish／review，审批消费与执行预留／审计同事务，不重复执行 |
 | 10 | W1 Workspace／Artifacts | 底层 FS／进程基础 | 七项 Project 操作、Git／worktree／checkpoint、完整产物上传下载／发布／恢复、项目禁用清理 |
@@ -121,7 +122,7 @@
 
 | 顺序 | Runner 主线 | Server 主线 |
 |---|---|---|
-| 1 | 正式 bwrap native confinement Service／provider／Runner consumer（进行中，显式 PGID，不自动降级 owner） | 显式旧凭据导入、独立凭据族验证及真实 PostgreSQL 迁移验收 |
+| 1 | 原 process Job／FIFO／stop／update 集成（DSH dc745 进行中）；受限 native 已提交，继续补 auto／scope／pkg／平台缺口 | 显式旧凭据导入、独立凭据族验证及真实 PostgreSQL 迁移验收 |
 | 2 | 原 process Job／stop／update／库存闭环 | 原业务授权／派发与持久 registry／结果 |
 | 3 | shell／script、编辑／删除／产物等 G2 基础 | 原项目／任务／执行／审批事务 |
 | 4 | Validation／LSP／项目生命周期、完整 G2 | MCP／Generic ToolRuntime／ProjectConnector |
@@ -130,7 +131,7 @@
 
 ## 7. 已有验证（十三条及更早阶段历史回执）
 
-本节保持当时测试和工作树状态；当前第十九条阶段见第 12 节。历史“提交后干净”不表示目前两仓库没有其他 agent 未提交工作，历史沙箱不可用也不否定本轮 bwrap 实测。
+本节保持当时测试和工作树状态；当前第二十条阶段见第 13 节。历史“提交后干净”不表示目前两仓库没有其他 agent 未提交工作，历史沙箱不可用也不否定本轮 bwrap 实测。
 
 - 认证新增 17 个顶层行为测试，Go Runner／protocol 两包完整本地 race 通过；最终认证增例后聚焦 race 通过。
 - `cf374cda9b` 阶段五组相关回归 174 通过、2 跳过；跳过项是因本机沙箱后端不可用而未执行的普通共享消费者正向验证，严格 Runner 拒绝回归实际通过。
@@ -152,7 +153,7 @@
 
 快照仅重定位 Markdown 引用：同批文档互相链接；本仓库源码使用仓库内相对链接；另一仓库、冻结源码和未随快照导入的设计文档保留明确的工作区路径文字。这些工作区引用不是独立克隆内已经包含的文件。更新根文档后需显式重新同步和核验，manifest 与 Git diff 提供对照，不声明后台自动同步。
 
-本次十九条代码／功能修复＋两条 fixture 验证补充的根文档按原脚本 `--write` 同步每仓库五个白名单快照文件，并以默认模式核验；未 stage／commit，须等 parent 明确协调 docs 提交。文档保存不增加代码数量，不声明整个工作树干净；历史第 9–11 节保留当时回执，当前 Server Job 阶段见第 12 节。
+本次二十条代码／功能修复＋两条 fixture 验证补充的根文档由原脚本 `--write` 同步每仓库五个白名单文件并默认核验，以 `docs: record confined native execution progress` 保存双仓库 docs-only 本地提交。第十九阶段 docs 已为 Go `4a58b994def92dec8372dc0725f4b31f62bdb69b`、DSH `d017b44b6eccba005c0d0126cb3b1f2042343002`；本快照仍固定顶部源码基线，不纳入并行产品提交。第 9–12 节为历史，第 13 节为当前阶段；不声明整个工作树干净。
 
 ## 9. 本轮三条提交与真实探针（十六条阶段历史快照）
 
@@ -184,7 +185,7 @@ DSH `1be7718659c239eaa9e441ba3ca064ceb6277657`（`test(runner): cover positional
 
 本次根三文档与两侧五文件快照保存为“18 功能／修复＋2 验证”阶段；同步和默认检查后仍不 stage／commit，等待 parent 审查 diff。并行 Go Job registry／HTTP job_update、正式 bwrap Service／provider／consumer 仍在研不计数，JobManager／FIFO／update 发送未开始；G2 3／22 与完整验收限制不变。
 
-## 12. 当前十九条阶段：Server legacy 结构化 process Job
+## 12. 十九条阶段历史：Server legacy 结构化 process Job
 
 第 19 个功能／修复为 Server `efa85831ef08995c54ab63dd33bc57afd7106acb`，`feat(webcodex): manage legacy structured process Jobs`，准确 23 文件，父提交 `a8b34712b56172884a1256f80b1afb37665da4cb`。当前计数 Server 8＋DSH 11＝19，另两条 test 提交不计功能；Go 基线为本提交，DSH 仍为 `1be7718659c239eaa9e441ba3ca064ceb6277657`。第 9–11 节 Go Job 在研的描述属于历史。
 
@@ -195,3 +196,17 @@ Host project／scope 授权前置，未增加用户 dispatch HTTP 或 MCP；无 
 最终实际回执：任务 530 离线 Go `-tags unit -race`，config／runner／server 选择 `^Test(WebCodexRunner|Job)` 全通过，分别 1.054s／1.479s／1.237s；旧同步 queue／HTTP 选择回归任务 516 为 1.299s 通过。管理路由初选 `^TestAgentTokenManagement` 命中零项，不算覆盖；改实际名称 `^TestWebCodexAgentToken` 后 server race 通过（1.131s）。parent 提交执行者核对 23 个白名单路径、diff／index 空且无后续源码修改；这是该提交收尾回执，不声明包含镜像／scratch／旧日志的整个工作树干净。
 
 当前共享 fixture 保持 91 DTO／16 families／12 operations，SHA-256 `a5a6a41542f2e382a32ba25fd287f83a33dd310bb29fadacbec1099d776497dc`，TS Job 162／162 与 Go fixture 0.005s 为最新 fixture 回执；487／487 是新增 fixture 前历史，没有 488 全组重跑。约 15%（10%～20%）、13 工作包无一全量完成、其余 File／Project／Computer 数量不变。三根文档和两侧镜像同步十九条阶段并默认／diff 核验，仍不 stage／commit，不重跑产品测试。
+
+## 13. 当前二十条阶段：正式 confined native 集成
+
+第 20 个独立功能为 DSH `655b2a643e49020f32641839753d45edf631ff06`（`feat(runner): execute confined native images through private bootstrap`），62 文件、+1230／-88，normal hooks 本地提交。累计 Server 8＋DSH 12＝20，另 2 条 fixture-only 不计功能。Go 源码仍固定 `efa85831ef08995c54ab63dd33bc57afd7106acb`；十九阶段 docs Go `4a58b994def92dec8372dc0725f4b31f62bdb69b`、DSH `d017b44b6eccba005c0d0126cb3b1f2042343002` 已提交。首次 target private channel 属于既有功能，不重复增加序号。
+
+正式 `prepareNativeImage` 闭包、Linux actual bwrap／full＋显式 process-group、本地 private bootstrap 与 Runner consumer 已提交；target argv／cwd／env 走 fd3。default／PTY 拒绝 defined field，E2B 两入口在远程资源前拒绝。bwrap executable 捕获 absolute default PATH，generic／exact／wrap 共用，generic 用 `/bin/true`。Runner 原 signal deadline 外，增加 performance elapsed 在阻塞 prepare 后 spawn 前复查，超预算 not_started 且 spawn 0。README／新增 confined-native-images Note 与 API／config／type-equiv 已同步。
+
+pkg confined、auto／scope、linux-scope FD、profile／环境快照及真实 macOS／Windows／musl／arm64 仍待验收；只证明 source／plain Node artifact，unconfined 保留。WW /tmp 遮 bootstrap 绝对 argv／file URL／realpath 且无 workspace bind 恢复时提前拒绝，不广 mount，不保证找全 transitive imports，仍 possible unknown；无 valid receipt 不虚成功。process-group 脱组限制与 no live PGID 不等于 all zombies reaped 保留，Python subreaper 仅 fixture。process.ts 仍四参数，无 Job onStarted；DSH dc745 Job 集成、Go 854 reconciliation 均进行中且未提交，不计数。固定 Server 继续库存／对账／log_snapshot 拒绝。
+
+已收取 source 五 specs 208 passed／0 skip（15＋46＋39＋72＋36）；最后 `/bin/true` 改动后 sandbox 46／0 与 2 文件 lint 0／0 是重复聚焦回执。此前测试 matcher 修正后的 10 文件 typed lint 0／0、blocking prepare 1 pass／38 filtered 不混加。官方 bwrap 0.11.0 的 plain Node Loader RO／WW 各 6 HTTP＝12 requests，含 TERM accepted＋unknown／no-live detection／Python no-children；bash 44 额外 owned /tmp admission-only＋PATH capture 不并入 12。旧 source 143／289、scratch 72＋78 均保留为历史，不加总。
+
+隔离候选从 d017 导入 exact owned files 并排除 Job，相关四组 tsc 通过；Cordis 99 artifacts 生成 0 change＋freshness、config freshness、421 type-equiv pairs／export JSDoc 通过，10 generated 与 main 逐字一致；候选已 cleanup，仅 main worktree，五包 artifacts 支持 smoke。mdlinks 1537／mdwrap 1544／budgets 8／doc-typecheck 80 blocks 通过；doc-quick 15／16 的历史 heading anchor 失败修后 doc-standard 12／12 成功，未声明 doc-quick 整组重跑。hooks 13 pairs 一致，16 文件 staged lint 0 errors／3 旧 unused-disable warnings，notices／whitespace／vendor 通过。完整回执及源码引用见[第二十阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十条阶段正式受限-native-执行已提交)。
+
+R0 fixtures 91／16 families／12 operations、原 39 serde probes 不变；约 15%（10%～20%）、13 大包无一完成、File 3／20、Project 0／7、Computer 0／19、native 最多 3／22／file-only 2／22、真实 Go G2 HTTP 400 均不变。无生产替换或持久 MCP 闭环。本次仅根三文档及每仓库五文件镜像同步／默认检查／镜像 diff 核验与 normal hooks docs-only 本地保存，不重跑产品测试，不 push／deploy／调用真实 E2B／model／credential／service。
