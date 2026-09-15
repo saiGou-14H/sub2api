@@ -168,7 +168,7 @@ func TestSkillFileReadSourceFixtures(t *testing.T) {
 	}
 }
 
-func TestSkillFileReadRetainsSixteenDeferredFileKinds(t *testing.T) {
+func TestSkillFileReadHistoricalDeferredFileKinds(t *testing.T) {
 	f := skillFixture(t)
 	for _, kind := range f.DeferredFileKinds {
 		t.Run(kind, func(t *testing.T) {
@@ -178,7 +178,13 @@ func TestSkillFileReadRetainsSixteenDeferredFileKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.DecodeInvocation(); !errors.Is(err, protocol.ErrUnsupported) {
+			inv, err := r.DecodeInvocation()
+			// Keep the prior fixture immutable; package listing was added afterward.
+			if kind == "file_skill_list_packages" {
+				if err != nil || inv.Operation.WireKind() != kind {
+					t.Fatalf("newly supported listing: %v", err)
+				}
+			} else if !errors.Is(err, protocol.ErrUnsupported) {
 				t.Fatalf("sync: %v", err)
 			}
 			if _, err := r.DecodeJobInvocation(); !errors.Is(err, protocol.ErrUnsupported) {

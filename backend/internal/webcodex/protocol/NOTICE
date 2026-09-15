@@ -38,5 +38,14 @@ fixture; no Rust oracle was run for it. Its independent executor output examples
 are adapted from crates/webcodex-runner/src/webcodex_runner/files.rs:508-529,
 662-795 and are not Go execution tests. The historical R0 fixture is unchanged.
 
+The file_skill_list_packages expansion adds one synchronous canonical kind
+using the unchanged File payload, opaque content and non-write exclusions;
+all present line ranges are rejected and Job classification stays unsupported.
+The independent testdata/skill-packages-list.json follows runner_operation.rs
+and the consumer src/tool_runtime/skills.rs:1175-1231. Executor-only examples
+are adapted from crates/webcodex-runner/src/webcodex_runner/files.rs:483-499,
+522-551,581-659. No Rust oracle or filesystem execution is claimed. Existing
+skill-file-read.json and jobs.json remain unchanged.
+
 The package does not implement the full original Runner or execute requests.
 See README.md for source locations, API contracts, and migration limitations.

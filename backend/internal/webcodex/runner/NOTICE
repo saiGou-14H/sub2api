@@ -48,4 +48,10 @@ src/tool_runtime/skills.rs:1234-1272. The Go adaptation preserves opaque content
 and does not implement skill filesystem execution, a SkillStore, or MCP tools.
 Registration still requires the complete original generation-2 baseline.
 
+file_skill_list_packages now uses that same synchronous FileRead classification,
+following runner_operation.rs:350-354 and src/tool_runtime/skills.rs:1175-1231.
+The Go registry transports opaque options and supplied results; directory scanning,
+nofollow semantics and list DTO validation remain executor responsibilities.
+No capability is inferred or added, and the generation-2 baseline is unchanged.
+
 This notice supplements ../NOTICE and does not relicense unrelated sub2api code.
