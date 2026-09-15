@@ -17,6 +17,12 @@ var rawType = reflect.TypeFor[json.RawMessage]()
 // members remain ignored unless the original struct uses deny_unknown_fields.
 // Field-by-field decoding also avoids Go embedded-Unmarshaler flattening traps.
 func decodeObject(data []byte, out any, closed bool) error {
+	return decodeObjectFields(data, out, closed, nil)
+}
+
+// decodeObjectFields keeps raw member boundaries intact. The optional decoder is
+// used only by the Job domain for its shared unit enum types.
+func decodeObjectFields(data []byte, out any, closed bool, decodeField func([]byte, any) error) error {
 	if err := validateJSONUnicode(data); err != nil {
 		return err
 	}
@@ -80,11 +86,16 @@ func decodeObject(data []byte, out any, closed bool) error {
 		}
 		if shape := tags[name].Tag.Get("shape"); shape != "" {
 			first := bytes.TrimSpace(raw)[0]
-			if (shape == "object" && first != '{') || (shape == "array" && first != '[') {
+			if (shape == "object" && first != '{') || (shape == "array" && first != '[') || (shape == "job" && first != '{' && first != '[') {
 				return fmt.Errorf("%s must be %s or null", name, shape)
 			}
 		}
-		if err = json.Unmarshal(raw, field.Addr().Interface()); err != nil {
+		if decodeField != nil {
+			err = decodeField(raw, field.Addr().Interface())
+		} else {
+			err = json.Unmarshal(raw, field.Addr().Interface())
+		}
+		if err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		// serde Vec<String> rejects null elements (encoding/json otherwise makes "").

@@ -296,6 +296,42 @@ func TestCapabilitiesAndUnsupportedDispatch(t *testing.T) {
 	}
 }
 
+func TestCodecOnlyJobsNeverEnterSynchronousRegistry(t *testing.T) {
+	r := testRegistry(t)
+	register(t, r, "node-a", "process-a")
+	for _, kind := range []string{"start_process_job", "stop_job"} {
+		t.Run(kind, func(t *testing.T) {
+			req := input(kind)
+			req.Kind, req.Command = kind, ""
+			id := "original-job"
+			req.JobID = &id
+			if kind == "start_process_job" {
+				req.TimeoutSecs = 3600
+				req.Process = &protocol.ShellProcessArgv{Executable: "printf", Args: []string{}}
+				req.JobContext = []byte(`{"command_preview":"printf","structured_execution":{"execution_source":"run_process","arg_count":0,"stdin_present":false}}`)
+			}
+			if _, err := req.DecodeJobInvocation(); err != nil {
+				t.Fatalf("valid codec-only Job rejected: %v", err)
+			}
+			if _, err := r.Enqueue(Access{Username: "alice"}, req); !errors.Is(err, protocol.ErrUnsupported) {
+				t.Fatalf("Job entered synchronous dispatch: %v", err)
+			}
+			if kind == "start_process_job" {
+				req.JobContext = []byte(`[null,null,null,null,null,null,null,"printf",[],null,["run_process",null,null,0,false]]`)
+				if _, err := req.DecodeJobInvocation(); err != nil {
+					t.Fatalf("positional Job context rejected: %v", err)
+				}
+				if _, err := r.Enqueue(Access{Username: "alice"}, req); !errors.Is(err, protocol.ErrUnsupported) {
+					t.Fatalf("positional Job entered synchronous dispatch: %v", err)
+				}
+			}
+			if dispatched, err := poll(r, "node-a", "process-a"); err != nil || dispatched != nil {
+				t.Fatalf("refused Job appeared in poll: %v %v", dispatched, err)
+			}
+		})
+	}
+}
+
 func TestConcurrentPollingDeliversOneRequestOnce(t *testing.T) {
 	r := testRegistry(t)
 	register(t, r, "node-a", "process-a")

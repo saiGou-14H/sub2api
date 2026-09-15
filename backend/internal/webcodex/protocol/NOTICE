@@ -5,9 +5,11 @@ WebCodex source at commit 97ad66949a859174911c2f6da2ff1063be98bfa9:
 
   crates/webcodex-core/src/runner_protocol.rs
   crates/webcodex-core/src/runner_operation.rs
+  crates/webcodex-core/src/runner_job_lifecycle.rs
   crates/webcodex-runner-registry/src/protocol.rs
   crates/webcodex-runner-registry/src/capabilities.rs
   crates/webcodex-runner-registry/src/validation.rs
+  src/runner_tokens_http/routes.rs
 
 The original Apache License, Version 2.0 is included in LICENSE. The fixed
 source checkout has no NOTICE file; this notice records the provenance and
@@ -17,6 +19,17 @@ Modifications: Go wire structs and strict JSON boundary decoding, initial
 six-operation canonical subset, explicit unsupported-family errors, staged
 RawMessage metadata domains, Go numeric/Unicode/vector fidelity handling,
 registration validation helpers, and focused Go/public JSON fixtures.
+The bounded R0 Job expansion adds complete reachable Job wire DTOs, exact
+lifecycle helpers, a separate start_process_job/stop_job operation adapter,
+and source-authored lossless shared Job fixtures. It preserves the original
+encoder/decode validation asymmetry and does not add execution capabilities.
+Job-only positional struct decoding preserves source field order and explicit
+serde defaults versus non-default Option positions. Externally tagged unit
+objects normalize to enum strings within the Job domain; raw duplicate members
+and integer widths remain checked. Only Job context/inventory raw carrier shapes
+also accept arrays. This adaptation uses the isolated serde 1.0.228 /
+serde_json 1.0.150 oracle and frozen source annotations; general non-Job alternate
+forms remain outside this bounded expansion.
 
 The package does not implement the full original Runner or execute requests.
 See README.md for source locations, API contracts, and migration limitations.

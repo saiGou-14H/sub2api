@@ -128,7 +128,8 @@ func TestRegistrationGenerationAndNumericRanges(t *testing.T) {
 }
 
 func TestRegistrationMetadataShapesAndHostContext(t *testing.T) {
-	for _, key := range []string{"policy", "job_inventory", "coding_agent_inventory", "build", "host_context"} {
+	// Job inventory's source-derived sequence form is covered by the Job tests.
+	for _, key := range []string{"policy", "coding_agent_inventory", "build", "host_context"} {
 		if _, err := ReadRegisterRequest(mutate(t, registerJSON, key, []any{}, false)); err == nil {
 			t.Fatalf("accepted array for %s", key)
 		}

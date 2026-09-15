@@ -97,7 +97,7 @@ type RunnerRegisterRequest struct {
 	ProcessStartedAt        *int64                         `json:"process_started_at,omitempty"`
 	Build                   *RunnerBuildInfo               `json:"build,omitempty"`
 	JobConcurrencyLimit     *uint64                        `json:"job_concurrency_limit,omitempty"`
-	JobInventory            json.RawMessage                `json:"job_inventory,omitempty" shape:"object"`
+	JobInventory            json.RawMessage                `json:"job_inventory,omitempty" shape:"job"`
 	CodingAgentProviders    json.RawMessage                `json:"coding_agent_providers,omitempty" shape:"array"`
 	CodingAgentInventory    json.RawMessage                `json:"coding_agent_inventory,omitempty" shape:"object"`
 }
@@ -243,7 +243,7 @@ type RunnerRequest struct {
 	CreatedAt       int64               `json:"created_at" wire:"required"`
 	Validation      json.RawMessage     `json:"validation,omitempty" shape:"object"`
 	LSP             json.RawMessage     `json:"lsp,omitempty" shape:"object"`
-	JobContext      json.RawMessage     `json:"job_context,omitempty" shape:"object"`
+	JobContext      json.RawMessage     `json:"job_context,omitempty" shape:"job"`
 	PersistentShell json.RawMessage     `json:"persistent_shell,omitempty" shape:"object"`
 	MCPGateway      json.RawMessage     `json:"mcp_gateway,omitempty" shape:"object"`
 	PluginGateway   json.RawMessage     `json:"plugin_gateway,omitempty" shape:"object"`
