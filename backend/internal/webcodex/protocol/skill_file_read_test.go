@@ -180,7 +180,7 @@ func TestSkillFileReadHistoricalDeferredFileKinds(t *testing.T) {
 			}
 			inv, err := r.DecodeInvocation()
 			// Keep the prior fixture immutable; these kinds were added afterward.
-			if kind == "file_skill_list_packages" || kind == "file_project_overview" {
+			if kind == "file_skill_list_packages" || kind == "file_project_overview" || kind == "file_write_project_file" {
 				if err != nil || inv.Operation.WireKind() != kind {
 					t.Fatalf("newly supported File kind: %v", err)
 				}
