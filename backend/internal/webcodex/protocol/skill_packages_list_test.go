@@ -138,7 +138,13 @@ func TestSkillPackagesListRemainingDeferredKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.DecodeInvocation(); !errors.Is(err, protocol.ErrUnsupported) {
+			inv, err := r.DecodeInvocation()
+			// Preserve the historical fixture; overview is now a synchronous File kind.
+			if kind == "file_project_overview" {
+				if err != nil || inv.Operation.WireKind() != kind {
+					t.Fatalf("newly supported overview: %v", err)
+				}
+			} else if !errors.Is(err, protocol.ErrUnsupported) {
 				t.Fatalf("sync: %v", err)
 			}
 			if _, err := r.DecodeJobInvocation(); !errors.Is(err, protocol.ErrUnsupported) {
