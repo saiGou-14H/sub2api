@@ -1,5 +1,7 @@
 # WebCodex V6 全量迁移：项目进度评估
 
+当前第29阶段＝Server12＋DSH17，fixture-only3；Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `5f2cccb7212099a50c26d31127e4d1322639ef63`。Go overview仅codec／FileRead路由，同步9类、Filecodec6；DSH同步8／File实际5／20剩15。ProjectOverview是File族，Project仍0／7、Computer0／19。无新共享JSONfixture／Rustoracle，旧jobs／read35／list38字节不变；聚焦离线Go普通-count1 protocol0.018s／runner0.009s PASS，非race／全suite。第28空cwd只验证原本拒绝、未改生产cwd处理，间接ENOTDIR已修。总体15%粗10–20%、13大包none、G2file2native3of22 HTTP400不变。以下第27摘要及第1–26节为历史，当前见第27节；本轮正常docs保存，不重复产品tests。
+
 本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。当前见第25节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
@@ -445,7 +447,7 @@ DSH `bd5216c4e45ff25c2a70ccd5a51881815d89c2ea`（fix(runner): distinguish non-di
 
 工程估计保持15%（10%～20%）、13大包none fully complete、Project0／7／Computer0／19、G2file2native最多3of22合规HTTP400、无完整持久MCP／生产替换。SkillList仍Go-only，FS有界nofollow支持仍为下一缺口。本次核验root／mirrors后各正常保存实际四个镜像变更（3md＋manifest），不强写INDEX、不包含NOTICE／scratch／日志／rootmap，不改原同步脚本，不重跑产品tests或34项doc-sync aggregate，无push／部署／真实凭据操作。
 
-## 25. 当前二十七条阶段：Skill列表真实执行
+## 25. 二十七条阶段历史：Skill列表真实执行
 
 DSH `a6bb656769050a320bb8046e7bc43b903b831135`，63files+1555／-64，`feat(runner): list native Skill packages`。总27＝Server11＋DSH16、fixture-only3，Go746行为基线保持；docs仅successor。File实际5／20、剩余15，两侧同步codec8／8，GoFilecodec5不变；不将provider fake四调用者适配或同commit P2另加功能。
 
@@ -458,3 +460,23 @@ listing间接ENOTDIR吞空已在同commit修复，local FS_NOT_FOUND保留cause�
 有效built为159 programmatic tsdown精确五targets、真实host typertPlugin、.js匹配exports／Runner三entry；154／157 CLI未匹配、158.mjs无效built已分析纠正，不计有效证据。161普通Node built-files-smoke同request[2]/max_bytes0三policy PASS，list→blindwrite拒→Skillread→write，source另maxOutput1。不称全Hostbundle／平台矩阵。424type-equiv与paired derivatives／99catalogfresh／exportJSDoc／doc-typecheck80blocks（USE_BUILD_OUTPUT=1，无Emit）、pairs／mdlinks1543／wrap1550／Notes312／README-subsystem gates／budgets8(163)PASS，非34gate aggregate。完整配置、来源与准确回执见[第二十七阶段实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十七条阶段原生skill-package-listing与有界目录扫描)。
 
 工程估计15%（10%～20%）不变，13大包none complete、Project0／7／Computer0／19、native3/file2of22与完整G2HTTP400不变。后续剩余15File和旧read差异，仍无完整持久MCP闭环／生产替换。本轮仅root三页及镜像sync／default／diff／cached／正常docs提交，不修改业务／Notes／生成API或rootmap，不重跑产品checks，不push／服务／秘密／模型／E2B。
+
+## 26. 二十八条准备历史：间接SkillRead路径错误
+
+DSH `5f2cccb7212099a50c26d31127e4d1322639ef63`（parent145dec5344），9files+61／-17，28＝Server11＋DSH17／fixture-only3。空 cwd已验证原本拒绝并回skill_path_invalid；本次新增三policy回归，未改生产cwd处理。真正修复是helper missing判断排除ENOTDIR cause：间接资源target／资源parent／package parent非目录回skill_path_invalid，真missinglink仍file_not_found；27已保留cause，本次无FS API／Go扩展。
+
+初167为47pass／3fail，失败均间接symlink→ordinary/child；最终169 Skillpolicy50（旧44＋6）＋Loader14＝64 PASS，不与旧44相加。168测试lint／170 Runner tsc-b／171 README与旧SkillReadNote两pairs／172 typedlint2 PASS；173 programmatic tsdown仅三Runner entry .js＋plainNode built三policy PASS，每policy六request含list／空cwd拒／间接资源拒／blindwrite拒／有效read／按policy write。174正常fixcommit两pairs／两fileslint／whitespace／vendor PASS，父jobs全收；没有604codec／全suite／全Hostbundle／docsaggregate重跑，没有新Note／Windows或真实E2B验证。详细来源见[第二十八阶段准备](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十八条阶段准备保留skillread间接路径错误)。
+
+File实际5／20、两端同步8／8、GoFilecodec5、13大包未全量、15%粗10–20%、G2file2／native3of22HTTP400不变。下一步overview需FS unreadable／nonUTF8 warnings和同execution world受控git ls-files -z tracked过滤，原depth默认2 clamp1–4／limit200 clamp20–500；当前DSH未执行overview，不计6／20。Go29只在准备，待正式SHA／验证再计；当前仅根三页准备、不sync镜像／stage／commit，保留其他worker所有业务与untracked。
+
+下一步只读审查确认：overview先git ls-files -z完整NUL索引过滤，失败／空index才fallback，Host预算超限不能降级成无Git；现scanDir无法表达排序前缀相关non_utf8／unreadable／symlink warnings，先limit500再excluded／Git过滤会漏合法项，新有界metadata扫描机制尚未定案，scanDirPage未决定或实现。E2B subprocess SDK2.29.1先累积全部stdout／stderr再回调，当前consumer cap不证明远程Git有界，需远端限额或明确拒未支持组合；无实际E2B验证，这不是实现／测试增量。
+
+## 27. 当前二十九条阶段：Go File ProjectOverview路由
+
+Go `ffae2865cc826f97131a45a89a63e7df2f9a3892`（feat(webcodex): route project overview requests），parentf4e321c384d8046f63b3468c2a2ea691f28aa8b4，10files+208／-15；DSH5f2cccb不变。29＝Server12＋DSH17、test-only3；Go同步9／Filecodec6，DSH同步8／实际File5／20剩15，ProjectOverview归File族，Project0／7／Computer0／19不变，不计第六项执行。
+
+仅三生产路由点：operation同步File case／移出knownDeferred，两Job decoder保持ErrUnsupported，registry用FileRead gate。27请求／9payload与opaque content不改，nil／invalidJSON／duplicate options透传，缺cwd/content generic valid；nonwrite／line与Job／command／stdin／typedpayload冲突拒绝，canonical copy不被后wire mutation重定向。两新增Go测试文件各两大public API测试，旧consumer认overview、deferred改deleteprojectfiles继续拒，两README说明9／6和execution-only options default/clamp。无业务parser／Git执行，无新共享JSONfixture或SHA／Rustoracle；旧jobs/read35/list38字节不变，NOTICE不改，原SPDX／引用保留。
+
+实际前台离线Go1.27.1指定selector普通-count1 protocol0.018s／runner0.009s PASS，无job id，不是race／全suite。父取完整receipt后接管diff review，gofmt八Go文件空输出、diff/cached/旧fixture检查、176正常featurecommit exit0已收，未重复tests。本轮也不重跑产品checks／Host／docaggregate。精确命令与source引用见[第二十九阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十九条阶段go-projectoverview同步路由)。
+
+28只验证空字符串cwd原拒绝、新增回归而未改生产cwd，间接ENOTDIR修复如历史记录。Next为DSH overview consumer、有界metadata warnings与same-world受控Git：完整NUL索引过滤、仅失败／空index fallback，超Host预算不得降级；先limit再excluded/git会漏项，scanDirPage尚未定案。E2B SDK回调前累积全输出的界限问题未解决，无实际provider验收。15%粗10–20%、13大包none、G2file2native3of22 HTTP400不变，无完整持久MCP闭环／生产替换。仅root/mirrors按原脚本同步检查和正常docs-only提交，保留untracked，不触业务／Notes／API／rootmap／script，不push或调用服务／秘密／模型／DB／E2B。

@@ -6,11 +6,11 @@
   "code_baselines": {
     "sub2api Server": {
       "branch": "mpc-server",
-      "commit": "746e98015112dfdd67837d2b72fa60015a96b0e4"
+      "commit": "ffae2865cc826f97131a45a89a63e7df2f9a3892"
     },
     "DSH Runner": {
       "branch": "mcp-runner",
-      "commit": "a6bb656769050a320bb8046e7bc43b903b831135"
+      "commit": "5f2cccb7212099a50c26d31127e4d1322639ef63"
     }
   },
   "transformation": "Preserve prose and fenced evidence; rehome same-repository links and spell external workspace references as text.",
@@ -18,8 +18,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "f6f790ec8191599dcc928ee8d0953e9e31d381f9129d7f948331e581eb689938",
-      "snapshot_sha256": "e421beeeb8fba3355143464ffc048cf284f26610303f2dcd5d46f7e4ba794f72",
+      "source_sha256": "35da3f326fc7c73423ff7b68c940d49f1d1705fb0e9000200659995ae7c16bc9",
+      "snapshot_sha256": "15a88c3959fb601fad78af36ba3ce5c87867e16a1a9ff7b5a688a6ed5844d477",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -32,8 +32,8 @@
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "ad4ee5813b5de295ab2eefe703d43b84278235289ab92b872206285dec5af42e",
-      "snapshot_sha256": "42a2377c32ae5c7e31de10aaacbc6ab768d29c4407e39283e73e093987cf9b7b",
+      "source_sha256": "9c29e1adbf2b10fb6db7422580e646e928626b574455f3a24f88fe6da966d5a2",
+      "snapshot_sha256": "25629df2b0fd1eab086a4d490ae9fa82c543d22ed6bc3caacd7629689d06d55a",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -105,8 +105,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "af09761d4f5bb59555b79a2eefd72bbfd270f7d6424733f8a12bd6265186c704",
-      "snapshot_sha256": "e5d506569206b6f960cf0b9b3eba78f8abd87502758242af219b35321f878362",
+      "source_sha256": "ede89c1e5a14beda213ea2eefbb98412a9946b44aa849a38c1a1e4169036593b",
+      "snapshot_sha256": "63c4b48737e272c2079fe6ae6692455e646d232bad8366c1d6d8766199f0f06d",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",
