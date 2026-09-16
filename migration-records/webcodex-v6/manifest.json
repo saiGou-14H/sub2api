@@ -10,7 +10,7 @@
     },
     "DSH Runner": {
       "branch": "mcp-runner",
-      "commit": "5f2cccb7212099a50c26d31127e4d1322639ef63"
+      "commit": "25f3630336f6ae5ec92cecdf7222a7387266beae"
     }
   },
   "transformation": "Preserve prose and fenced evidence; rehome same-repository links and spell external workspace references as text.",
@@ -18,8 +18,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md",
-      "source_sha256": "35da3f326fc7c73423ff7b68c940d49f1d1705fb0e9000200659995ae7c16bc9",
-      "snapshot_sha256": "15a88c3959fb601fad78af36ba3ce5c87867e16a1a9ff7b5a688a6ed5844d477",
+      "source_sha256": "05e737d64159318420b37780a0a4a41b3d4e516a76b4303685086faa95841f7b",
+      "snapshot_sha256": "0fb307e8db60aac819659161412bb7a6ed1a7cb2ea6c98d9eddbb20bb39c6afa",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -32,8 +32,8 @@
     {
       "source_workspace_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
       "snapshot_path": "WEBCODEX_MIGRATION_PROGRESS.zh-CN.md",
-      "source_sha256": "9c29e1adbf2b10fb6db7422580e646e928626b574455f3a24f88fe6da966d5a2",
-      "snapshot_sha256": "25629df2b0fd1eab086a4d490ae9fa82c543d22ed6bc3caacd7629689d06d55a",
+      "source_sha256": "0105b72c1ad5d728e24c03a58fc34a87a7d327f8d3c95c6bb0fbc5318591d34f",
+      "snapshot_sha256": "f8fa4e734d1b803edb9902b23bcffd7389dab3e004a37c00385e6fde618a70a9",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md",
@@ -48,6 +48,7 @@
         "integration/deepseek-harness/packages/e2b/fs-e2b/src/remote-file.ts",
         "integration/deepseek-harness/packages/e2b/subprocess-e2b/src/index.ts",
         "integration/deepseek-harness/packages/fs/fs-local/README.zh.md",
+        "integration/deepseek-harness/packages/fs/fs-local/src/scan-dir-page.ts",
         "integration/deepseek-harness/packages/fs/fs-local/src/scan-dir.ts",
         "integration/deepseek-harness/packages/fs/fs-observation-policy/src/index.ts",
         "integration/deepseek-harness/packages/fs/fs/src/index.ts",
@@ -66,12 +67,17 @@
         "integration/deepseek-harness/packages/runner/runner/src/job-manager.ts",
         "integration/deepseek-harness/packages/runner/runner/src/native.ts",
         "integration/deepseek-harness/packages/runner/runner/src/process.ts",
+        "integration/deepseek-harness/packages/runner/runner/src/project-overview-format.ts",
+        "integration/deepseek-harness/packages/runner/runner/src/project-overview-git.ts",
+        "integration/deepseek-harness/packages/runner/runner/src/project-overview.ts",
         "integration/deepseek-harness/packages/runner/runner/src/protocol.ts",
         "integration/deepseek-harness/packages/runner/runner/src/skill-file-read.ts",
         "integration/deepseek-harness/packages/runner/runner/src/skill-package-list.ts",
         "integration/deepseek-harness/packages/runner/runner/src/types.ts",
+        "integration/deepseek-harness/packages/runner/runner/tests/README.md",
         "integration/deepseek-harness/packages/runner/runner/tests/built-files-smoke.mjs",
         "integration/deepseek-harness/packages/runner/runner/tests/built-jobs-smoke.mjs",
+        "integration/deepseek-harness/packages/runner/runner/tests/built-overview-smoke.mjs",
         "integration/deepseek-harness/packages/runner/runner/tests/fixtures/skill-packages-list.json",
         "integration/deepseek-harness/packages/runner/runner/tests/job-manager.spec.ts",
         "integration/deepseek-harness/packages/runner/runner/tests/jobs-client.spec.ts",
@@ -105,8 +111,8 @@
     {
       "source_workspace_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
       "snapshot_path": "WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md",
-      "source_sha256": "ede89c1e5a14beda213ea2eefbb98412a9946b44aa849a38c1a1e4169036593b",
-      "snapshot_sha256": "63c4b48737e272c2079fe6ae6692455e646d232bad8366c1d6d8766199f0f06d",
+      "source_sha256": "ae2b5efeeb567ad603b63ffed27c03a957b2dd9f8b3653313433bd23837031a0",
+      "snapshot_sha256": "b2cbc43ce7dac75ad9f34bde659bb70a03ca070cfd24a6e76a3ff590fc636a37",
       "external_workspace_references": [
         ".scratch/job-serde-oracle-20260914/REPORT.md",
         "SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md#19-全量功能工作包",

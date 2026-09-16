@@ -1,12 +1,12 @@
 # WebCodex → sub2api / DSH：V6 实施进度
 
-> 当前阶段29＝Server12＋DSH17，fixture-only3。Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `5f2cccb7212099a50c26d31127e4d1322639ef63`。Go新增file_project_overview同步codec／FileRead路由：同步9类、Filecodec6／20；DSH同步8类、File实际5／20剩15项，overview属File族，Project仍0／7、Computer0／19。没有新增共享JSONfixture，旧jobs／read35／list38字节不变。第28修复间接ENOTDIR误码；空cwd已验证原本拒绝，仅新增回归、未改生产cwd处理。第29聚焦离线Go普通-count1 protocol0.018s／runner0.009s PASS，非race／全suite。整体15%（10%～20%）、13大包未完整、G2file2/native3of22注册HTTP400不变；本次同步并正常保存docs，不重复产品tests。
+> 当前阶段30＝Server12＋DSH18，fixture-only3。Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `25f3630336f6ae5ec92cecdf7222a7387266beae`。原生ProjectOverview已提交：双方同步codec9，File实际6／20剩14项；Project仍0／7、Computer0／19。overview默认off，显式projectOverview:{}启用，需要same-host POSIX FS／subprocess host confinement／始终full只读Git沙箱；E2B通用page已实现但远端overview与Windows拒绝。metadata不产生观察或写授权，原11输出字段／lossless options及历史jobs/read35/list38不变。测试按分组和最终selector范围记录，不称Git61全部重跑或全平台验收。整体15%（10%～20%）、13大包none、G2file2/native3of22注册HTTP400保持；本轮仅正常保存迁移docs，不重复产品checks。
 
 > 第27阶段历史：27条代码／功能修复（Server11、DSH16）＋3条fixture-only。Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。SkillList真实执行及通用scanDir／local／fs-sandbox继承／E2B provider已提交；File实际5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。listing无FsObserved、不授权写；同提交修复listing间接ENOTDIR吞空和空cwd，旧Skill read空cwd／间接ENOTDIR差异仍待验证。最末listing policy25＋Loader14＝39 PASS与先前client28分开；真实E2B未跑，未声称全Host bundle或全doc-sync。原wire27／File9／Job12状态、R0jobs91／16／12与39oracle、整体15%（10%～20%）、13大包未完整、G2file2／native3of22硬拒400保持。只同步和正常保存进度docs，不重跑产品测试。
 
 逐项已完成／待办见[开发状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)；工程完成度估算和历史快照见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)。本页保留各阶段的具体实现与验证回执。
 
-本页阶段按发生顺序保留历史，包括“RO／WW 一概拒绝”“正式 bwrap 在研”“Job 尚未开始”和“inventory／reconciliation／log_snapshot 一概拒绝”；当前以顶部摘要与末尾第二十九条为准，第28及以前各阶段保留当时证据。本次按原脚本同步并正常提交每侧实际四个docs文件。
+本页阶段按发生顺序保留历史，包括“RO／WW 一概拒绝”“正式 bwrap 在研”“Job 尚未开始”和“inventory／reconciliation／log_snapshot 一概拒绝”；当前以顶部摘要与末尾第三十条为准，第29及以前各阶段保留当时证据。本次按原脚本同步并正常提交每侧实际四个docs文件。
 
 ## 开发位置与范围
 
@@ -15,18 +15,18 @@
 | sub2api | `mpc-server` | `integration/sub2api` | `d9f5b7d75ecb9b8bd944326a0f3b161b1c217ee1` |
 | DSH | `mcp-runner` | `integration/deepseek-harness` | `b733bc9c812b0202d137ebd7b238f52fab7ad81f` |
 
-用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 29 条本地代码／功能修复提交（Server 12 条、DSH 17 条），Server 当前代码基线为 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH 为 `5f2cccb7212099a50c26d31127e4d1322639ef63`（包含45487类型修正，共三条不增加功能数的 test 验证补充）；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
+用户最终指定的 Server 分支拼写是 **`mpc-server`**。`mcpserver` 是已更正的旧名。原字段、功能和状态以 V6 开发设计（工作区引用：`SUB2API_DSH_DEVELOPMENT_DESIGN.zh-CN.md`） 为依据；固定 WebCodex 源码为 `source-sync/webcodex` 的 `97ad66949a859174911c2f6da2ff1063be98bfa9`。实现只修改 `integration/` 开发副本。现有验证完成的迁移代码已按功能建立 30 条本地代码／功能修复提交（Server 12 条、DSH 18 条），Server 当前代码基线为 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH 为 `25f3630336f6ae5ec92cecdf7222a7387266beae`（包含45487类型修正，共三条不增加功能数的 test 验证补充）；文件阶段清单及后续进程提交见[项目进度评估](./WEBCODEX_V6_PROGRESS_ASSESSMENT.zh-CN.md)；未推送、部署、修改运行中的 `/opt/deepseek-harness` 或生产服务，未读取真实 Runner / 模型凭据。
 
-## 本批代码（当前二十九条阶段）
+## 本批代码（当前三十条阶段）
 
 | 位置 | 当前实现 | 尚不代表 |
 |---|---|---|
 | [Go protocol](../../backend/internal/webcodex/protocol/README.md) | 原注册、视图、poll、result、offline DTO；27 项 RunnerRequest 顶层字段；严格 required/null/default、整数和 Unicode 解码；九类直接请求的闭合 Invocation（新增file_project_overview；原九字段File payload保留，content opaque）；原 Job DTO／生命周期及 serde 输入形式 codec | 全部 family/nested domain 已验证或可以执行；外层 RunnerRequest 数组和 general 非 Job 替代形式仍有 gap |
 | [Go runner](../../backend/internal/webcodex/runner/README.md) | 原 Bearer 凭据类型/scope/client/owner/group 检查；managed token 原哈希、撤销／到期及宿主不可变身份验证；原 12 字段 SQL repository／迁移和当前宿主用户适配；公开 create／register_hash／list／revoke 管理；内存 registry 与 legacy process Job 独立 records／Start／Get／List／Log／Stop；五条 transport 路由（含 job_update）已接默认关闭配置／DI，另四条凭据管理共九路径；启用需六项正数限制；同 Server／同实例已派发 process Job 库存／快照恢复已提交，reconciliation 另需正数 job_recovery_grace_seconds，默认 0 拒绝；Get／List／Log 投影 recovering | 未知／过期／重启／跨实例／未支持家族库存、真实 PostgreSQL 约束／事务验收、显式全量导入、跨 account family 独立 hash 检查、用户 dispatch HTTP／MCP 或持久执行记录 |
-| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、同步请求/结果编解码及进程内保留；独立 Job DTO／start_process_job／stop_job codec；可选 `./files` 原生五项文件（含Skill read／list）和 `./native` 文件／Linux严格进程组合入口；Skill list已接scanDir完整nofollow扫描，不产生FsObserved；旧Skill read空cwd已验证原本拒绝、生产cwd处理未改，间接ENOTDIR由28修复，历史bd5216保留；OS API 接受与精确目标退出回执，PGID 用私有 fd3 socket；Linux actual bwrap／full＋显式 process-group 的 prepareNativeImage／private bootstrap／Runner consumer 已提交；scope 仍用文件；显式 processJobs 可选对象启用独立 Job provider／FIFO／真实 native 执行／legacy job_update 单发送者，省略关闭；能力位依据 provider 支持 | 完整 generation-2 准入、auto／scope／pkg confined、shell/script、process profile／环境／Windows 等价、持久 Host 审批；无 Runner inventory／log_snapshot／reconciliation 广告，不恢复 pending updates／snapshots，非全 serde parity |
+| DSH runner（工作区引用：`integration/deepseek-harness/packages/runner/runner/README.md`） | Cordis `runnerRuntime`；原 HTTP polling、同步请求/结果编解码及进程内保留；独立 Job DTO／start_process_job／stop_job codec；可选 `./files` 原生六项文件（含Skill read／list／overview）和 `./native` 文件／Linux严格进程组合入口；overview通过继承配置显式启用、默认off，只接受same-host POSIX及full只读Git沙箱；Skill list已接scanDir完整nofollow扫描，不产生FsObserved；旧Skill read空cwd已验证原本拒绝、生产cwd处理未改，间接ENOTDIR由28修复，历史bd5216保留；OS API 接受与精确目标退出回执，PGID 用私有 fd3 socket；Linux actual bwrap／full＋显式 process-group 的 prepareNativeImage／private bootstrap／Runner consumer 已提交；scope 仍用文件；显式 processJobs 可选对象启用独立 Job provider／FIFO／真实 native 执行／legacy job_update 单发送者，省略关闭；能力位依据 provider 支持 | 完整 generation-2 准入、auto／scope／pkg confined、shell/script、process profile／环境／Windows 等价、持久 Host 审批；无 Runner inventory／log_snapshot／reconciliation 广告，不恢复 pending updates／snapshots，非全 serde parity |
 | [Go↔TS 检查](../../backend/internal/webcodex/runner/interop_test.go) | 六类请求跨语言往返、64 位整数极值、真实 Go 接口拒绝 DSH 部分能力注册 | ChatGPT 原生 Connector、真实文件/命令执行的端到端成功 |
 
-原六类直接请求为 `run_shell`、`run_process`、`run_script`、`file_read`、`file_write`、`file_list`，两端均有已提交协议入口；Go第七类file_skill_read_file／第八类file_skill_list_packages及第九类file_project_overview codec／Invocation和FileRead路由已提交，Go File codec6／20；DSH仍八类同步，overview无原生consumer。DSH已提交八类同步，read35／listing38共享fixture双端字节相同。原生执行计read／write／list／skill read／skill list五项File及Linux `run_process` 子集；listing已接有界nofollow scanDir，并在同提交处理间接ENOTDIR和空cwd，旧Skill read的空cwd已验证原本拒绝（仅增回归），间接ENOTDIR由28修复；不泛化全空白相对路径原语义。不将Go codec、fake provider或源码例子当额外执行能力，也不称完整跨平台等价。
+原六类直接请求为 `run_shell`、`run_process`、`run_script`、`file_read`、`file_write`、`file_list`，两端均有已提交协议入口；Go第七类file_skill_read_file／第八类file_skill_list_packages及第九类file_project_overview codec／Invocation和FileRead路由已提交，Go File codec6／20；DSH已提交九类同步与原生overview consumer，read35／listing38共享fixture保持。原生执行计basic3／Skill read／Skill list／overview六项File及Linux `run_process` 子集，overview默认off且限same-host POSIX full只读Git；listing已接有界nofollow scanDir，并在同提交处理间接ENOTDIR和空cwd，旧Skill read的空cwd已验证原本拒绝（仅增回归），间接ENOTDIR由28修复；不泛化全空白相对路径原语义。不将Go codec、fake provider或源码例子当额外执行能力，也不称完整跨平台等价。
 
 ## 必须保留的源码行为
 
@@ -558,6 +558,8 @@ DSH `5f2cccb7212099a50c26d31127e4d1322639ef63`，`fix(runner): preserve indirect
 
 ## 第二十九条阶段：Go ProjectOverview同步路由
 
+本节为历史；当时仅Go路由，DSH原生overview现已由第30项完成，当前以第三十条章为准。
+
 Go `ffae2865cc826f97131a45a89a63e7df2f9a3892`，`feat(webcodex): route project overview requests`，parent `f4e321c384d8046f63b3468c2a2ea691f28aa8b4`，10files+208／-15，正常功能提交已完成。DSH行为仍 `5f2cccb7212099a50c26d31127e4d1322639ef63`。总29＝Server12＋DSH17、test-only3；Go同步codec9／Filecodec6／20，DSH同步8／File实际5／20剩15项。ProjectOverview属于File族，Project仍0／7，Computer0／19；不是overview执行完成，不计第六项实际File。
 
 仅三处生产路由变更：[operation.go](../../backend/internal/webcodex/protocol/operation.go)增加file_project_overview同步File case并移出knownDeferred；[jobs_operation.go](../../backend/internal/webcodex/protocol/jobs_operation.go)两Job decoder仍ErrUnsupported；[registry.go](../../backend/internal/webcodex/runner/registry.go)复用FileRead capability gate。原27请求／9payload保留，content opaque，nil／invalid JSON／duplicate options字符串可透传，缺cwd／content generic valid；nonwrite规则／line拒绝以及Job／command／stdin／typed payload冲突拒绝保持，canonical copy不被后续wire pointer mutation重定向。
@@ -577,3 +579,27 @@ GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off CGO_ENABLED=1 GOMODCACHE=/root/project
 Next仍为DSH overview原生consumer：新有界metadata扫描须表达排序前缀相关non_utf8／unreadable／symlink warnings，不能先limit500再excluded／Git过滤，方案未定案、未决定scanDirPage。同execution world受控git ls-files -z须完整NUL索引再过滤，仅失败／空index fallback，Host超限不可伪装无Git；depth默认2/clamp1–4、limit200/clamp20–500属于执行层。E2B SDK2.29.1 callback前累积全部输出，consumer cap不足证明远程Git有界，需远端限额或明确拒不支持组合，尚无真实E2B验收。
 
 第28空cwd仅证明空字符串原本拒绝，新增回归未改生产cwd处理；不将全空白路径或旧bd5216扩成新结论。整体15%（10%～20%）、13大包none fully complete、G2file2／native3of22合规HTTP400不变。按原sync脚本write／default／diff／cached核验后正常双docs-only提交，每仓仅3md＋manifest，INDEX无变更不写；保留scratch／日志，业务／Notes／API／rootmap／脚本不动，无push／服务／模型／DB／E2B操作。
+
+## 第三十条阶段：原生ProjectOverview与有界metadata页
+
+DSH `25f3630336f6ae5ec92cecdf7222a7387266beae`，`feat(runner): build native project overviews`，parent `072991e201a9021e9415308e6c85ff70ac9a3e47`，65files+2921／-67，正常功能提交完成。Go行为仍 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，此前Go docs HEAD为2c15d67427de9316dea0ba4cdae7c8ed2873e5bc。总30＝Server12＋DSH18，fixture-only3另计；File实际6／20剩14，两端同步codec9，Project0／7／Computer0／19不变，overview仍属于File族。后继迁移docs不是新功能。
+
+### 已提交执行范围
+
+core `scanDirPage`由local与E2B provider实现：按raw name仅保留K＋1，after cursor／无状态rescan，invalid UTF-8条目name:null，逐entry unreadable与global iterator error标志，完整JSON字节预算。Runner以FIFO遍历，excluded与Git filtering先于计数，保留原11字段输出、lossless options及原默认／clamp（depth2→1–4、limit200→20–500），空／missing cwd按原行为处理；不产生FsObserved或后续写授权。完整page、raw Git index、owned index JSON（含增量祖先集合）、outer result分别受maxResultBytes约束，request max_bytes与maxOutputBytes不限制overview。
+
+`config.projectOverview: {}`显式启用，省略默认off；嵌套graceMs／cleanupTimeoutMs／outputDrainTimeoutMs默认1000／5000／2000ms，files／native继承配置均可，其他五File不新增subprocess依赖。要求same-host POSIX FS映射、subprocess supportsHostConfinement、sandbox与standing policy服务；Git始终使用full read-only wrapper，即使standing full-access也一样。metadata Git使用ordinary argv且省略executionMode，不要求native image。Windows overview不接受；E2B generic page已完整，但SDK upstream全输出累积缺口未修，因此拒绝远端overview，不称真实E2B验收。
+
+genuine Git lookup missing、ordinary nonzero或空index允许原fallback；partial、missing wrapper、denial、truncated stderr、unknown／not_started receipt、kill／wait failure、abort及oversize均为Host failure并await cleanup，不把预算超限伪装无Git。完整NUL raw index与owned JSON（含祖先）各有独立maxResultBytes界限，pages与Git共用invocation deadline。以往第29时点“分页尚未定案／consumer未实现”为历史，当前机制已在此提交完成。
+
+源码：project-overview.ts（工作区引用：`integration/deepseek-harness/packages/runner/runner/src/project-overview.ts`）、project-overview-git.ts（工作区引用：`integration/deepseek-harness/packages/runner/runner/src/project-overview-git.ts`）、format（工作区引用：`integration/deepseek-harness/packages/runner/runner/src/project-overview-format.ts`）、local scan-dir-page.ts（工作区引用：`integration/deepseek-harness/packages/fs/fs-local/src/scan-dir-page.ts`）、E2B remote-file.ts（工作区引用：`integration/deepseek-harness/packages/e2b/fs-e2b/src/remote-file.ts`）。准确验证入口及source／artifact区分见tests README（工作区引用：`integration/deepseek-harness/packages/runner/runner/tests/README.md`），构建产物检查为built-overview-smoke.mjs（工作区引用：`integration/deepseek-harness/packages/runner/runner/tests/built-overview-smoke.mjs`）。没有新共享JSONfixture，旧Jobs91／read35／list38字节与SHA不变；没有Rust oracle或全平台等价结论。
+
+### 已收验证回执（范围分列，不重复相加）
+
+- local scan-dir-page22＋old scan13＝35 PASS（job198）。E2B filesystem75＋remote-file56＝131 PASS，job210另含E2B tsc与typedlint2files 0error／0warning。新增invalid raw file／dir／link、枚举后删除unreadable与positive budget回归使用owned本机Python离线执行，非actual E2B。
+- pure format75／codec54是此前worker聚焦通过，本轮未重复。Git59＋policy25＝84 PASS（204），随后Host全tsc205、typedlint206 PASS。后续修missingGit＋partial、confineThrows组合后Git总61，但213只执行selector15 PASS／46filtered，不能称全61重跑；214 Runner tsc、215 typedlint通过。最终父Host tsc＋diff219 PASS。
+- 真Loader files-composition17／17 PASS（199），含三策略真实Git index与full read-only bwrap。fixture拥有本地git init／git add仓库，无network，native-subreaper.py收尾no children。
+- 217四FS包tsc emit PASS；218 programmatic tsdown使用fixedExtension:false与真实Typert host插件构建fs/fs、fs-local、fs-sandbox、e2b/fs-e2b及Runner三entry PASS。同job普通Node old built-files-smoke三策略与new built-overview-smoke三策略均PASS，经既有owned bwrap／subreaper真实执行、无残留children；不称全Host bundle或平台矩阵。
+- 文档worker type-equiv429／429、exportJSDoc、Cordis catalog99／config catalog freshness、mdlinks1545／wrap1552／noteformat313／budgets8通过。功能commit正常lefthook11 staged named pairs、30 staged TS files／49 lint rules、whitespace／vendor guard全PASS；不是full doc aggregate或全test suite。
+
+所有功能jobs已由各owner收取；本轮迁移记录只复用实得回执，不重跑产品tests或构建。下一步剩余14项File原协议与其他未完成大包，远端overview Git输出界限和平台支持仍缺。13大包无一全量完成，整体15%（10%～20%）粗估、native3／file-only2of22与合规G2HTTP400不变，无完整持久MCP／生产替换。仅原三root及两侧五文件镜像按原脚本write/default/diff/cached检查后各正常docs-only提交3md＋manifest，INDEX不强写；不触业务／Notes／API生成／rootmap／脚本／旧untracked，不push／生产服务／真实模型／凭据／网络E2B。

@@ -1,8 +1,8 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-当前第29阶段＝Server12＋DSH17，fixture-only3；Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `5f2cccb7212099a50c26d31127e4d1322639ef63`。Go overview仅codec／FileRead路由，同步9类、Filecodec6；DSH同步8／File实际5／20剩15。ProjectOverview是File族，Project仍0／7、Computer0／19。无新共享JSONfixture／Rustoracle，旧jobs／read35／list38字节不变；聚焦离线Go普通-count1 protocol0.018s／runner0.009s PASS，非race／全suite。第28空cwd只验证原本拒绝、未改生产cwd处理，间接ENOTDIR已修。总体15%粗10–20%、13大包none、G2file2native3of22 HTTP400不变。以下第27摘要及第1–26节为历史，当前见第27节；本轮正常docs保存，不重复产品tests。
+当前第30阶段＝Server12＋DSH18，fixture-only3；Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `25f3630336f6ae5ec92cecdf7222a7387266beae`。原生overview使File实际6／20、剩14，两端同步9；Project0／7／Computer0／19不变。scanDirPage的local与E2B provider已实现，overview仅显式启用的same-host POSIX／full只读受控Git，无观察或写授权；远端Git上游输出累积未解决，拒远端overview，Windows也不接受。原输出／options／历史JSONfixtures保持。第1–27节与旧摘要为历史，第28节为当前30证据，Git末次仅15通过／46filtered，不累加重合tests。整体15%粗10–20%、13大包none、G2file2/native3of22HTTP400、无完整持久MCP或生产替换不变；本轮正常docs保存，不重跑产品检查。
 
-本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。当前见第25节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
+本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。该历史阶段见第25节；当前见第28节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -471,7 +471,9 @@ File实际5／20、两端同步8／8、GoFilecodec5、13大包未全量、15%粗
 
 下一步只读审查确认：overview先git ls-files -z完整NUL索引过滤，失败／空index才fallback，Host预算超限不能降级成无Git；现scanDir无法表达排序前缀相关non_utf8／unreadable／symlink warnings，先limit500再excluded／Git过滤会漏合法项，新有界metadata扫描机制尚未定案，scanDirPage未决定或实现。E2B subprocess SDK2.29.1先累积全部stdout／stderr再回调，当前consumer cap不证明远程Git有界，需远端限额或明确拒未支持组合；无实际E2B验证，这不是实现／测试增量。
 
-## 27. 当前二十九条阶段：Go File ProjectOverview路由
+## 27. 二十九条阶段历史：Go File ProjectOverview路由
+
+本节未实现项为当时状态；当前DSH overview完成范围及限制见第28节（第30阶段）。
 
 Go `ffae2865cc826f97131a45a89a63e7df2f9a3892`（feat(webcodex): route project overview requests），parentf4e321c384d8046f63b3468c2a2ea691f28aa8b4，10files+208／-15；DSH5f2cccb不变。29＝Server12＋DSH17、test-only3；Go同步9／Filecodec6，DSH同步8／实际File5／20剩15，ProjectOverview归File族，Project0／7／Computer0／19不变，不计第六项执行。
 
@@ -480,3 +482,17 @@ Go `ffae2865cc826f97131a45a89a63e7df2f9a3892`（feat(webcodex): route project ov
 实际前台离线Go1.27.1指定selector普通-count1 protocol0.018s／runner0.009s PASS，无job id，不是race／全suite。父取完整receipt后接管diff review，gofmt八Go文件空输出、diff/cached/旧fixture检查、176正常featurecommit exit0已收，未重复tests。本轮也不重跑产品checks／Host／docaggregate。精确命令与source引用见[第二十九阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第二十九条阶段go-projectoverview同步路由)。
 
 28只验证空字符串cwd原拒绝、新增回归而未改生产cwd，间接ENOTDIR修复如历史记录。Next为DSH overview consumer、有界metadata warnings与same-world受控Git：完整NUL索引过滤、仅失败／空index fallback，超Host预算不得降级；先limit再excluded/git会漏项，scanDirPage尚未定案。E2B SDK回调前累积全输出的界限问题未解决，无实际provider验收。15%粗10–20%、13大包none、G2file2native3of22 HTTP400不变，无完整持久MCP闭环／生产替换。仅root/mirrors按原脚本同步检查和正常docs-only提交，保留untracked，不触业务／Notes／API／rootmap／script，不push或调用服务／秘密／模型／DB／E2B。
+
+## 28. 当前三十条阶段：原生overview完成范围
+
+DSH `25f3630336f6ae5ec92cecdf7222a7387266beae`，feat(runner): build native project overviews，parent072991e201a9021e9415308e6c85ff70ac9a3e47，65files+2921／-67。总30＝Server12＋DSH18、fixture-only3，Go行为ffae2865保持；File实际6／20剩14，双方同步9，Project0／7、Computer0／19不增。
+
+scanDirPage的core/local/E2B完整实现rawname K＋1、aftercursor stateless rescan、name:null／perentry unreadable／iteratorerror与完整JSON预算，consumer FIFO／filter-before-count、原11字段／lossless options／limits和空missingcwd行为保留，无observations。projectOverview:{}显式opt-in默认off，files/native继承，grace/cleanup/drain默认1000/5000/2000ms。overview需要same-host POSIX、subprocess hostconfinement和full只读wrapper，即使standing full-access也使用只读；ordinary argv不设置executionMode，不要求nativeimage。
+
+仅genuine Git lookupmissing／ordinary nonzero／空index fallback；partial／missingwrapper／deny／truncatedstderr／unknown-notstarted／killwaitfail／abort／oversize均Hostfail且awaitcleanup。rawindex与带增量ancestors的ownedindexJSON分别受maxResultBytes，page/outer也受完整预算。E2B page虽已实现，SDK upstream输出累积限制未解决，远端overview拒绝，Windows不接受。这是限定平台和启用配置的完成证据，不是全V6验收。
+
+验证分组：198 local22+13=35；E2B75+56=131、210E2Btsc/lint2 0/0，本机ownedPython离线不是actualE2B。此前pure75/codec54不重复；204Git59+policy25=84与205Hosttsc/206lint通过，后续missingGit+partial/confineThrows修复后Git总61，213仅15PASS/46filtered，不称全61重跑，214Runner tsc/215lint及219最终Hosttsc+diff通过。199真实Loader17/17三policyGit/read-onlybwrap，ownedgit init/add无network，经subreaper nochildren。217四FS tscemit；218真实Typert host和fixedExtension:false programmatic五包构建（Runner三entry）及普通Node旧built-files／新built-overview各三policy均PASS，真实ownedbwrap/subreaper无children。
+
+type-equiv429/429／exportJSDoc／catalog99/configfresh／links1545/wrap1552/note313/budgets8、正常featurehooks11pairs／30files49lintRules／whitespace/vendor均PASS，无全docaggregate/fulltest。全部功能jobs由owner已收，具体源码与测试分界见[第三十阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十条阶段原生projectoverview与有界metadata页)，本轮不重复产品checks。历史Jobs91/read35/list38SHA不变，无新共享JSONfixture／Rustoracle；第28空cwd只验证原拒绝且未改生产处理。
+
+下一步剩余14File及其他Go/Runner大包、远端Git与平台缺口；约15%（10%～20%）、13大包none、native3/file2of22与完整G2HTTP400不变，无持久MCP完整闭环或生产替换。本轮仅root三页及现有镜像，原script同步／default／diff／cached后正常docs-only提交，不改INDEX若字节未变，不触业务/Notes/API/rootmap/script/旧untracked，不push或调用实际服务/秘密/模型/DB/E2B。
