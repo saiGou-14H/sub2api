@@ -1,8 +1,8 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-当前第38阶段＝Server14＋DSH24，fixture-only3且无新增；Go行为基线 `c47e84a1593c11c788c04ed80c763c46d1ed97ee`，DSH `9470328e728065adec7edeeb084a80fae5d388cc`。Go同步codec11／File codec8，DSH同步10／File codec7；原生File仍7／20、剩13，Project0／7、Computer0／19不变。Go删除只有outer codec＋StructuredFileDelete registry，Runner未实现或广告删除。4be885ac60的helper未接实际files派发，68a5f0ddd6补接及后续修复／新验证才支持当前写入完成；旧438测试不覆盖新E2B写入或丢失的files分支。第1–29节保留历史，第29节附明确纠正，第30节为当前34–38证据。整体约15%（10%～20%）、13大包未全量完成、G2file2/native3of22HTTP400、无完整持久MCP或生产替换不变；根文档与两侧镜像通过既有同步脚本保持一致；文档提交不改变上述源码基线。
+当前第40阶段＝Server14＋DSH26，fixture-only3且无新增；Go行为基线 `c47e84a1593c11c788c04ed80c763c46d1ed97ee`，DSH `3223697df3568113538077103955ebf70ad88d09`。双端同步codec11／File codec8，DSH删除codec与原生执行已提交；原生File8／20、剩12，Project0／7、Computer0／19不变。删除全路径词法预检后逐条执行，可部分完成、不回滚；最终链接只unlink条目，原结果字段不增加effect状态。4be885ac60的helper未接实际files派发，68a5f0ddd6补接及后续修复／新验证才支持写入完成；旧438测试不覆盖新E2B写入或丢失的files分支。第1–30节保留历史，第29节附明确纠正，第31节为当前39–40证据。整体约15%（10%～20%）、13大包未全量完成；G2 file-only3／native最多4of22，合规HTTP400且无旁路，无完整持久MCP或生产替换；真实E2B未跑。根文档与两侧镜像通过既有同步脚本保持一致；文档提交不改变上述源码基线。
 
-本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。该历史阶段见第25节；当前见第30节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
+本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。该历史阶段见第25节；当前见第31节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -518,3 +518,15 @@ file_write_project_file的Go FileWrite路由、DSH协议与真实FS执行已经�
 最新回执分列：Loader files-composition34＝31 passed／3 skipped，client30，file-settlement1；local effects9＋fsio70 passed／1 skipped＝79＋1；raw-storage38在capsh移除cap_dac_override,cap_dac_read_search后通过，解决root权限预期失败；E2B新38＋75＋56＝169 passed，无live E2B。Runner／FS／E2B类型构建、changed lint0、Typert Host artifacts与plain Node built-files-smoke三策略（read-only／workspace-write／danger-full-access，含publication后timeout）通过。export-jsdoc0 missing、生成99 artifacts current、named双语配对及links／wrap／note／package docs gates通过，full doc-sync未重跑。Go相关focused tests、删除race、vet、gofmt据worker报告通过；本次不重跑、不将重合分组相加，详见[第三十四至三十八阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十四至三十八条阶段实际写入派发效果回执修复与go删除路由)。
 
 Go同步11／File codec8，DSH同步10／File codec7；Go删除只完成outer codec与registry，Runner删除未实现或广告。原生File仍7／20、剩13项；下一步需Runner删除codec、FS受guard约束的nofollow remove原语、local／E2B provider和Loader／smoke，现有FS无remove方法。Project0／7、Computer0／19、G2 file2/native最多3of22合规HTTP400、约15%粗估和13大包未全量完成不变，历史fixtures／SHA保持。根文档与两侧镜像通过既有同步脚本保持一致；文档提交不改变上述源码基线。
+
+## 31. 当前四十条阶段：项目文件删除完成范围
+
+第39条DSH `16656a869efa852551cb3d1d7cfe1790d0ef6589`新增file_delete_project_files outer codec、原始paths parser及独立structured_file_delete准入；第40条 `3223697df3568113538077103955ebf70ad88d09`提交root-scoped removeFile Definition／local／sandbox／E2B及Runner files／native执行。总40＝Server14＋DSH26、fixture-only3；Go基线 `c47e84a1593c11c788c04ed80c763c46d1ed97ee`不变。双端同步codec11／File codec8，原生File8／20、剩12项，Project0／7、Computer0／19；各功能已独立本地提交，后续docs不增加功能数。
+
+原1–64项paths全词法预检，随后逐条文件系统操作；保留原deleted_paths顺序、重复及缺失项，不回滚、不加effect字段。最终symlink只unlink目录项，目录拒绝，raw斜杠／点后缀不会改删规范化目标；local／E2B缺失祖先语义补齐。HostToolOwner／私有ToolRuntime scope、guard与完整结果／transport预算仍约束副作用，无内容观察写授权。E2B锁key重解析及kill不等exit已修复；deadline或controller不可达仍unknown，不据此宣称quiescence。真实E2B、完整平台矩阵和持久业务闭环未验收，路径检查也不保证跨进程原子CAS。
+
+验证各自记录、不合成总数：codec最初7文件752 passed，最终删除parser88／88；local删除13／13、sandbox31／31、E2B删除50／50（离线真实Python helper＋fake SDK）；真实Loader files54 passed／3项既有overview skip；client／native／Job／write相关6文件179 passed／9项既有opt-in skip。FS service12、tool-fs74、skill-filesystem21，以及capsh移除DAC后agent-instructions155分别通过；早先root权限绕过chmod的环境失败未删去。Host完整tsc、exported JSDoc、scoped lint及precommit24份TS零错误、11组staged配对triplets通过。真实Typert tsdown重建FS／local／sandbox与Runner三entry；built files三策略、native＋Jobs、owned bwrap／subreaper overview三策略均PASS且overview无children；E2B重建通过。native旧built ENOEXEC／127断言对齐既有source not_started／completed127，不是新增process功能。
+
+API catalog99 fresh；quick docs15／16，仅既有verify-doc-refs在overview literal docs／README／index路径失败，未绕开扫描、不称full doc-sync通过。具体job编号与验证范围见[第三十九至四十阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十九至四十条阶段删除协议与受控原生执行)，本轮仅引用已收回执，不重复产品检查。4be885ac60未接实际派发、68a5f0ddd6补接及旧438覆盖缺口的历史纠正继续有效；jobs／read35／list38共享fixture和原SHA保持。
+
+下一步为剩余12项File中的编辑／patch、产物及checkpoint，以及其他Go／Runner大包。G2 file-only3／native最多4of22仍硬拒HTTP400，不提供旁路。整体仍按约15%（10%～20%）管理，13大包无一完成全部退出条件；没有完整持久MCP或生产替换结论。本轮只更新三份root与原脚本生成的双仓镜像，不stage／commit，不改业务／冻结源码、fixture或同步脚本；未push、部署、操作生产服务或访问真实模型、凭据、DB、E2B。
