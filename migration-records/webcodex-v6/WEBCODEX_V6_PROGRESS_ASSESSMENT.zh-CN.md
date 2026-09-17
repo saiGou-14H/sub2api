@@ -1,8 +1,8 @@
 # WebCodex V6 全量迁移：项目进度评估
 
-当前第30阶段＝Server12＋DSH18，fixture-only3；Go行为基线 `ffae2865cc826f97131a45a89a63e7df2f9a3892`，DSH `25f3630336f6ae5ec92cecdf7222a7387266beae`。原生overview使File实际6／20、剩14，两端同步9；Project0／7／Computer0／19不变。scanDirPage的local与E2B provider已实现，overview仅显式启用的same-host POSIX／full只读受控Git，无观察或写授权；远端Git上游输出累积未解决，拒远端overview，Windows也不接受。原输出／options／历史JSONfixtures保持。第1–27节与旧摘要为历史，第28节为当前30证据，Git末次仅15通过／46filtered，不累加重合tests。整体15%粗10–20%、13大包none、G2file2/native3of22HTTP400、无完整持久MCP或生产替换不变；本轮正常docs保存，不重跑产品检查。
+当前第38阶段＝Server14＋DSH24，fixture-only3且无新增；Go行为基线 `c47e84a1593c11c788c04ed80c763c46d1ed97ee`，DSH `9470328e728065adec7edeeb084a80fae5d388cc`。Go同步codec11／File codec8，DSH同步10／File codec7；原生File仍7／20、剩13，Project0／7、Computer0／19不变。Go删除只有outer codec＋StructuredFileDelete registry，Runner未实现或广告删除。4be885ac60的helper未接实际files派发，68a5f0ddd6补接及后续修复／新验证才支持当前写入完成；旧438测试不覆盖新E2B写入或丢失的files分支。第1–29节保留历史，第29节附明确纠正，第30节为当前34–38证据。整体约15%（10%～20%）、13大包未全量完成、G2file2/native3of22HTTP400、无完整持久MCP或生产替换不变；根文档与两侧镜像通过既有同步脚本保持一致；文档提交不改变上述源码基线。
 
-本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。该历史阶段见第25节；当前见第28节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
+本报告第1–24节保留历史，第25节记录第27阶段原生Skill列表。累计27条代码／功能修复（Server11、DSH16）＋3条fixture-only；Go行为基线 `746e98015112dfdd67837d2b72fa60015a96b0e4`，DSH `a6bb656769050a320bb8046e7bc43b903b831135`。通用scanDir与SkillList consumer已提交，File真实5／20、剩余15项，双方同步codec8／8，Go Filecodec5不变。最末listpolicy25＋Loader14＝39与先前client28分开，不称67一次aggregate；真实E2B未执行。listing P2同提交修复，旧Skill read空cwd／间接ENOTDIR差异待验证。13大包none fully complete、15%（10%～20%）、Project0／7、Computer0／19、G2file2／native3of22合规HTTP400，无完整持久MCP／生产替换不变。该历史阶段见第25节；当前见第30节及[状态总表](./WEBCODEX_V6_DEVELOPMENT_STATUS.zh-CN.md)，准确构建／测试范围见[实施进度](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md)。本轮正常保存镜像，不重跑产品tests或doc-sync aggregate。
 
 ## 1. 结论与统计口径（第 1–8 节为文件阶段历史快照）
 
@@ -496,3 +496,25 @@ scanDirPage的core/local/E2B完整实现rawname K＋1、aftercursor stateless re
 type-equiv429/429／exportJSDoc／catalog99/configfresh／links1545/wrap1552/note313/budgets8、正常featurehooks11pairs／30files49lintRules／whitespace/vendor均PASS，无全docaggregate/fulltest。全部功能jobs由owner已收，具体源码与测试分界见[第三十阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十条阶段原生projectoverview与有界metadata页)，本轮不重复产品checks。历史Jobs91/read35/list38SHA不变，无新共享JSONfixture／Rustoracle；第28空cwd只验证原拒绝且未改生产处理。
 
 下一步剩余14File及其他Go/Runner大包、远端Git与平台缺口；约15%（10%～20%）、13大包none、native3/file2of22与完整G2HTTP400不变，无持久MCP完整闭环或生产替换。本轮仅root三页及现有镜像，原script同步／default／diff／cached后正常docs-only提交，不改INDEX若字节未变，不触业务/Notes/API/rootmap/script/旧untracked，不push或调用实际服务/秘密/模型/DB/E2B。
+
+## 29. 当前三十三条阶段：结构化项目写入已完成
+
+> 第38阶段纠正：本节是历史记录，4be885ac60未接实际files派发，“真实FS执行已经完成”的断言过早；68a5f0ddd6才补接。旧438 passed／4 skipped不覆盖新的E2B写入或丢失的files分支，不能证明该执行链路。保留原日志和计数，当前结论以第30节的补接、修复与新验证为准。
+
+Go `9785d295487d3f6f89ce8fbb5d214ed424f9e22e`（`feat(webcodex): route structured project file writes`）新增第31条，DSH `941bf30801fc4d68bc03e5715a63c628c4ac4094`（`feat(runner): decode structured project file writes`）及 `4be885ac60709e06bc06af161408835b97c92679`（`feat(runner): execute structured project file writes`）为第32／33条。当前33＝Server13＋DSH20，另3条fixture-only；Go HEAD9785d2954、DSH HEAD4be885ac60已核对，两侧snapshot30 docs仍保留为历史。第30阶段的overview与更早证据不重写。
+
+file_write_project_file的Go FileWrite路由、DSH协议与真实FS执行已经完成；双端同步codec10、File codec7／20、File实际7／20剩13项，Project0／7及Computer0／19不增加。完整写入结果预算、原owner写意图及provider效果回执支持结构化结果与不确定效果结算；现有overview的显式启用／same-host POSIX／只读Git和远端／Windows限制不变。这一片不解决完整业务授权、持久结果、其余File家族或全平台验收。
+
+已收DSH相关五组tsc -b exit0，focused suite438 passed／4 skipped、helper/options/codec164 passed；Loader files composition17项含3 skipped，files-policy25 passed。另引用fs-local effect7、fsio71 passed／1 skipped、sandbox27、E2B75＋remote56及changed feature oxlint0 errors，分组可能重合，不累加。Go protocol／runner focused、race／vet据报告通过，本次没有重跑产品检查，不补造selector或计数。完整范围见[第三十一至三十三阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十一至三十三条阶段结构化项目文件写入)。
+
+历史jobs91／16 families／12 operations、read35、list38的字节与SHA保持，无新共享JSONfixture或Rust oracle；约15%（10%～20%）粗估、13大包无一全部完成、G2file2/native最多3of22合规HTTP400、无完整持久MCP或生产替换均不变。本次根三页与两侧镜像按原脚本write及默认只读核验，不stage／commit，不修改源码、fixture、脚本或生产，不访问网络、凭据或实际外部服务。
+
+## 30. 当前三十八条阶段：实际派发与效果证据修复
+
+总38＝Server14＋DSH24、fixture-only3且无新增。第34条DSH `68a5f0ddd6fa9f6dc3c01ccb0fc4e39c0b5b55ca`补实际files派发；第35条Go `c47e84a1593c11c788c04ed80c763c46d1ed97ee`增加删除outer codec及StructuredFileDelete registry；第36条DSH `88b5a15ff19b1933e44972e749ee53a1788f21af`修E2B六字段／严格枚举回执与postprobe失败分类；第37条 `11b8f9e1cdf48d5a35b10f739c5cc7aedf68d1f4`修local rollback父目录身份；第38条 `9470328e728065adec7edeeb084a80fae5d388cc`修Runner guard预算／HMR回执并完成集成／API文档。每项已本地提交，docs提交不增加功能数。
+
+第33阶段对4be885ac60的完成断言过早：helper／provider未接实际files派发，旧438测试未覆盖新的E2B写入或丢失的files分支。68a5f0ddd6补接及本阶段修复／新验证证明当前写入执行，历史日志保留并附纠正，不能继续用旧suite作为遗漏路径的证据。
+
+最新回执分列：Loader files-composition34＝31 passed／3 skipped，client30，file-settlement1；local effects9＋fsio70 passed／1 skipped＝79＋1；raw-storage38在capsh移除cap_dac_override,cap_dac_read_search后通过，解决root权限预期失败；E2B新38＋75＋56＝169 passed，无live E2B。Runner／FS／E2B类型构建、changed lint0、Typert Host artifacts与plain Node built-files-smoke三策略（read-only／workspace-write／danger-full-access，含publication后timeout）通过。export-jsdoc0 missing、生成99 artifacts current、named双语配对及links／wrap／note／package docs gates通过，full doc-sync未重跑。Go相关focused tests、删除race、vet、gofmt据worker报告通过；本次不重跑、不将重合分组相加，详见[第三十四至三十八阶段](./WEBCODEX_MIGRATION_PROGRESS.zh-CN.md#第三十四至三十八条阶段实际写入派发效果回执修复与go删除路由)。
+
+Go同步11／File codec8，DSH同步10／File codec7；Go删除只完成outer codec与registry，Runner删除未实现或广告。原生File仍7／20、剩13项；下一步需Runner删除codec、FS受guard约束的nofollow remove原语、local／E2B provider和Loader／smoke，现有FS无remove方法。Project0／7、Computer0／19、G2 file2/native最多3of22合规HTTP400、约15%粗估和13大包未全量完成不变，历史fixtures／SHA保持。根文档与两侧镜像通过既有同步脚本保持一致；文档提交不改变上述源码基线。
