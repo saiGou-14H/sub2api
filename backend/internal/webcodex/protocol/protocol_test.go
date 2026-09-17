@@ -386,7 +386,7 @@ func TestUnknownConflictingAndDeferredNeverFallback(t *testing.T) {
 	if _, err := r.DecodeInvocation(); err == nil {
 		t.Fatal("accepted conflicting lsp")
 	}
-	for _, kind := range []string{"start_job", "run_internal_posix_script", "file_apply_patch", "register_project", "computer_control", "validation", "lsp", "persistent_shell", "mcp_gateway", "plugin_gateway", "coding_agent", "skill_store", "ssh_resource", "runner_config"} {
+	for _, kind := range []string{"start_job", "run_internal_posix_script", "file_save_project_artifact", "register_project", "computer_control", "validation", "lsp", "persistent_shell", "mcp_gateway", "plugin_gateway", "coding_agent", "skill_store", "ssh_resource", "runner_config"} {
 		r = request(t, kind)
 		if _, err := r.DecodeInvocation(); !errors.Is(err, ErrUnsupported) {
 			t.Fatalf("%s: %v", kind, err)

@@ -695,6 +695,10 @@ func supports(c protocol.RunnerCapabilities, kind string) bool {
 		// Host mutation-matrix adaptation; the frozen generic enqueue has no
 		// explicit FileWrite gate (requests.rs:436-455).
 		return c.FileWrite
+	case "file_apply_patch":
+		// The host matrix adopts the dedicated entry's three-bit gate
+		// (requests.rs:583-605); the source generic entry has no patch gate.
+		return c.ApplyPatch && c.ApplyPatchMatchMetadata && c.ApplyPatchMatchingMode
 	case "file_delete_project_files":
 		return c.StructuredFileDelete
 	default:
