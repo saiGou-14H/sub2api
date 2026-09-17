@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -564,6 +566,9 @@ func supportsRequest(c protocol.RunnerCapabilities, request protocol.RunnerReque
 	if request.Kind != "file_apply_text_edits" || request.Content == nil {
 		return true
 	}
+	if !selectorJSONEligible(*request.Content) {
+		return true
+	}
 	// RawMessage keeps integer lexemes lossless and map decoding selects the
 	// last duplicate member, as serde_json::Value does in the source scanner.
 	var payload map[string]json.RawMessage
@@ -595,6 +600,81 @@ func supportsRequest(c protocol.RunnerCapabilities, request protocol.RunnerReque
 	}
 	// Generic ingress does not call the dedicated occurrence-only entry point.
 	return !requiresLineScope || (c.ApplyTextEditLineScope && (!requiresOccurrence || c.ApplyTextEditOccurrence))
+}
+
+// selectorJSONEligible checks the whole Value before inspecting selectors.
+// serde_json 1.0.150 rejects lone surrogates, non-finite numbers and a 128th
+// nested container, even in unknown or subsequently overwritten members.
+// This private Unicode check mirrors protocol.validateJSONUnicode; exporting a
+// protocol API just for this registry scan would expand the wire codec surface.
+func selectorJSONEligible(content string) bool {
+	if !utf8.ValidString(content) {
+		return false
+	}
+	quoted := false
+	for i := 0; i < len(content); i++ {
+		if content[i] == '"' {
+			quoted = !quoted
+			continue
+		}
+		if !quoted || content[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(content) {
+			return false
+		}
+		if content[i] != 'u' {
+			continue
+		}
+		if i+4 >= len(content) {
+			return false
+		}
+		n, err := strconv.ParseUint(content[i+1:i+5], 16, 16)
+		if err != nil {
+			return false
+		}
+		i += 4
+		if n >= 0xdc00 && n <= 0xdfff {
+			return false
+		}
+		if n < 0xd800 || n > 0xdbff {
+			continue
+		}
+		if i+6 >= len(content) || content[i+1] != '\\' || content[i+2] != 'u' {
+			return false
+		}
+		low, err := strconv.ParseUint(content[i+3:i+7], 16, 16)
+		if err != nil || low < 0xdc00 || low > 0xdfff {
+			return false
+		}
+		i += 6
+	}
+	// Token's default number conversion rejects overflow to infinity. Values
+	// here are discarded: the separate RawMessage scan and wire retain the
+	// original numeric lexemes (including exact u64/i64 and wider finite values).
+	decoder := json.NewDecoder(strings.NewReader(content))
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+		if delimiter, ok := token.(json.Delim); ok {
+			switch delimiter {
+			case '{', '[':
+				depth++
+				if depth >= 128 {
+					return false
+				}
+			case '}', ']':
+				depth--
+			}
+		}
+	}
 }
 
 func supports(c protocol.RunnerCapabilities, kind string) bool {
