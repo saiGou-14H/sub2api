@@ -140,7 +140,7 @@ func TestSkillPackagesListRemainingDeferredKinds(t *testing.T) {
 			}
 			inv, err := r.DecodeInvocation()
 			// Preserve the historical fixture; these synchronous File kinds were added later.
-			if kind == "file_project_overview" || kind == "file_write_project_file" {
+			if kind == "file_project_overview" || kind == "file_write_project_file" || kind == "file_delete_project_files" {
 				if err != nil || inv.Operation.WireKind() != kind {
 					t.Fatalf("newly supported File kind: %v", err)
 				}

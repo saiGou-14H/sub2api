@@ -570,6 +570,8 @@ func supports(c protocol.RunnerCapabilities, kind string) bool {
 		return c.FileRead
 	case "file_write", "file_write_project_file":
 		return c.FileWrite
+	case "file_delete_project_files":
+		return c.StructuredFileDelete
 	default:
 		return false
 	}
