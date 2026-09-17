@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Adapted from WebCodex 97ad66949a859174911c2f6da2ff1063be98bfa9,
-// crates/webcodex-runner-registry/src/{runners,polling,registry}.rs.
+// crates/webcodex-runner-registry/src/{runners,polling,registry,requests}.rs.
 package runner
 
 import (
@@ -272,7 +272,7 @@ func (r *Registry) Enqueue(access Access, input protocol.RunnerRequest) (*Pendin
 	if n.disconnectedAt != nil || time.Since(n.lastSeen) > r.options.OnlineWindow {
 		return nil, fmt.Errorf("Runner is offline")
 	}
-	if !supports(n.registration.Capabilities, body.Kind) {
+	if !supportsRequest(n.registration.Capabilities, body) {
 		return nil, fmt.Errorf("Runner capability not advertised")
 	}
 	if _, ok := r.pending[body.RequestID]; ok || r.requestToJob[body.RequestID] != "" {
@@ -321,7 +321,11 @@ func (r *Registry) Poll(principal Principal, body protocol.RunnerPollPayload) (*
 			r.settleLocked(p, Outcome{Err: ErrStale})
 			continue
 		}
-		if !supports(n.registration.Capabilities, p.kind) {
+		request, err := protocol.ReadRequest(p.wire)
+		if err != nil {
+			return nil, err
+		}
+		if !supportsRequest(n.registration.Capabilities, request) {
 			if p.jobID != "" {
 				if j := r.jobs[p.jobID]; j != nil {
 					r.loseJobLocked(j, "runner_capability_withdrawn", "Runner capability withdrawn", time.Now())
@@ -329,10 +333,6 @@ func (r *Registry) Poll(principal Principal, body protocol.RunnerPollPayload) (*
 			}
 			r.settleLocked(p, Outcome{Err: fmt.Errorf("Runner capability withdrawn")})
 			continue
-		}
-		request, err := protocol.ReadRequest(p.wire)
-		if err != nil {
-			return nil, err
 		}
 		p.dispatched = true
 		if p.jobID != "" {
@@ -554,6 +554,49 @@ func (r *Registry) Close() {
 	r.requestToJob = make(map[string]string)
 }
 
+// supportsRequest combines the host mutation matrix with the original generic
+// selector scan (requests.rs:328-357,391-415,503-557). Callers hold r.mu through
+// admission/dispatch. Semantic payload validation remains Runner-owned.
+func supportsRequest(c protocol.RunnerCapabilities, request protocol.RunnerRequest) bool {
+	if !supports(c, request.Kind) {
+		return false
+	}
+	if request.Kind != "file_apply_text_edits" || request.Content == nil {
+		return true
+	}
+	// RawMessage keeps integer lexemes lossless and map decoding selects the
+	// last duplicate member, as serde_json::Value does in the source scanner.
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(*request.Content), &payload) != nil {
+		return true
+	}
+	var changes []json.RawMessage
+	if json.Unmarshal(payload["changes"], &changes) != nil {
+		return true
+	}
+	requiresOccurrence, requiresLineScope := false, false
+	for _, change := range changes {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(change, &fields) != nil {
+			continue
+		}
+		var edits []json.RawMessage
+		if json.Unmarshal(fields["edits"], &edits) != nil {
+			continue
+		}
+		for _, edit := range edits {
+			var selectors map[string]json.RawMessage
+			if json.Unmarshal(edit, &selectors) != nil {
+				continue
+			}
+			requiresOccurrence = requiresOccurrence || present(selectors["occurrence"])
+			requiresLineScope = requiresLineScope || present(selectors["line_scope"])
+		}
+	}
+	// Generic ingress does not call the dedicated occurrence-only entry point.
+	return !requiresLineScope || (c.ApplyTextEditLineScope && (!requiresOccurrence || c.ApplyTextEditOccurrence))
+}
+
 func supports(c protocol.RunnerCapabilities, kind string) bool {
 	switch kind {
 	case "start_process_job":
@@ -568,7 +611,9 @@ func supports(c protocol.RunnerCapabilities, kind string) bool {
 		return c.StructuredScriptPayload
 	case "file_read", "file_list", "file_skill_read_file", "file_skill_list_packages", "file_project_overview":
 		return c.FileRead
-	case "file_write", "file_write_project_file":
+	case "file_write", "file_write_project_file", "file_apply_text_edits":
+		// Host mutation-matrix adaptation; the frozen generic enqueue has no
+		// explicit FileWrite gate (requests.rs:436-455).
 		return c.FileWrite
 	case "file_delete_project_files":
 		return c.StructuredFileDelete

@@ -95,7 +95,7 @@ func TestSkillPackagesListOpaqueOptionsAndCanonicalRejection(t *testing.T) {
 		t.Fatal("listing range admitted")
 	}
 	req = packageListInput("deferred-list")
-	req.Kind = "file_apply_text_edits"
+	req.Kind = "file_apply_patch"
 	if _, err := r.Enqueue(Access{Username: "alice"}, req); !errors.Is(err, protocol.ErrUnsupported) {
 		t.Fatalf("deferred operation admitted: %v", err)
 	}
