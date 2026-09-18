@@ -729,7 +729,9 @@ func prismInput(req *apicompat.ResponsesRequest) json.RawMessage {
 			if json.Unmarshal(raw, &input) != nil {
 				return raw
 			}
-			items = append(items, input...)
+			for _, item := range input {
+				items = append(items, prismNormalizeInputMessage(item))
+			}
 		} else {
 			text := string(raw)
 			if raw[0] == '"' {
