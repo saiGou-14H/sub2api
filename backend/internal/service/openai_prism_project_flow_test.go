@@ -84,7 +84,7 @@ func TestOpenAIPrismProjectChatArtifactsAndRestart(t *testing.T) {
 			upload, err := first.OperatePrismProject(ctx, key, project.Handle, PrismProjectOperation{Name: "upload", FileName: "figure.png", ContentType: "image/png", Data: []byte("synthetic resource")})
 			require.NoError(t, err)
 			require.Contains(t, string(upload.Body), "prism_file_")
-			body := `{"model":"gpt-6-astra","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"review the project"},{"type":"input_file","filename":"main.tex","project_path":"main.tex"}]}]}`
+			body := `{"model":"gpt-5.6-sol","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"review the project"},{"type":"input_file","filename":"main.tex","project_path":"main.tex"}]}]}`
 			c, recorder := prismGatewayTestContext("/v1/responses", body)
 			c.Set("api_key", key)
 			c.Request = c.Request.WithContext(WithPrismProject(ctx, project))

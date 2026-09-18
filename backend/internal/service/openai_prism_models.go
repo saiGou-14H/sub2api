@@ -6,10 +6,10 @@ import (
 	"unicode"
 )
 
-// OpenAIPrismDefaultModel is the model observed on Prism's project chat API.
-// Additional models require an explicit account mapping; this is not a claim
-// that the Codex or ChatGPT Web model catalogs are available through Prism.
-const OpenAIPrismDefaultModel = "gpt-6-astra"
+// OpenAIPrismDefaultModel follows Prism's project-chat frontend default observed
+// on 2026-09-18. The older HAR's gpt-6-astra is no longer accepted upstream.
+// Additional models still require explicit account mappings.
+const OpenAIPrismDefaultModel = "gpt-5.6-sol"
 
 func NormalizeOpenAIPrismModel(model string) (string, bool) {
 	model = strings.TrimSpace(model)

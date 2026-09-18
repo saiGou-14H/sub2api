@@ -47,13 +47,13 @@ func TestOpenAIGatewayPrismRoutingProtocols(t *testing.T) {
 		body string
 		call func(*OpenAIGatewayService, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error)
 	}{
-		{"responses", "/v1/responses", `{"model":"gpt-6-astra","stream":true,"input":"hello"}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
+		{"responses", "/v1/responses", `{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
 			return s.Forward(c.Request.Context(), c, a, b)
 		}},
-		{"chat", "/v1/chat/completions", `{"model":"gpt-6-astra","stream":true,"messages":[{"role":"user","content":"hello"}]}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
+		{"chat", "/v1/chat/completions", `{"model":"gpt-5.6-sol","stream":true,"messages":[{"role":"user","content":"hello"}]}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
 			return s.ForwardAsChatCompletions(c.Request.Context(), c, a, b, "", "")
 		}},
-		{"anthropic", "/v1/messages", `{"model":"gpt-6-astra","stream":true,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
+		{"anthropic", "/v1/messages", `{"model":"gpt-5.6-sol","stream":true,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`, func(s *OpenAIGatewayService, c *gin.Context, a *Account, b []byte) (*OpenAIForwardResult, error) {
 			return s.ForwardAsAnthropic(c.Request.Context(), c, a, b, "", "")
 		}},
 	}
@@ -293,7 +293,7 @@ func TestOpenAIGatewayPrismErrors(t *testing.T) {
 			u := &prismGatewayUpstream{errorPath: OpenAIPrismStartPath, errorStatus: status}
 			s := prismIntegrationService(u)
 			a := prismGatewayTestAccount()
-			body := `{"model":"gpt-6-astra","input":"hi"}`
+			body := `{"model":"gpt-5.6-sol","input":"hi"}`
 			c, w := prismGatewayTestContext("/v1/responses", body)
 			_, err := s.Forward(c.Request.Context(), c, a, []byte(body))
 			require.Error(t, err)
@@ -330,7 +330,7 @@ func TestOpenAIGatewayPrismPollFailureDoesNotRestart(t *testing.T) {
 				}
 				s := prismIntegrationService(u)
 				a := prismGatewayTestAccount()
-				body := []byte(`{"model":"gpt-6-astra","input":"hi","messages":[{"role":"user","content":"hi"}],"max_tokens":128}`)
+				body := []byte(`{"model":"gpt-5.6-sol","input":"hi","messages":[{"role":"user","content":"hi"}],"max_tokens":128}`)
 				c, w := prismGatewayTestContext("/v1/"+protocol, string(body))
 				var err error
 				switch protocol {

@@ -543,7 +543,7 @@ func TestAccountTestService_OpenAIPrismDefaultModel(t *testing.T) {
 	account := prismAccount(nil)
 	account.Credentials = map[string]any{"access_token": "access-secret", "prism_session_token": "session-secret"}
 	require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "", "", ""))
-	require.Contains(t, recorder.Body.String(), `"model":"gpt-6-astra"`)
+	require.Contains(t, recorder.Body.String(), `"model":"gpt-5.6-sol"`)
 	for _, req := range upstream.requests {
 		if req.URL.Path != OpenAIPrismStartPath {
 			continue

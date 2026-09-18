@@ -802,11 +802,15 @@ func (t *OpenAIPrismTransport) Do(ctx context.Context, account *Account, token s
 	}
 	conversationID := prismConversationID(options.ConversationID)
 	t.initializeConversation(ctx, account, token, userID, projectID, conversationID)
-	model, effort := "", ""
+	model, effort := OpenAIPrismDefaultModel, "medium"
 	if options.Request != nil {
-		model = options.Request.Model
+		if value := strings.TrimSpace(options.Request.Model); value != "" {
+			model = value
+		}
 		if options.Request.Reasoning != nil {
-			effort = options.Request.Reasoning.Effort
+			if value := strings.TrimSpace(options.Request.Reasoning.Effort); value != "" {
+				effort = value
+			}
 		}
 	}
 	metadata := map[string]any{"projectId": projectID, "userId": userID, "model": model, "reasoning_effort": effort, "frontend_origin": t.baseURL(), "sandbox_url": strings.TrimRight(sandboxURL, "/") + "/", "sandbox_token": sandboxToken}
