@@ -2,7 +2,7 @@
 
 Prism 是 OpenAI 账号的一种独立上游传输方式。网关将 Responses、Chat Completions 和 Anthropic Messages 请求接入 Prism 异步项目聊天，同时提供项目、文件、同步状态与渲染相关的工作区 API。
 
-本文描述当前代码行为，验证结果见文末。实现依据包括 HAR 请求结构、官方 Yjs 合成样本和离线模拟；未使用真实 HAR 凭据执行在线验证。本文只包含字段名、端点结构和合成示例。
+本文描述当前代码行为，验证结果见文末。实现依据包括 HAR 请求结构、当前官方前端、官方 Yjs 合成样本、离线模拟及用户授权账号的真实 API 验证。未使用 HAR 中的凭据执行请求，本文不包含凭据或私有状态。
 
 能力范围以 HAR 中已经观察到的请求、响应及协作文档结构为依据。接入这些链路不代表已支持 Prism 未公开的全部工具、任意客户端工具注册或完整浏览器编辑器。
 
@@ -20,11 +20,11 @@ Prism 是 OpenAI 账号的一种独立上游传输方式。网关将 Responses�
 
 | 界面字段 | 保存位置 | 含义 |
 | --- | --- | --- |
-| Prism 访问令牌 | `credentials.access_token` | 以 `prism_oai_access_token` Cookie 发送 |
-| Prism 会话令牌 | `credentials.prism_session_token` | 以同名 Cookie 发送；界面可选 |
+| OpenAI 访问令牌（access_token） | `credentials.access_token` | 与 Web 共用的普通 OpenAI access token，以 `prism_oai_access_token` Cookie 引导自动认证 |
+| 高级：手动覆盖 Prism 会话 | `credentials.prism_session_token` | 默认折叠、通常留空；仅用于兼容手动覆盖 |
 | 文本提示工具桥接 | `extra.prism_prompt_tool_bridge` | 严格布尔值，默认 `false`，仅 Prism 生效 |
 
-访问令牌为创建必填项；真实上游是否同时要求会话令牌尚待在线确认。后端兼容 `credentials.prism_oai_access_token` 和 `credentials.prism_cookie`，正常界面使用两个独立凭据输入。
+访问令牌为创建必填项。已在指定测试账号验证：仅有普通 OpenAI `access_token`、没有手动 Prism 会话令牌，也能由后端请求 `/auth/session` 自动获取 `prism_session_token` 并完成真实对话，无需抓 Cookie。编辑留空会保留已有令牌。后端仍兼容 `credentials.prism_oai_access_token` 和 `credentials.prism_cookie`。
 
 编辑框不回填已有凭据，留空由后端保留原值；旧后端返回的敏感字段不会被编辑界面再次提交。上游 `Set-Cookie` 更新进入 Cookie jar，并随私有续链/项目状态保存以便恢复，不写回账号配置，也不传给客户端。
 
@@ -34,10 +34,10 @@ Prism 不使用 Codex 透传、Responses WebSocket、Codex CLI 限制、指纹�
 
 ## 模型和客户端工具
 
-默认模型为 `gpt-6-astra`。未配置映射时，Prism 只声明并接受这个模型，不自动引入 Codex/Web 别名。`credentials.model_mapping` 的公开名称构成账号模型白名单，例如：
+默认模型为 `gpt-5.6-sol`，未指定 reasoning effort 时使用 `medium`，与 2026-09-18 Prism 当前前端默认值一致。旧 HAR 中的 `gpt-6-astra` 和客户端 `gpt-5.5` 在本次指定账号实测均被上游拒绝；不会自动把它们伪装成受支持模型。未配置映射时，Prism 只声明并接受默认模型，不自动引入 Codex/Web 别名。`credentials.model_mapping` 的公开名称构成账号模型白名单，例如：
 
 ```json
-{"model_mapping":{"prism-default":"gpt-6-astra"}}
+{"model_mapping":{"prism-default":"gpt-5.6-sol"}}
 ```
 
 此时客户端请求 `prism-default`；要同时接受原名称，须另加该名称的映射。映射键和值必须是具体模型名，不含空白、通配符或路径分隔符。映射不证明上游实际开放了目标模型。项目创建也检查分组模型白名单。
@@ -60,7 +60,7 @@ Prism 的 endpoint capability 声明包含 Responses 与 Chat Completions；网�
 
 以下 17 个端点以 sub2api API key 认证，仅接受 OpenAI 分组，复用计费资格及用户并发检查。项目账号选择、账号并发、所有权和项目锁由服务层验证。依赖缺失时返回 503，不跳过计费检查。
 
-`POST /v1/prism/projects` 接受 JSON `{ "title": "Paper", "model": "gpt-6-astra" }`；字段可省略，服务端补默认标题与模型。成功返回 HTTP 201，公开字段为 `id`、`object`、`title`、`model`、`created_at`、`expires_at`。`id` 是 sub2api 生成的 `prism_proj_…` 句柄，不接受上游原始 project UUID 代替。表中的 `{project_id}` 均指该公开句柄。
+`POST /v1/prism/projects` 接受 JSON `{ "title": "Paper", "model": "gpt-5.6-sol" }`；字段可省略，服务端补默认标题与模型。成功返回 HTTP 201，公开字段为 `id`、`object`、`title`、`model`、`created_at`、`expires_at`。`id` 是 sub2api 生成的 `prism_proj_…` 句柄，不接受上游原始 project UUID 代替。表中的 `{project_id}` 均指该公开句柄。
 
 | 方法 | 端点 | 参数与用途 |
 | --- | --- | --- |
@@ -136,11 +136,15 @@ Content-Type: application/json
 
 项目初始化包含 `/auth/session`、创建/验证项目、动态创建 sandbox、获取资源授权并传给 sandbox、通过 `/api/y` 获取文档授权、将授权交给 sandbox，以及等待文件同步。授权 URL 须符合 Prism 基础地址的同源规则；sandbox URL 路径限定为 `/s/sandboxes/proxy`。
 
-聊天通过 `POST /api/llm/response_with_tools_start` 提交任务，再通过 `POST /api/llm/response_with_tools_status` 轮询。默认间隔 500 毫秒、最多 240 次；实际耗时包含 HTTP 往返并受上下文超时约束。`turn_state` 和 `codex_listen_snapshot` 等私有状态保留不透明结构，不能据字段名称认定已实现浏览器完整实时协作。
+聊天通过 `POST /api/llm/response_with_tools_start` 提交任务。start 可以同步返回 completed/success 或 completed/error，这两种情况直接处理结果，不再轮询。只有非终态且带有效、非空对象 `turn_state` 时才调用 `POST /api/llm/response_with_tools_status`。默认间隔 500 毫秒、最多 240 次；实际耗时包含 HTTP 往返并受上下文超时约束。`turn_state` 和 `codex_listen_snapshot` 等私有状态保留不透明结构；pending 的缺失/null 状态不会覆盖上一轮有效对象，非法非空状态会结束请求。上游错误中的 debug、认证头和 sandbox URL 不公开。
+
+Responses 的简写消息（省略 `type` 或使用字符串 `content`）在发送前转换为 Prism 所需的 message/text 结构，避免用户正文被上游忽略。对于客户端提供的完整纯文本历史，先前 user/assistant 消息以 JSON 引用方式携带在本轮用户提示中，system/developer 仍保留原有角色；支持标准输出中的空 annotations/logprobs。未知输入条目、未知附加字段、非空注释和非文本内容保持原始 JSON，这些组合的上下文连续性未在线验证。
+
+2026-09-18 指定账号实测发现：仅带 `previous_response_id` 和本轮增量消息时，虽然项目、会话及 sandbox 状态正确复用，上游 `codex_session_id` 仍发生重建，模型未保留先前数字。当前不保证该模式的语义连续性；文本对话客户端应随每轮请求带完整历史。HAR 中旧版本的稳定续聊不能替代当前版本的在线结果。
 
 拿到 `request_id` 后的轮询、校验或状态保存失败不会触发换账号重新启动，以免远端工具重复执行。Prism 完成结果的本地转换不启用原生 HTTP Responses 首输出超时或首输出暂存；转换产生的账号重试信号也被转为当前请求的终结错误，不会重放已完成的任务。显式项目先完成租约检查的项目状态保存，再发布续链游标。当前不持久化未完成任务来恢复轮询；重启恢复指已保存项目/续链状态，不包括中途任务恢复。
 
-`stream=true` 的最终文本仍取自轮询终态，随后转换为下游内容事件，并非上游逐 token 转发。等待期间默认发送 SSE 心跳注释 `: prism task pending`，由轮询进度驱动、约 15 秒节流；它与项目 `/heartbeat` API 用途不同。
+`stream=true` 的最终文本取自 start 或轮询的成功终态，随后转换为下游内容事件，并非上游逐 token 转发。等待期间默认发送 SSE 心跳注释 `: prism task pending`，由轮询进度驱动、约 15 秒节流；它与项目 `/heartbeat` API 用途不同。
 
 要观察远端原生工具进度，流式请求额外携带 `X-Prism-Progress: true`。状态变化时发送独立事件：
 
@@ -196,20 +200,20 @@ SSE 已提交后发生错误时，通过相应流式错误事件结束，客户�
 - [gateway_cache_prism.go](../backend/internal/repository/gateway_cache_prism.go) 和 [gateway_cache_prism_session.go](../backend/internal/repository/gateway_cache_prism_session.go)：Redis 存储。
 - 前端 Create/Edit/BulkEdit 账号弹窗：协议、凭据与独立桥接设置。
 
-本版记录（2026-09-18）：离线验证与真实账号验证分别记录如下。
+本次修复验证（2026-09-18，独立分支 `fix/prism-turn-state`）：
 
 | 检查 | 状态 |
 | --- | --- |
-| 原生/桥接三协议、进度、项目和续链离线回归 | 定向回归与后端全量单元测试通过 |
-| handler/routes、上传边界、认证/计费/并发回归 | 定向与全量包测试通过 |
-| Redis TTL、跨实例恢复、租约与故障关闭回归 | 定向回归及 repository 全量包测试通过 |
-| 后端全量单元测试 | `go test -p 1 -tags=unit -ldflags=-w ./... -count=1` 通过 |
-| 服务端构建 | `CGO_ENABLED=0 go build -p 1 -trimpath -ldflags="-s -w -X main.Version=prism-local" ./cmd/server` 通过，生成本地 Windows 可执行文件 |
-| 前端相关测试、类型检查、ESLint、生产构建 | 相关 184 项测试、vue-tsc、变更文件 ESLint、Vite 构建通过；此后未修改前端 |
-| 格式、差异与敏感数据检查 | 82 个 Go 变更文件格式检查、git diff --check 通过；HAR 敏感内容扫描无命中 |
-| 上传后 Y 文档文件树挂接、服务端确认与 sandbox 同步 | 离线回归通过；真实可读性/编译未验证 |
-| Yjs 文本回写、基线冲突、跨实例恢复和失败状态 | 官方 Yjs 合成样本与 Go 全量回归通过；六个网关场景验证原生/桥接下的成功、缺失读回确认及 sandbox 未同步，均无模型重放 |
-| golangci-lint | 未执行，当前环境未安装 |
-| 真实 Prism 账号在线端到端验证 | 未执行 |
+| service、handler、routes 定向回归 | `-run 'Prism|SSEToJSON|NonStreaming'` 通过；覆盖同步终态、opaque turn_state、失败不重放、默认模型、简写消息、纯文本历史及转换后的 JSON Content-Type |
+| 标准 Responses 输出回灌 | 覆盖空 annotations/logprobs；非空注释、未知字段、文件输入保留原结构 |
+| Create/Edit 账号、i18n 完整性测试 | 119/119 通过；vue-tsc、变更文件 ESLint 和生产构建通过 |
+| Linux 嵌入式后端与 Docker 镜像 | 构建通过，实际运行版本经容器二进制核对 |
+| 9999 自动认证界面 | 实际 HTTP 静态资源与构建字节一致，包含自动获取 Prism 会话说明 |
+| 真实账号普通 access token 自动认证 | 通过；没有预填 Prism 会话令牌，也自动取得会话 Cookie |
+| 公网 `/v1/responses` 两轮纯文本对话 | 通过；请求 `gpt-5.6-sol`，首轮 SSE 返回 `PRISM_OK`，次轮携带完整历史返回 `731`，均为 completed |
+| `previous_response_id` + 增量消息语义连续性 | 未通过；上游 Codex session 重建，当前必须携带完整文本历史 |
+| 上游模型选择 | 指定账号拒绝 `gpt-5.5` 和旧 HAR 的 `gpt-6-astra`；按用户选择请求 `gpt-5.6-sol`，未设置冒名映射 |
+| usage | 真实响应未提供统计，保留 null，不估算或伪造 token 数 |
+| 本次后端全量单测、golangci-lint | 未重跑全量单测；golangci-lint 未执行。上述结果为本次定向回归 |
 
-真实模型权限、登录有效期、服务端工具集和输出稳定性、桥接遵循率、usage 及上传/同步/渲染完整效果仍需通过获授权的测试账号确认。当前不宣称支持未知工具注册、完整浏览器编辑器或所有 Responses 图像/文件输入形式。
+初始主版本曾完成后端全量单测、repository 回归和 184 项前端定向测试；这些历史结果不代替本次变更验证。上传后 Y 文档挂接、生成文件回写、冲突和故障处理仍以离线回归为依据，本次未在线验收上传/编译/渲染完整链路。客户端工具桥接遵循率、长期登录有效期及模型输出稳定性也未作在线承诺；当前不宣称支持未知工具注册、完整浏览器编辑器或所有 Responses 图像/文件输入形式。
