@@ -44,6 +44,8 @@ Prism 不使用 Codex 透传、Responses WebSocket、Codex CLI 限制、指纹�
 
 Prism 的 endpoint capability 声明包含 Responses 与 Chat Completions；网关另提供 Anthropic Messages 适配。这不代表 embeddings、实时语音、搜索专用端点或 compact 已获支持。
 
+2026-09-18 在桥接关闭状态下直接测试 Prism 原生 start/status：两种标准 OpenAI 自定义工具声明均未返回客户端调用，`function_call_output` 测试值未进入当前提示；内置 exec 工具执行成功。原生进度中的 function_call 不等于交给客户端执行的调用。详细请求、5 项结果和 HAR 证据见 [原生工具验证记录](PRISM_NATIVE_TOOLS_VALIDATION_20260918.md)。
+
 | 工具路径 | 执行位置 | 当前行为 |
 | --- | --- | --- |
 | Prism 内置工具 | Prism 远端 sandbox | 保留原生协议，由上游选择并执行；桥接不负责注册或执行这些工具 |
