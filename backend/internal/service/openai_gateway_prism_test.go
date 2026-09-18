@@ -77,6 +77,21 @@ func TestOpenAIGatewayPrismRoutingProtocols(t *testing.T) {
 	}
 }
 
+func TestOpenAIGatewayPrismNonStreamingJSONContentType(t *testing.T) {
+	service := prismGatewayTestService(&prismTestUpstream{})
+	body := `{"model":"gpt-5.6-sol","stream":false,"input":"hello"}`
+	c, recorder := prismGatewayTestContext("/v1/responses", body)
+	result, err := service.Forward(c.Request.Context(), c, prismGatewayTestAccount(), []byte(body))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Stream)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+	require.NotContains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
+	require.True(t, json.Valid(recorder.Body.Bytes()))
+	require.Contains(t, recorder.Body.String(), "hello")
+}
+
 // This fake exercises the HAR wire contract through the public forwarders. It
 // generates distinct projects/conversations/responses and never reaches a host.
 type prismGatewayUpstream struct {
