@@ -605,14 +605,12 @@ type prismAuthSession struct {
 		} `json:"user"`
 	} `json:"policy"`
 }
-type prismStartResponse struct {
-	Status              string          `json:"status"`
-	RequestID           string          `json:"request_id"`
-	ConversationID      string          `json:"conversation_id"`
-	TurnState           json.RawMessage `json:"turn_state"`
-	CodexListenSnapshot json.RawMessage `json:"codex_listen_snapshot,omitempty"`
-}
+
+// Start and status return the same turn envelope, including synchronous results.
+type prismStartResponse = prismStatusResponse
+
 type prismStatusResponse struct {
+	ConversationID      string          `json:"conversation_id"`
 	Status              string          `json:"status"`
 	RequestID           string          `json:"request_id"`
 	CodexAsyncJobID     string          `json:"codex_async_job_id,omitempty"`
@@ -839,12 +837,15 @@ func (t *OpenAIPrismTransport) Do(ctx context.Context, account *Account, token s
 		}
 	}()
 	state := append(json.RawMessage(nil), started.TurnState...)
-	if len(state) == 0 {
-		state = json.RawMessage(`{}`)
-	}
 	snapshot := append(json.RawMessage(nil), started.CodexListenSnapshot...)
-	var payload json.RawMessage
-	for i := 0; i < t.options.PollLimit; i++ {
+	payload, err := prismTurnResult(started, OpenAIPrismStartPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) == 0 && !prismValidTurnState(state) {
+		return nil, errors.New("prism start response missing valid non-empty turn_state object")
+	}
+	for i := 0; len(payload) == 0 && i < t.options.PollLimit; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -858,11 +859,18 @@ func (t *OpenAIPrismTransport) Do(ctx context.Context, account *Account, token s
 		if err := json.Unmarshal(data, &status); err != nil {
 			return nil, err
 		}
-		if len(status.TurnState) > 0 {
-			state = append(state[:0], status.TurnState...)
-		}
 		if len(status.CodexListenSnapshot) > 0 {
 			snapshot = append(snapshot[:0], status.CodexListenSnapshot...)
+		}
+		payload, err = prismTurnResult(status, OpenAIPrismStatusPath)
+		if err != nil {
+			return nil, err
+		}
+		if next := bytes.TrimSpace(status.TurnState); len(payload) == 0 && len(next) > 0 && !bytes.Equal(next, []byte("null")) {
+			if !prismValidTurnState(next) {
+				return nil, errors.New("prism status response contains invalid turn_state object")
+			}
+			state = append(state[:0], next...)
 		}
 		if options.OnProgress != nil && status.CodexLiveProgress != nil {
 			secrets := prismSensitiveValues(account, token, sandboxToken)
@@ -875,26 +883,8 @@ func (t *OpenAIPrismTransport) Do(ctx context.Context, account *Account, token s
 		} else if options.OnProgress != nil && strings.EqualFold(status.Status, "pending") {
 			options.OnProgress(OpenAIPrismProgress{})
 		}
-		if status.Response != nil && len(status.Response.Payload) > 0 {
-			if prismStatusCompleted(status.Status) && strings.EqualFold(status.Response.Status, "success") {
-				candidate := bytes.TrimSpace(status.Response.Payload)
-				if len(candidate) > 1 && candidate[0] == '{' && candidate[len(candidate)-1] == '}' && json.Valid(candidate) {
-					var completed struct {
-						Output json.RawMessage `json:"output"`
-					}
-					_ = json.Unmarshal(candidate, &completed)
-					output := bytes.TrimSpace(completed.Output)
-					if len(output) < 2 || output[0] != '[' {
-						return nil, errors.New("prism completed response payload missing output array")
-					}
-					payload = append(json.RawMessage(nil), candidate...)
-					break
-				}
-				return nil, errors.New("prism completed response payload is not a JSON object")
-			}
-		}
-		if prismStatusFailed(status.Status) || (status.Response != nil && prismStatusFailed(status.Response.Status)) {
-			return nil, errors.New("prism turn failed")
+		if len(payload) > 0 {
+			break
 		}
 		select {
 		case <-ctx.Done():

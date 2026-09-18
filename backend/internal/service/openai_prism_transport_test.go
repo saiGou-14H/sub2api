@@ -188,7 +188,7 @@ func TestOpenAIPrismTransportContinuationRetainsSandboxAndOpaqueState(t *testing
 				require.Contains(t, string(poll.TurnState), "9007199254740993123")
 				return prismTestJSON(`{"status":"pending","turn_state":null,"response":{"status":"success","payload":{"id":"stale-pending","output":[]}}}`), nil
 			}
-			require.Equal(t, "null", string(poll.TurnState))
+			require.JSONEq(t, opaque, string(poll.TurnState))
 			return prismTestJSON(fmt.Sprintf(`{"status":"completed","response":{"status":"success","payload":{"id":"response-%d","output":[],"codexListenSnapshot":%s}}}`, starts, snapshot)), nil
 		}
 		return base.Do(req, "", 0, 1)
@@ -367,12 +367,12 @@ func TestOpenAIPrismTransportCancellationWhilePolling(t *testing.T) {
 	require.Equal(t, 1, polls)
 }
 
-func TestOpenAIPrismTransportPollFailureRedactsSandboxAfterNullState(t *testing.T) {
+func TestOpenAIPrismTransportPollFailureRedactsSandbox(t *testing.T) {
 	base := &prismTestUpstream{}
 	transport := NewOpenAIPrismTransportFromUpstream(prismUpstreamFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case OpenAIPrismStartPath:
-			return prismTestJSON(`{"status":"started","request_id":"request-test","turn_state":null}`), nil
+			return prismTestJSON(`{"status":"started","request_id":"request-test","turn_state":{"opaque":"synthetic-state"}}`), nil
 		case OpenAIPrismStatusPath:
 			resp := prismTestJSON(`{"error":{"message":"sandbox-secret expired"}}`)
 			resp.StatusCode = http.StatusUnauthorized
