@@ -740,7 +740,7 @@ func prismInput(req *apicompat.ResponsesRequest) json.RawMessage {
 			items = append(items, message("user", text))
 		}
 	}
-	b, _ := json.Marshal(items)
+	b, _ := json.Marshal(prismFoldTextHistory(items))
 	return b
 }
 
