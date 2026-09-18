@@ -1738,13 +1738,16 @@
           <div>
             <label class="input-label" for="edit-prism-access-token">{{ t('admin.accounts.openai.prismAccessToken') }}</label>
             <input id="edit-prism-access-token" v-model="prismAccessToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="edit-prism-access-token" />
-            <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+            <p class="input-hint">{{ t('admin.accounts.openai.prismAccessTokenHint') }} {{ t('admin.accounts.leaveEmptyToKeep') }}</p>
           </div>
-          <div>
-            <label class="input-label" for="edit-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
-            <input id="edit-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="edit-prism-session-token" />
-            <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
-          </div>
+          <details data-testid="edit-prism-session-override">
+            <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-400">{{ t('admin.accounts.openai.prismSessionOverride') }}</summary>
+            <div class="mt-3">
+              <label class="input-label" for="edit-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
+              <input id="edit-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="edit-prism-session-token" />
+              <p class="input-hint">{{ t('admin.accounts.openai.prismSessionTokenHint') }} {{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+            </div>
+          </details>
           <div class="flex items-start gap-3 pt-1">
             <input
               id="edit-prism-prompt-tool-bridge"

@@ -555,15 +555,23 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(wrapper.find('[data-testid="create-openai-ws-mode"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="create-openai-flatten-namespaces-toggle"]').exists()).toBe(false)
     expect((wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').element as HTMLInputElement).checked).toBe(false)
-    await wrapper.get('[data-testid="create-prism-access-token"]').setValue(' prism-access ')
-    await wrapper.get('[data-testid="create-prism-session-token"]').setValue(sessionToken)
+    const sessionOverride = wrapper.get('[data-testid="create-prism-session-override"]')
+    expect((sessionOverride.element as HTMLDetailsElement).open).toBe(false)
+    expect(sessionOverride.get('summary').text()).toBe('admin.accounts.openai.prismSessionOverride')
+    expect(wrapper.get('label[for="create-prism-access-token"]').text()).toBe('admin.accounts.openai.prismAccessToken')
+    expect(wrapper.text()).toContain('admin.accounts.openai.prismAccessTokenHint')
+    await wrapper.get('[data-testid="create-prism-access-token"]').setValue(' openai-access ')
+    if (sessionToken) {
+      (sessionOverride.element as HTMLDetailsElement).open = true
+      await sessionOverride.get('[data-testid="create-prism-session-token"]').setValue(sessionToken)
+    }
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
 
     expect(createAccountMock).toHaveBeenCalledTimes(1)
     const payload = createAccountMock.mock.calls[0]?.[0]
     expect(payload).toMatchObject({ platform: 'openai', type: 'setup-token', extra: { openai_transport: 'prism', prism_prompt_tool_bridge: false } })
-    expect(payload.credentials.access_token).toBe('prism-access')
+    expect(payload.credentials.access_token).toBe('openai-access')
     expect(payload.credentials).not.toHaveProperty('refresh_token')
     expect(payload.credentials).not.toHaveProperty('compact_model_mapping')
     if (sessionToken) expect(payload.credentials.prism_session_token).toBe('prism-session')
@@ -573,7 +581,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.unmount()
   })
 
-  it('requires a Prism access token before creating an account', async () => {
+  it('requires an OpenAI access token before creating a Prism account', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')

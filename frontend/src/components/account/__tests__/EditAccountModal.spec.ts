@@ -1582,6 +1582,12 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
 
+    const sessionOverride = wrapper.get('[data-testid="edit-prism-session-override"]')
+    expect((sessionOverride.element as HTMLDetailsElement).open).toBe(false)
+    expect(sessionOverride.get('summary').text()).toBe('admin.accounts.openai.prismSessionOverride')
+    expect(wrapper.get('label[for="edit-prism-access-token"]').text()).toBe('admin.accounts.openai.prismAccessToken')
+    expect(wrapper.text()).toContain('admin.accounts.openai.prismAccessTokenHint')
+    expect(wrapper.text()).toContain('admin.accounts.leaveEmptyToKeep')
     expect((wrapper.get('[data-testid="edit-prism-access-token"]').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('[data-testid="edit-prism-session-token"]').element as HTMLInputElement).value).toBe('')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -1595,6 +1601,8 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
 
     const replacement = mountModal(account)
+    const replacementOverride = replacement.get('[data-testid="edit-prism-session-override"]')
+    ;(replacementOverride.element as HTMLDetailsElement).open = true
     await replacement.get('[data-testid="edit-prism-access-token"]').setValue(' new-access ')
     await replacement.get('[data-testid="edit-prism-session-token"]').setValue(' new-session ')
     await replacement.get('form#edit-account-form').trigger('submit.prevent')

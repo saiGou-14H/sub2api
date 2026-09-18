@@ -2998,11 +2998,14 @@
             <input id="create-prism-access-token" v-model="prismAccessToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="create-prism-access-token" />
             <p class="input-hint">{{ t('admin.accounts.openai.prismAccessTokenHint') }}</p>
           </div>
-          <div>
-            <label class="input-label" for="create-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
-            <input id="create-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="create-prism-session-token" />
-            <p class="input-hint">{{ t('admin.accounts.openai.prismSessionTokenHint') }}</p>
-          </div>
+          <details data-testid="create-prism-session-override">
+            <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-400">{{ t('admin.accounts.openai.prismSessionOverride') }}</summary>
+            <div class="mt-3">
+              <label class="input-label" for="create-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
+              <input id="create-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="create-prism-session-token" />
+              <p class="input-hint">{{ t('admin.accounts.openai.prismSessionTokenHint') }}</p>
+            </div>
+          </details>
           <div class="flex items-start gap-3 pt-1">
             <input
               id="create-prism-prompt-tool-bridge"
