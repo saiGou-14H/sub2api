@@ -140,23 +140,24 @@ func normalizeGrokAccountTestMode(mode string) string {
 
 // AccountTestService handles account testing operations
 type AccountTestService struct {
-	accountRepo               AccountRepository
-	geminiTokenProvider       *GeminiTokenProvider
-	claudeTokenProvider       *ClaudeTokenProvider
-	grokTokenProvider         *GrokTokenProvider
-	antigravityGatewayService *AntigravityGatewayService
-	httpUpstream              HTTPUpstream
-	cfg                       *config.Config
-	settingService            *SettingService
-	tlsFPProfileService       *TLSFingerprintProfileService
-	modelMetadataRegistryMu   sync.Mutex
-	modelMetadataRegistry     map[string]modelsDevProvider
-	modelMetadataRegistryAt   time.Time
-	pluginManager             *PluginManager
-	openaiGatewayService      *OpenAIGatewayService
-	agentIdentityTaskMu       sync.Mutex
-	agentIdentityWS           agentIdentityWSConnectionInvalidator
-	openAIWebTransportFactory func() *OpenAIWebTransport
+	accountRepo                 AccountRepository
+	geminiTokenProvider         *GeminiTokenProvider
+	claudeTokenProvider         *ClaudeTokenProvider
+	grokTokenProvider           *GrokTokenProvider
+	antigravityGatewayService   *AntigravityGatewayService
+	httpUpstream                HTTPUpstream
+	cfg                         *config.Config
+	settingService              *SettingService
+	tlsFPProfileService         *TLSFingerprintProfileService
+	modelMetadataRegistryMu     sync.Mutex
+	modelMetadataRegistry       map[string]modelsDevProvider
+	modelMetadataRegistryAt     time.Time
+	pluginManager               *PluginManager
+	openaiGatewayService        *OpenAIGatewayService
+	agentIdentityTaskMu         sync.Mutex
+	agentIdentityWS             agentIdentityWSConnectionInvalidator
+	openAIWebTransportFactory   func() *OpenAIWebTransport
+	openAIPrismTransportFactory func() *OpenAIPrismTransport
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
@@ -730,6 +731,17 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 		return s.testOpenAIWebAccountConnection(c, account, credentialAccount, modelID, prompt)
 	}
+	if account != nil && account.IsOpenAIPrismTransport() {
+		credentialAccount := account
+		if account.IsCredentialShadow() {
+			resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+			if err != nil {
+				return s.sendErrorAndEnd(c, err.Error())
+			}
+			credentialAccount = resolved
+		}
+		return s.testOpenAIPrismAccountConnection(c, account, credentialAccount, modelID, prompt)
+	}
 
 	// Do not silently downgrade an explicit Web test for a Codex/API-key
 	// account; that would make the admin result misleading.
@@ -1007,6 +1019,101 @@ func (s *AccountTestService) newOpenAIWebTransport() *OpenAIWebTransport {
 		httpUpstream:  s.httpUpstream,
 		pluginManager: s.pluginManager,
 	}, OpenAIWebTransportOptions{})
+}
+
+func (s *AccountTestService) testOpenAIPrismAccountConnection(c *gin.Context, account, credentialAccount *Account, modelID, prompt string) error {
+	if account == nil || credentialAccount == nil {
+		return s.sendErrorAndEnd(c, "Failed to resolve account credentials")
+	}
+	model := strings.TrimSpace(modelID)
+	if model == "" {
+		model = OpenAIPrismDefaultModel
+	}
+	if normalized, ok := NormalizeOpenAIPrismModel(model); ok {
+		model = normalized
+	} else {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("model %q is not supported by Prism transport", model))
+	}
+	if !account.IsModelSupported(model) {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("model %q is not enabled for this Prism account", model))
+	}
+	upstreamModel := account.GetMappedModel(model)
+	if normalized, ok := NormalizeOpenAIPrismModel(upstreamModel); ok {
+		upstreamModel = normalized
+	} else {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("mapped model %q is not supported by Prism transport", upstreamModel))
+	}
+	token := prismAccessToken(credentialAccount)
+	if token == "" && strings.TrimSpace(credentialAccount.GetCredential("prism_session_token")) == "" && strings.TrimSpace(credentialAccount.GetCredential("prism_cookie")) == "" {
+		return s.sendErrorAndEnd(c, "No Prism access token or session cookie available")
+	}
+	testPrompt := strings.TrimSpace(prompt)
+	if testPrompt == "" {
+		testPrompt = "hi"
+	}
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: model})
+	transport := s.newOpenAIPrismTransport()
+	if transport == nil {
+		return s.sendErrorAndEnd(c, "Prism transport is not configured")
+	}
+	req := &apicompat.ResponsesRequest{Model: upstreamModel, Stream: true, Input: json.RawMessage(prismMustJSON([]map[string]any{{"type": "message", "role": "user", "content": []map[string]string{{"type": "input_text", "text": testPrompt}}}}))}
+	// A credential shadow keeps its own model policy, proxy, and concurrency.
+	// Only authentication comes from the resolved credential account.
+	transportAccount := *account
+	transportAccount.Credentials = map[string]any{
+		"prism_session_token": credentialAccount.GetCredential("prism_session_token"),
+		"prism_cookie":        credentialAccount.GetCredential("prism_cookie"),
+	}
+	resp, err := transport.Do(c.Request.Context(), &transportAccount, token, OpenAIPrismConversationOptions{Request: req})
+	if err != nil {
+		var upstreamErr *OpenAIPrismHTTPError
+		if errors.As(err, &upstreamErr) && upstreamErr != nil {
+			switch upstreamErr.StatusCode {
+			case http.StatusUnauthorized:
+				if s.accountRepo != nil {
+					_ = s.accountRepo.SetError(c.Request.Context(), account.ID, "Authentication failed (401) via Prism transport")
+				}
+			case http.StatusTooManyRequests:
+				s.reconcileOpenAI429State(c.Request.Context(), account, upstreamErr.Headers, nil)
+			}
+		}
+		return s.sendErrorAndEnd(c, "Prism request failed: "+redactPrismAccountTestError(err.Error(), credentialAccount))
+	}
+	if resp == nil || resp.Body == nil {
+		return s.sendErrorAndEnd(c, "Prism returned no response body")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return s.processOpenAIStream(c, resp.Body)
+}
+
+func redactPrismAccountTestError(message string, credentialAccount *Account) string {
+	for _, key := range []string{"access_token", "prism_oai_access_token", "prism_session_token", "prism_cookie"} {
+		if value := strings.TrimSpace(credentialAccount.GetCredential(key)); value != "" {
+			message = strings.ReplaceAll(message, value, "[redacted]")
+		}
+	}
+	// An upstream may echo one cookie value instead of the complete Cookie header.
+	for _, part := range strings.Split(credentialAccount.GetCredential("prism_cookie"), ";") {
+		if _, value, ok := strings.Cut(part, "="); ok && strings.TrimSpace(value) != "" {
+			message = strings.ReplaceAll(message, strings.TrimSpace(value), "[redacted]")
+		}
+	}
+	return sanitizeUpstreamErrorMessage(message)
+}
+
+func (s *AccountTestService) newOpenAIPrismTransport() *OpenAIPrismTransport {
+	if s != nil && s.openAIPrismTransportFactory != nil {
+		return s.openAIPrismTransportFactory()
+	}
+	if s == nil {
+		return nil
+	}
+	return NewOpenAIPrismTransport(&OpenAIGatewayService{accountRepo: s.accountRepo, httpUpstream: s.httpUpstream, pluginManager: s.pluginManager}, OpenAIPrismTransportOptions{})
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
@@ -2381,6 +2488,13 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 		}
 		setAccountModelRateLimitSnapshot(account, openAIWebTransportRateLimitKey, *resetAt, reason, now)
 		_ = setModelRateLimitSafely(s.accountRepo, ctx, account.ID, openAIWebTransportRateLimitKey, *resetAt, reason)
+		return
+	}
+	if account.IsOpenAIPrismTransport() {
+		now := time.Now()
+		resetAt := openAIPrismRateLimitResetTime(headers, now)
+		setAccountModelRateLimitSnapshot(account, openAIPrismTransportRateLimitKey, resetAt, "prism_rate_limited", now)
+		_ = setModelRateLimitSafely(s.accountRepo, ctx, account.ID, openAIPrismTransportRateLimitKey, resetAt, "prism_rate_limited")
 		return
 	}
 

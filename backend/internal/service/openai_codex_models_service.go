@@ -1623,6 +1623,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
+	if account.IsOpenAIPrismTransport() {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_MODELS_TRANSPORT_UNSUPPORTED", "Prism accounts do not expose a Codex models manifest")
+	}
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "resolve credential account: %v", err)

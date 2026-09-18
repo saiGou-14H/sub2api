@@ -1713,7 +1713,7 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth-like upstream transport (web or Codex) -->
+      <!-- OpenAI OAuth-like upstream transport -->
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -1732,6 +1732,33 @@
               :options="openaiTransportOptions"
               data-testid="edit-openai-transport-select"
             />
+          </div>
+        </div>
+        <div v-if="openaiTransportMode === 'prism'" class="mt-4 space-y-3">
+          <div>
+            <label class="input-label" for="edit-prism-access-token">{{ t('admin.accounts.openai.prismAccessToken') }}</label>
+            <input id="edit-prism-access-token" v-model="prismAccessToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="edit-prism-access-token" />
+            <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+          </div>
+          <div>
+            <label class="input-label" for="edit-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
+            <input id="edit-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="edit-prism-session-token" />
+            <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+          </div>
+          <div class="flex items-start gap-3 pt-1">
+            <input
+              id="edit-prism-prompt-tool-bridge"
+              v-model="prismPromptToolBridge"
+              type="checkbox"
+              class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              data-testid="edit-prism-prompt-tool-bridge"
+            />
+            <div>
+              <label class="input-label mb-0" for="edit-prism-prompt-tool-bridge">
+                {{ t('admin.accounts.openai.prismPromptToolBridge') }}
+              </label>
+              <p class="input-hint">{{ t('admin.accounts.openai.prismPromptToolBridgeDesc') }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -3068,6 +3095,7 @@ import {
   type OpenAIWSMode,
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
+import { normalizeOpenAITransport, openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
@@ -3444,13 +3472,13 @@ const customBaseUrl = ref('')
 
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
-type OpenAITransportMode = 'web' | 'codex'
 // Keep Codex as the implicit legacy mode when older accounts have no marker.
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
-const openaiTransportOptions = computed<Array<{ value: OpenAITransportMode; label: string }>>(() => [
-  { value: 'codex', label: t('admin.accounts.openai.transportCodex') },
-  { value: 'web', label: t('admin.accounts.openai.transportWeb') }
-])
+const openaiTransportOptions = computed(() => openAITransportOptions(t))
+// Write-only secrets: existing values are deliberately never loaded into the form.
+const prismAccessToken = ref('')
+const prismSessionToken = ref('')
+const prismPromptToolBridge = ref(false)
 const isOpenAIOAuthLikeAccount = computed(() =>
   props.account?.platform === 'openai' &&
   (props.account?.type === 'oauth' || props.account?.type === 'setup-token')
@@ -3948,6 +3976,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
   openaiTransportMode.value = 'codex'
+  prismAccessToken.value = ''
+  prismSessionToken.value = ''
+  prismPromptToolBridge.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   editPlanType.value = ''
@@ -3967,10 +3998,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
-      const storedTransport = typeof extra?.openai_transport === 'string'
-        ? extra.openai_transport.trim().toLowerCase()
-        : ''
-      openaiTransportMode.value = storedTransport === 'web' ? 'web' : 'codex'
+      openaiTransportMode.value = normalizeOpenAITransport(extra?.openai_transport)
+      prismPromptToolBridge.value = extra?.prism_prompt_tool_bridge === true
     }
     openaiFlattenNamespacesEnabled.value =
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
@@ -4831,6 +4860,8 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
+  prismAccessToken.value = ''
+  prismSessionToken.value = ''
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5271,6 +5302,23 @@ const handleSubmit = async () => {
       updatePayload.credentials = applyPlanType({ ...currentCredentials }, editPlanType.value)
     }
 
+    if (isOpenAIOAuthLikeAccount.value) {
+      const credentials = { ...((updatePayload.credentials || props.account.credentials || {}) as Record<string, unknown>) }
+      // Never echo a secret returned by an older backend. Only new input may be submitted.
+      // Omitted secrets are preserved by the backend's MergePreservingSensitiveCreds.
+      for (const key of [
+        'access_token', 'refresh_token', 'id_token', 'agent_private_key',
+        'prism_session_token', 'prism_oai_access_token', 'prism_cookie',
+        'api_key', 'session_key', 'cookie', 'private_key'
+      ]) delete credentials[key]
+      if (openaiTransportMode.value === 'prism') {
+        if (prismAccessToken.value.trim()) credentials.access_token = prismAccessToken.value.trim()
+        if (prismSessionToken.value.trim()) credentials.prism_session_token = prismSessionToken.value.trim()
+        delete credentials.compact_model_mapping
+      }
+      updatePayload.credentials = credentials
+    }
+
     // Antigravity: persist model mapping to credentials (applies to all antigravity types)
     // Antigravity 只支持映射模式
     if (props.account.platform === 'antigravity') {
@@ -5432,11 +5480,11 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      const usesWebTransport =
+      const usesNonCodexTransport =
         (props.account.type === 'oauth' || props.account.type === 'setup-token') &&
-        openaiTransportMode.value === 'web'
+        openaiTransportMode.value !== 'codex'
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        const webSocketMode = usesWebTransport ? 'off' : openaiOAuthResponsesWebSocketV2Mode.value
+        const webSocketMode = usesNonCodexTransport ? 'off' : openaiOAuthResponsesWebSocketV2Mode.value
         newExtra.openai_oauth_responses_websockets_v2_mode = webSocketMode
         newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(webSocketMode)
       } else if (props.account.type === 'apikey') {
@@ -5445,24 +5493,24 @@ const handleSubmit = async () => {
       }
       delete newExtra.responses_websockets_v2_enabled
       delete newExtra.openai_ws_enabled
-      if (!usesWebTransport && openaiPassthroughEnabled.value) {
+      if (!usesNonCodexTransport && openaiPassthroughEnabled.value) {
         newExtra.openai_passthrough = true
       } else {
         delete newExtra.openai_passthrough
         delete newExtra.openai_oauth_passthrough
       }
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
-      if (!usesWebTransport && props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
+      if (!usesNonCodexTransport && props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
         newExtra.openai_responses_flatten_namespaces = true
       } else {
         delete newExtra.openai_responses_flatten_namespaces
       }
-      if (usesWebTransport || isSparkShadow.value) {
+      if (usesNonCodexTransport || isSparkShadow.value) {
         delete newExtra.openai_long_context_billing_enabled
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
-      if (usesWebTransport || openAICompactMode.value === 'auto') {
+      if (usesNonCodexTransport || openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
       } else {
         newExtra.openai_compact_mode = openAICompactMode.value
@@ -5508,7 +5556,7 @@ const handleSubmit = async () => {
 		delete newExtra.codex_auto_reset_credit_state
 
 		delete newExtra.codex_image_generation_bridge_enabled
-      if (usesWebTransport) {
+      if (usesNonCodexTransport) {
         delete newExtra.codex_image_generation_bridge
         delete newExtra.codex_image_generation_explicit_tool_policy
       } else {
@@ -5530,7 +5578,10 @@ const handleSubmit = async () => {
 
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_transport = openaiTransportMode.value
-        if (!usesWebTransport && codexCLIOnlyEnabled.value) {
+        if (openaiTransportMode.value === 'prism') {
+          newExtra.prism_prompt_tool_bridge = prismPromptToolBridge.value
+        }
+        if (!usesNonCodexTransport && codexCLIOnlyEnabled.value) {
           newExtra.codex_cli_only = true
         } else if (hadCodexCLIOnlyEnabled) {
           // 关闭时显式写 false，避免 extra 为空被后端忽略导致旧值无法清除
@@ -5540,7 +5591,7 @@ const handleSubmit = async () => {
         }
         // Claude Code 插件放行已迁移到全局 codex_cli_only_whitelist，编辑时清理废弃账号级快捷字段。
         delete newExtra.codex_cli_only_allowed_clients
-        if (!usesWebTransport && codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
+        if (!usesNonCodexTransport && codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
           newExtra.codex_cli_only_allow_app_server = true
         } else {
           delete newExtra.codex_cli_only_allow_app_server
@@ -5550,7 +5601,7 @@ const handleSubmit = async () => {
       // 指纹收敛模式：默认 off（不写入）；device/session/full 是显式 opt-in，
       // 必须落键，否则管理员的选择会被后端当作"未设置"而回落到 off（#5610）。
       if (props.account.type === 'oauth') {
-        if (!usesWebTransport && codexFingerprintMode.value !== 'off') {
+        if (!usesNonCodexTransport && codexFingerprintMode.value !== 'off') {
           newExtra.codex_fingerprint_mode = codexFingerprintMode.value
         } else {
           delete newExtra.codex_fingerprint_mode

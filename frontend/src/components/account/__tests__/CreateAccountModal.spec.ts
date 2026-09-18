@@ -545,8 +545,77 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('initialInputMethod')).toBe('manual')
   })
 
-  it('creates an OpenAI setup-token account from a direct access token', async () => {
-    const wrapper = await openCodexImportStep()
+  it.each(['', ' prism-session '])('creates a Prism setup-token account with optional session credentials: %s', async (sessionToken) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="create-openai-ws-mode"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="create-openai-flatten-namespaces-toggle"]').exists()).toBe(false)
+    expect((wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('[data-testid="create-prism-access-token"]').setValue(' prism-access ')
+    await wrapper.get('[data-testid="create-prism-session-token"]').setValue(sessionToken)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({ platform: 'openai', type: 'setup-token', extra: { openai_transport: 'prism', prism_prompt_tool_bridge: false } })
+    expect(payload.credentials.access_token).toBe('prism-access')
+    expect(payload.credentials).not.toHaveProperty('refresh_token')
+    expect(payload.credentials).not.toHaveProperty('compact_model_mapping')
+    if (sessionToken) expect(payload.credentials.prism_session_token).toBe('prism-session')
+    else expect(payload.credentials).not.toHaveProperty('prism_session_token')
+    expect(payload.extra).not.toHaveProperty('prism_session_token')
+    expect(payload.extra.openai_oauth_responses_websockets_v2_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('requires a Prism access token before creating an account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(OAuthAuthorizationFlowStub).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('enables Prism prompt tool bridging only after an explicit choice', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('[data-testid="create-prism-access-token"]').setValue('prism-access')
+    await wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_transport: 'prism',
+      prism_prompt_tool_bridge: true
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('preserves the selected %s transport when importing an access token', async (transport) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').setValue(true)
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', transport)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="create-prism-prompt-tool-bridge"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
 
     flow.vm.$emit('import-access-token', 'web-access-token')
@@ -558,7 +627,9 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.type).toBe('setup-token')
     expect(payload?.credentials).toMatchObject({ access_token: 'web-access-token' })
     expect(payload?.credentials).not.toHaveProperty('refresh_token')
-    expect(payload?.extra?.openai_transport).toBe('web')
+    expect(payload?.extra?.openai_transport).toBe(transport)
+    expect(payload?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
   })
 
   it.each([

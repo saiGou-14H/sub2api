@@ -493,7 +493,7 @@ export default {
         longContextShadowHint: 'Long-context billing belongs to the parent account. Selected shadow accounts keep following their parent, including when targets come from a filter.',
         longContextParentRequired: 'All selected accounts are shadows. Select the parent account to change long-context billing.',
         mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.',
-        transportModeHint: 'Applies only to OpenAI OAuth / Setup Token accounts. Switching to Web also disables Codex-only settings on the bulk targets.'
+        transportModeHint: 'Applies only to OpenAI OAuth / Setup Token accounts. Switching to Web or Prism disables Codex-only settings on the bulk targets.'
       },
       bulkDeleteTitle: 'Bulk Delete Accounts',
       bulkDeleteConfirm: 'Delete the selected {count} account(s)? This action cannot be undone.',
@@ -578,9 +578,17 @@ export default {
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         transportMode: 'Upstream protocol',
         transportModeDesc:
-          'Choose the upstream protocol for OpenAI OAuth-like accounts. Web uses the ChatGPT web conversation API; Codex uses the Codex Responses API. Missing values default to Codex.',
+          'Choose the upstream protocol for OpenAI OAuth / Setup Token accounts: Codex, ChatGPT web conversation, or Prism. Missing values default to Codex.',
         transportWeb: 'Web conversation (web)',
         transportCodex: 'Codex (codex)',
+        transportPrism: 'Prism (prism)',
+        prismAccessToken: 'Prism access token',
+        prismAccessTokenHint: 'Enter prism_oai_access_token from your Prism sign-in cookies.',
+        prismAccessTokenRequired: 'Enter a Prism access token',
+        prismSessionToken: 'Prism session token (optional)',
+        prismSessionTokenHint: 'Enter prism_session_token from your Prism sign-in cookies, if available.',
+        prismPromptToolBridge: 'Text prompt tool bridge',
+        prismPromptToolBridgeDesc: 'Off by default to preserve the native Prism tool protocol. Enable only when client tools need to be converted to a text protocol; Prism built-in tools are still handled upstream.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
         flattenNamespacesDesc:
           'Disabled by default: Codex namespace tool declarations are forwarded as-is on /responses, which is what the ChatGPT Codex backend expects. Enable only when this OAuth account is routed to a relay that rejects namespace tools — flattening renames them to namespace__tool, which breaks models that address collaboration tools as functions.<namespace>.<tool>. Compaction requests always flatten regardless of this switch.',

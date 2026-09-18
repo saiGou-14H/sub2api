@@ -455,6 +455,8 @@ type OpenAIGatewayService struct {
 	liveAttestationCipher SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
+	prismWorkspaceOnce             sync.Once
+	prismWorkspace                 *prismWorkspaceRuntime
 	openaiWSStateStoreOnce         sync.Once
 	openaiSchedulerOnce            sync.Once
 	openaiProxyStreamCircuitOnce   sync.Once
@@ -469,6 +471,7 @@ type OpenAIGatewayService struct {
 	openaiAccountStats             *openAIAccountRuntimeStats
 	openaiModelTransient           *openAIAccountModelTransientState
 	openAIWebTransportFactory      func() *OpenAIWebTransport
+	openAIPrismTransportFactory    func() *OpenAIPrismTransport
 	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
 	openaiProxyStreamFailOpenLogAt atomic.Int64
 
@@ -487,6 +490,9 @@ type OpenAIGatewayService struct {
 	openAIModelsCache                   openAIModelsCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+	// Prism opaque continuation state is keyed by account, downstream API key,
+	// credential fingerprint and explicit response ID; idle entries expire.
+	openaiPrismSessions sync.Map
 	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
 	// 记录最近一次向该会话下发 x-codex-turn-state 的铸造账号，供出站守卫
 	// 剥离跨账号回带（openai_codex_turn_state.go）。

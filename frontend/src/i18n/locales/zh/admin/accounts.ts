@@ -581,7 +581,7 @@ export default {
         longContextShadowHint: '长上下文计费归母账号所有。选中的影子账号仍跟随母账号，筛选全量目标时同样如此。',
         longContextParentRequired: '选中的账号全部是影子账号，请选择母账号修改长上下文计费。',
         mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。',
-        transportModeHint: '仅对 OpenAI OAuth / Setup Token 账号生效。切换到网页模式会关闭批量目标上的 Codex 专属设置。'
+        transportModeHint: '仅对 OpenAI OAuth / Setup Token 账号生效。切换到网页或 Prism 协议会关闭批量目标上的 Codex 专属设置。'
       },
       bulkDeleteTitle: '批量删除账号',
       bulkDeleteConfirm: '确定要删除选中的 {count} 个账号吗？此操作无法撤销。',
@@ -665,9 +665,17 @@ export default {
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
         transportMode: '上游协议',
         transportModeDesc:
-          '选择 OpenAI OAuth-like 账号使用的上游协议。网页模式使用 ChatGPT 网页对话接口，Codex 模式使用 Codex Responses 接口；未设置时默认为 Codex。',
+          '选择 OpenAI OAuth / Setup Token 账号使用的上游协议：Codex、ChatGPT 网页对话或 Prism。未设置时默认为 Codex。',
         transportWeb: '网页对话（web）',
         transportCodex: 'Codex（codex）',
+        transportPrism: 'Prism（prism）',
+        prismAccessToken: 'Prism 访问令牌',
+        prismAccessTokenHint: '填写 Prism 登录 Cookie 中的 prism_oai_access_token。',
+        prismAccessTokenRequired: '请输入 Prism 访问令牌',
+        prismSessionToken: 'Prism 会话令牌（可选）',
+        prismSessionTokenHint: '填写 Prism 登录 Cookie 中的 prism_session_token（如有）。',
+        prismPromptToolBridge: '文本提示工具桥接',
+        prismPromptToolBridgeDesc: '默认关闭，保留 Prism 原生工具协议。仅在需要将客户端工具转为文本协议时启用；Prism 内置工具仍由上游处理。',
         flattenNamespaces: '摊平 Codex namespace 工具（兼容）',
         flattenNamespacesDesc:
           '默认关闭：/responses 上的 namespace 工具声明原样转发，这正是 ChatGPT Codex 后端期望的形态。仅当该 OAuth 账号指向不认识 namespace 的兼容上游时才开启——摊平会把工具改名为 namespace__tool，使按 functions.<命名空间>.<工具> 寻址的模型（如 gpt-5.6 多智能体）无法调用。压缩（compact）请求不受该开关影响，始终摊平。',

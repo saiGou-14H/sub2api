@@ -35,6 +35,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	if account != nil && account.IsOpenAIPrismTransport() {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIPrismStartPath)
+		return s.forwardAnthropicViaOpenAIPrism(ctx, c, account, body, defaultMappedModel)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}

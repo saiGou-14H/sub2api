@@ -189,6 +189,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	registerPrismProjectRoutes(gateway, h.OpenAIGateway.CreatePrismProject, h.OpenAIGateway.PrismProject)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
@@ -649,6 +650,38 @@ func compositeGeminiModelFromParams(c *gin.Context) string {
 		return strings.TrimSpace(modelAction[:idx])
 	}
 	return modelAction
+}
+
+// Register before model-reading middleware: uploads are multipart, and existing
+// project operations resolve their model and ownership from service state.
+func registerPrismProjectRoutes(gateway *gin.RouterGroup, create gin.HandlerFunc, operate func(*gin.Context, string)) {
+	gateway.POST("/prism/projects", create)
+	for _, route := range []struct {
+		method    string
+		path      string
+		operation string
+	}{
+		{http.MethodGet, "", "access"},
+		{http.MethodGet, "/conversation-history", "history"},
+		{http.MethodGet, "/delta-files", "delta-files"},
+		{http.MethodGet, "/sync-status", "sync-status"},
+		{http.MethodPost, "/files", "upload"},
+		{http.MethodPatch, "/thumbnail", "thumbnail"},
+		{http.MethodPost, "/render", "render"},
+		{http.MethodGet, "/render-status", "render-status"},
+		{http.MethodGet, "/pdf", "pdf"},
+		{http.MethodGet, "/logs", "logs"},
+		{http.MethodGet, "/synctex", "synctex"},
+		{http.MethodGet, "/word-count", "word-count"},
+		{http.MethodGet, "/latest-render", "latest-render"},
+		{http.MethodGet, "/version-history", "version-history"},
+		{http.MethodPost, "/heartbeat", "heartbeat"},
+		{http.MethodPost, "/wait-for-sync", "wait-for-sync"},
+	} {
+		gateway.Handle(route.method, "/prism/projects/:project_id"+route.path, func(c *gin.Context) {
+			operate(c, route.operation)
+		})
+	}
 }
 
 func compositeRouteEndpointForPath(path string) string {

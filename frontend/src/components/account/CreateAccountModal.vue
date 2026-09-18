@@ -2988,9 +2988,42 @@
         </p>
       </div>
 
+      <div v-if="form.platform === 'openai' && accountCategory === 'oauth-based'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label">{{ t('admin.accounts.openai.transportMode') }}</label>
+        <Select v-model="openaiTransportMode" :options="openaiTransportOptions" data-testid="create-openai-transport-select" />
+        <p class="input-hint">{{ t('admin.accounts.openai.transportModeDesc') }}</p>
+        <div v-if="openaiTransportMode === 'prism'" class="mt-4 space-y-3">
+          <div>
+            <label class="input-label" for="create-prism-access-token">{{ t('admin.accounts.openai.prismAccessToken') }}</label>
+            <input id="create-prism-access-token" v-model="prismAccessToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="create-prism-access-token" />
+            <p class="input-hint">{{ t('admin.accounts.openai.prismAccessTokenHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label" for="create-prism-session-token">{{ t('admin.accounts.openai.prismSessionToken') }}</label>
+            <input id="create-prism-session-token" v-model="prismSessionToken" type="password" class="input font-mono" autocomplete="new-password" data-testid="create-prism-session-token" />
+            <p class="input-hint">{{ t('admin.accounts.openai.prismSessionTokenHint') }}</p>
+          </div>
+          <div class="flex items-start gap-3 pt-1">
+            <input
+              id="create-prism-prompt-tool-bridge"
+              v-model="prismPromptToolBridge"
+              type="checkbox"
+              class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              data-testid="create-prism-prompt-tool-bridge"
+            />
+            <div>
+              <label class="input-label mb-0" for="create-prism-prompt-tool-bridge">
+                {{ t('admin.accounts.openai.prismPromptToolBridge') }}
+              </label>
+              <p class="input-hint">{{ t('admin.accounts.openai.prismPromptToolBridgeDesc') }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
-        v-if="form.platform === 'openai'"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3020,7 +3053,7 @@
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
-        v-if="form.platform === 'openai' && form.type === 'oauth'"
+        v-if="showOpenAICodexSettings && form.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3051,7 +3084,7 @@
 
       <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
       <div
-        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="showOpenAICodexSettings"
         data-testid="create-openai-ws-mode"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
@@ -3141,7 +3174,7 @@
 
       <!-- OpenAI API 长上下文计费开关 -->
       <div
-        v-if="form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="showOpenAICodexSettings && !hideAccountLongContextBilling"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3173,7 +3206,7 @@
       </div>
 
       <div
-        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        v-if="showOpenAICodexSettings && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -3229,7 +3262,7 @@
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
-        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        v-if="showOpenAICodexSettings && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -3247,7 +3280,7 @@
 
       <!-- OpenAI Compact 能力配置 -->
       <div
-        v-if="form.platform === 'openai' && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
+        v-if="showOpenAICodexSettings"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="flex items-center justify-between">
@@ -3902,6 +3935,7 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import { openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -4299,6 +4333,17 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
+const openaiTransportMode = ref<OpenAITransportMode>('codex')
+const openaiTransportOptions = computed(() => openAITransportOptions(t))
+const prismAccessToken = ref('')
+const prismSessionToken = ref('')
+const prismPromptToolBridge = ref(false)
+const isPrismAccount = computed(() =>
+  form.platform === 'openai' && accountCategory.value === 'oauth-based' && openaiTransportMode.value === 'prism'
+)
+const showOpenAICodexSettings = computed(() =>
+  form.platform === 'openai' && (accountCategory.value === 'apikey' || openaiTransportMode.value === 'codex')
+)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4448,7 +4493,9 @@ function buildAntigravityExtra(): Record<string, unknown> | undefined {
 }
 
 const buildOpenAICompactModelMapping = () =>
-  buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
+  accountCategory.value === 'oauth-based' && openaiTransportMode.value !== 'codex'
+    ? undefined
+    : buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
 
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: string; otherPlatform: string } | null>(
@@ -4606,6 +4653,7 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
+  if (isPrismAccount.value) return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -4768,6 +4816,10 @@ watch(
       interceptWarmupRequests.value = false
     }
     if (newPlatform !== 'openai') {
+      openaiTransportMode.value = 'codex'
+      prismAccessToken.value = ''
+      prismSessionToken.value = ''
+      prismPromptToolBridge.value = false
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -5220,6 +5272,10 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
+  openaiTransportMode.value = 'codex'
+  prismAccessToken.value = ''
+  prismSessionToken.value = ''
+  prismPromptToolBridge.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
@@ -5280,6 +5336,8 @@ const resetForm = () => {
 }
 
 const handleClose = () => {
+  prismAccessToken.value = ''
+  prismSessionToken.value = ''
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5291,6 +5349,27 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (accountCategory.value === 'oauth-based') {
+    extra.openai_transport = openaiTransportMode.value
+    if (openaiTransportMode.value === 'prism') {
+      extra.prism_prompt_tool_bridge = prismPromptToolBridge.value
+    } else {
+      delete extra.prism_prompt_tool_bridge
+    }
+    if (openaiTransportMode.value !== 'codex') {
+      // These settings describe Codex requests and must not reach other transports.
+      for (const key of [
+        'openai_passthrough', 'openai_oauth_passthrough', 'openai_responses_flatten_namespaces',
+        'openai_long_context_billing_enabled', 'openai_compact_mode', 'codex_cli_only',
+        'codex_cli_only_allow_app_server', 'codex_cli_only_allowed_clients', 'codex_fingerprint_mode',
+        'codex_image_generation_bridge', 'codex_image_generation_bridge_enabled',
+        'codex_image_generation_explicit_tool_policy', 'responses_websockets_v2_enabled', 'openai_ws_enabled'
+      ]) delete extra[key]
+      extra.openai_oauth_responses_websockets_v2_mode = 'off'
+      extra.openai_oauth_responses_websockets_v2_enabled = false
+      return extra
+    }
+  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5489,6 +5568,18 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (isPrismAccount.value) {
+    if (!form.name.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    if (!prismAccessToken.value.trim()) {
+      appStore.showError(t('admin.accounts.openai.prismAccessTokenRequired'))
+      return
+    }
+    await handleOpenAIImportAccessToken(prismAccessToken.value)
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {
@@ -6411,7 +6502,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
   }
 }
 
-// OpenAI 网页 access token：创建 setup-token 账号，绕过 OAuth refresh 生命周期。
+// OpenAI access token：保留所选传输模式，创建无 refresh 生命周期的 setup-token 账号。
 const handleOpenAIImportAccessToken = async (accessToken: string) => {
   const oauthClient = openaiOAuth
   const trimmed = accessToken.trim()
@@ -6433,9 +6524,12 @@ const handleOpenAIImportAccessToken = async (accessToken: string) => {
       access_token: trimmed,
       ...credentialExtras
     }
+    if (isPrismAccount.value && prismSessionToken.value.trim()) {
+      credentials.prism_session_token = prismSessionToken.value.trim()
+    }
     const extra = {
       ...buildOpenAICodexImportExtra(),
-      openai_transport: 'web'
+      openai_transport: openaiTransportMode.value
     }
     await createAccountAndFinish('openai', 'setup-token', credentials, extra)
   } catch (error: any) {

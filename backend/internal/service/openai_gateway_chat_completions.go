@@ -80,6 +80,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		SetActualOpenAIUpstreamEndpoint(c, OpenAIWebConversationPath)
 		return s.forwardChatCompletionsViaOpenAIWeb(ctx, c, account, body, defaultMappedModel)
 	}
+	if account != nil && account.IsOpenAIPrismTransport() {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIPrismStartPath)
+		return s.forwardChatCompletionsViaOpenAIPrism(ctx, c, account, body, defaultMappedModel)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}

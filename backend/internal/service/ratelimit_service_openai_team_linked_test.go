@@ -126,6 +126,24 @@ func TestTeamLinkedError_GenericPaymentErrorDoesNotFanout(t *testing.T) {
 	require.Zero(t, repo.listCalls)
 }
 
+func TestTeamLinkedError_FanoutExcludesPrismWithSameTeamID(t *testing.T) {
+	trigger := newTeamLinkedAccount(1, "team-A")
+	codex := newTeamLinkedAccount(2, "team-A")
+	prism := newTeamLinkedAccount(3, "team-A")
+	prism.Extra = map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism}
+	repo := &teamLinkedAccountRepoStub{teamAccounts: []Account{trigger, codex, prism}}
+	rl, blocker := newTeamLinkedTestService(repo)
+
+	rl.HandleUpstreamError(context.Background(), &trigger, http.StatusPaymentRequired, http.Header{}, []byte(teamLinkedDeactivatedBody))
+
+	// Migrated Prism accounts may retain the Codex team ID, but a Codex
+	// workspace failure must neither persist an error nor block Prism.
+	require.Equal(t, []int64{2, 1}, repo.setErrorIDs)
+	require.Len(t, blocker.accounts, 2)
+	require.Equal(t, int64(2), blocker.accounts[0].ID)
+	require.Equal(t, int64(1), blocker.accounts[1].ID)
+}
+
 func TestTeamLinkedError_DedupWithinTTL(t *testing.T) {
 	repo := &teamLinkedAccountRepoStub{teamAccounts: newTeamLinkedFixture()}
 	rl, _ := newTeamLinkedTestService(repo)

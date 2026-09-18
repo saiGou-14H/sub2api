@@ -2780,6 +2780,14 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 
 	// Handle OpenAI accounts
 	if account.IsOpenAI() {
+		if account.IsOpenAIPrismTransport() {
+			models := make([]openai.Model, 0)
+			for _, id := range service.OpenAIPrismAccountModels(account) {
+				models = append(models, openai.Model{ID: id, Object: "model", Type: "model", DisplayName: id})
+			}
+			response.Success(c, models)
+			return
+		}
 		// ChatGPT Web accounts have a separate selector contract from Codex.
 		// Prefer the account's authenticated catalog and ignore stale Codex
 		// model_mapping stored on an imported access-token account.

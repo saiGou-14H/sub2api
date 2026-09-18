@@ -126,6 +126,7 @@ const (
 const (
 	OpenAITransportWeb   = "web"
 	OpenAITransportCodex = "codex"
+	OpenAITransportPrism = "prism"
 )
 
 func isOpenAIPersonalAccessTokenAuthMode(value string) bool {
@@ -848,6 +849,9 @@ func resolveRequestedModelInMapping(mapping map[string]string, requestedModel st
 // 请求卡死在该账号上、无法 failover 到真正支持该模型的 API Key 账号（#3662）。
 // 未知/自定义别名仍保持允许（兼容渠道级映射），见 isOpenAIOAuthServableModel。
 func (a *Account) IsModelSupported(requestedModel string) bool {
+	if a.IsOpenAIPrismTransport() {
+		return isOpenAIPrismModelSupported(a, requestedModel)
+	}
 	// ChatGPT Web has its own finite selector catalog. Account mappings belong
 	// to the Codex/API-key transports and must not hide or rename Web models.
 	if a.IsOpenAIWebTransport() {
@@ -931,6 +935,9 @@ func (a *Account) GetOpenAICompactMode() string {
 func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
 	if a == nil || !a.IsOpenAI() {
 		return false, false
+	}
+	if a.IsOpenAIPrismTransport() {
+		return false, true
 	}
 
 	switch a.GetOpenAICompactMode() {
@@ -1340,8 +1347,11 @@ func (a *Account) OpenAITransport() string {
 		return OpenAITransportCodex
 	}
 	value, _ := a.Extra[OpenAIWebTransportExtraKey].(string)
-	if strings.EqualFold(strings.TrimSpace(value), OpenAITransportWeb) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case OpenAITransportWeb:
 		return OpenAITransportWeb
+	case OpenAITransportPrism:
+		return OpenAITransportPrism
 	}
 	return OpenAITransportCodex
 }
@@ -1352,11 +1362,26 @@ func (a *Account) IsOpenAIWebTransport() bool {
 	return a != nil && a.IsOpenAIOAuthLike() && a.OpenAITransport() == OpenAITransportWeb
 }
 
+// IsOpenAIPrismTransport identifies Prism independently from the credential lifecycle.
+func (a *Account) IsOpenAIPrismTransport() bool {
+	return a != nil && a.IsOpenAIOAuthLike() && a.OpenAITransport() == OpenAITransportPrism
+}
+
+// Prism's built-in tools execute upstream regardless of this client-tool bridge.
+// The bridge is opt-in and must not affect Codex or ChatGPT Web accounts.
+func (a *Account) IsPrismPromptToolBridgeEnabled() bool {
+	if !a.IsOpenAIPrismTransport() {
+		return false
+	}
+	enabled, _ := a.Extra["prism_prompt_tool_bridge"].(bool)
+	return enabled
+}
+
 // UsesOpenAICodexProtocol preserves legacy OpenAI gateway OAuth routing for
 // accounts whose platform is implicit, while adding OpenAI SetupToken. An
-// explicit web transport is the only exception for OpenAI OAuth-like accounts.
+// explicit Web and Prism transports do not use the Codex inference protocol.
 func (a *Account) UsesOpenAICodexProtocol() bool {
-	return a != nil && !a.IsOpenAIWebTransport() && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
+	return a != nil && !a.IsOpenAIWebTransport() && !a.IsOpenAIPrismTransport() && (a.Type == AccountTypeOAuth || a.IsOpenAIOAuthLike())
 }
 
 func (a *Account) IsOpenAIChatGPTSubscription() bool {
@@ -1861,6 +1886,9 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if !a.IsOpenAICompatible() {
 		return false
 	}
+	if a.IsOpenAIPrismTransport() && capability != OpenAIEndpointCapabilityChatCompletions && capability != OpenAIEndpointCapabilityResponses {
+		return false
+	}
 	if a.IsGrok() {
 		switch capability {
 		case OpenAIEndpointCapabilityChatCompletions:
@@ -2117,7 +2145,7 @@ func (a *Account) IsOveragesEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
-	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+	if a == nil || !a.IsOpenAI() || a.IsOpenAIPrismTransport() || a.Extra == nil {
 		return false
 	}
 	if enabled, ok := a.Extra["openai_passthrough"].(bool); ok {
@@ -2143,7 +2171,7 @@ func (a *Account) IsOpenAIPassthroughEnabled() bool {
 // 1. 按账号类型读取分类型字段
 // 2. 分类型字段缺失时，回退兼容字段
 func (a *Account) IsOpenAIResponsesWebSocketV2Enabled() bool {
-	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() || a.Extra == nil {
+	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() || a.IsOpenAIPrismTransport() || a.Extra == nil {
 		return false
 	}
 	if a.IsOpenAIOAuthLike() {
@@ -2212,7 +2240,7 @@ func normalizeOpenAIWSIngressDefaultMode(mode string) string {
 // 4. defaultMode（非法时回退 ctx_pool）
 func (a *Account) ResolveOpenAIResponsesWebSocketV2Mode(defaultMode string) string {
 	resolvedDefault := normalizeOpenAIWSIngressDefaultMode(defaultMode)
-	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() {
+	if a == nil || !a.IsOpenAI() || a.IsOpenAIWebTransport() || a.IsOpenAIPrismTransport() {
 		return OpenAIWSIngressModeOff
 	}
 	if a.Extra == nil {
@@ -2369,7 +2397,7 @@ func (a *Account) GetWebSearchEmulationMode() string {
 // 字段：accounts.extra.codex_cli_only。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsCodexCLIOnlyEnabled() bool {
-	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil {
+	if a == nil || !a.IsOpenAIOAuth() || a.IsOpenAIPrismTransport() || a.Extra == nil {
 		return false
 	}
 	enabled, ok := a.Extra["codex_cli_only"].(bool)

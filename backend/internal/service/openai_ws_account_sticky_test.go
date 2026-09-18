@@ -315,6 +315,36 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_WebTransportHit(
 	}
 }
 
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_PrismTransportHit(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(23)
+	account := Account{
+		ID: 15, Platform: PlatformOpenAI, Type: AccountTypeSetupToken,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism},
+	}
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
+		cache:              cache,
+		cfg:                newOpenAIWSV2TestConfig(),
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: store,
+	}
+	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_prev_prism", account.ID, time.Hour))
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_prism", OpenAIPrismDefaultModel, nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection, "Prism HTTP continuation must retain the account that created the response")
+	require.NotNil(t, selection.Account)
+	require.Equal(t, account.ID, selection.Account.ID)
+	require.False(t, selection.Account.IsOpenAIResponsesWebSocketV2Enabled())
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(23)

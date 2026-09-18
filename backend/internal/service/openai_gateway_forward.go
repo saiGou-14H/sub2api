@@ -31,6 +31,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		SetActualOpenAIUpstreamEndpoint(c, OpenAIWebConversationPath)
 		return s.forwardResponsesViaOpenAIWeb(ctx, c, account, body)
 	}
+	if account != nil && account.IsOpenAIPrismTransport() {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIPrismStartPath)
+		return s.forwardResponsesViaOpenAIPrism(ctx, c, account, body)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -1675,6 +1679,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	if account != nil && account.IsOpenAIPrismTransport() {
+		return nil, errors.New("Prism accounts must use the Prism asynchronous transport")
+	}
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {

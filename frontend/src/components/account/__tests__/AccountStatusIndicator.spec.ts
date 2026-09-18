@@ -51,6 +51,26 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('labels the Prism transport rate-limit bucket', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          platform: 'openai',
+          extra: { model_rate_limits: {
+            openai_transport_prism: {
+              rate_limited_at: '2026-09-18T00:00:00Z',
+              rate_limit_reset_at: '2099-09-18T00:00:00Z'
+            }
+          } }
+        })
+      },
+      global: { stubs: { Icon: true } }
+    })
+    expect(wrapper.text()).toContain('Prism')
+    expect(wrapper.text()).not.toContain('openai_transport_prism')
+    wrapper.unmount()
+  })
+
   it('Claude 5 模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

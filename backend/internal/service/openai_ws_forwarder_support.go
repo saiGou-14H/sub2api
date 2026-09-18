@@ -562,6 +562,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	// response-id binding must retain the original Web account as well as API keys.
 	if !account.IsOpenAIApiKey() &&
 		!account.IsOpenAIWebTransport() &&
+		!account.IsOpenAIPrismTransport() &&
 		s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return 0, nil, "", nil
 	}

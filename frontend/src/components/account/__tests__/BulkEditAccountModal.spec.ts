@@ -357,6 +357,93 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('Prism transport overrides previously selected Codex-only settings in a bulk update', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'] })
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
+    expect(wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').attributes('disabled')).toBeDefined()
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { compact_model_mapping: {} },
+      extra: expect.objectContaining({
+        openai_transport: 'prism',
+        openai_passthrough: false,
+        openai_oauth_responses_websockets_v2_mode: 'off',
+        openai_oauth_responses_websockets_v2_enabled: false,
+        codex_cli_only: false,
+        codex_fingerprint_mode: 'off',
+        openai_compact_mode: null,
+        codex_image_generation_bridge: null
+      })
+    })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('updates the Prism prompt tool bridge to %s only when separately selected', async (enabled) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'] })
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    if (enabled) await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
+      extra: expect.objectContaining({ openai_transport: 'prism', prism_prompt_tool_bridge: enabled })
+    }))
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('does not submit a checked Prism bridge option after switching to %s', async (transport) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue(transport)
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it('does not submit the Prism bridge after its update checkbox is cleared', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it('does not submit the Prism bridge when the transport update is deselected', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(false)
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { status: 'active' })
+    wrapper.unmount()
+  })
+
   it('OpenAI Setup Token 批量编辑切换到 Codex 协议', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],

@@ -33,7 +33,7 @@
 
       <!-- OpenAI passthrough -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="allOpenAIPassthroughCapable && !switchingToNonCodexTransport"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -124,9 +124,49 @@
         </div>
       </div>
 
+      <div v-if="switchingToPrismTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <label class="input-label mb-0" for="bulk-edit-prism-prompt-tool-bridge-enabled">
+              {{ t('admin.accounts.openai.prismPromptToolBridge') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.prismPromptToolBridgeDesc') }}
+            </p>
+          </div>
+          <input
+            id="bulk-edit-prism-prompt-tool-bridge-enabled"
+            v-model="enablePrismPromptToolBridge"
+            type="checkbox"
+            aria-controls="bulk-edit-prism-prompt-tool-bridge-toggle"
+            class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          />
+        </div>
+        <button
+          id="bulk-edit-prism-prompt-tool-bridge-toggle"
+          type="button"
+          role="switch"
+          :disabled="!enablePrismPromptToolBridge"
+          :aria-checked="prismPromptToolBridge"
+          :aria-label="t('admin.accounts.openai.prismPromptToolBridge')"
+          :class="[
+            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+            prismPromptToolBridge ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+          ]"
+          @click="prismPromptToolBridge = !prismPromptToolBridge"
+        >
+          <span
+            :class="[
+              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              prismPromptToolBridge ? 'translate-x-5' : 'translate-x-0'
+            ]"
+          />
+        </button>
+      </div>
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
-        v-if="allOpenAIOAuthOnly"
+        v-if="allOpenAIOAuthOnly && !switchingToNonCodexTransport"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between">
@@ -177,7 +217,7 @@
 
       <!-- OpenAI API long-context billing -->
       <div
-        v-if="allOpenAIPassthroughCapable"
+        v-if="allOpenAIPassthroughCapable && !switchingToNonCodexTransport"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="mb-3 flex items-center justify-between gap-4">
@@ -891,7 +931,7 @@
       </div>
 
       <!-- OpenAI OAuth WS mode -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIOAuth && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-ws-mode-label"
@@ -928,7 +968,7 @@
       </div>
 
       <!-- OpenAI OAuth Codex CLI only -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIOAuth && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-cli-only-label"
@@ -972,7 +1012,7 @@
       </div>
 
       <!-- OpenAI OAuth: Codex app-server -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIOAuth && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-app-server-label"
@@ -1016,7 +1056,7 @@
       </div>
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIOAuth && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
           <input
@@ -1206,7 +1246,7 @@
       </div>
 
       <!-- OpenAI Compact mode -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIPassthroughCapable && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1242,7 +1282,7 @@
       </div>
 
       <!-- OpenAI Compact model mapping -->
-      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIPassthroughCapable && !switchingToNonCodexTransport" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <div class="flex-1 pr-4">
             <label
@@ -1558,6 +1598,7 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
+import { openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1701,6 +1742,7 @@ const enableStatus = ref(false)
 const enableGroups = ref(false)
 const enableOpenAIPassthrough = ref(false)
 const enableOpenAITransport = ref(false)
+const enablePrismPromptToolBridge = ref(false)
 const enableOpenAIFlattenNamespaces = ref(false)
 const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
@@ -1736,12 +1778,15 @@ const rateMultiplier = ref(1)
 const status = ref<'active' | 'inactive'>('active')
 const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
-type OpenAITransportMode = 'web' | 'codex'
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
-const openaiTransportOptions = computed<Array<{ value: OpenAITransportMode; label: string }>>(() => [
-  { value: 'codex', label: t('admin.accounts.openai.transportCodex') },
-  { value: 'web', label: t('admin.accounts.openai.transportWeb') }
-])
+const openaiTransportOptions = computed(() => openAITransportOptions(t))
+const prismPromptToolBridge = ref(false)
+const switchingToPrismTransport = computed(() =>
+  enableOpenAITransport.value && allOpenAIOAuth.value && openaiTransportMode.value === 'prism'
+)
+const switchingToNonCodexTransport = computed(() =>
+  enableOpenAITransport.value && allOpenAIOAuth.value && openaiTransportMode.value !== 'codex'
+)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -2035,20 +2080,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   if (enableOpenAITransport.value && allOpenAIOAuth.value) {
     const extra = ensureExtra()
     extra.openai_transport = openaiTransportMode.value
-    if (openaiTransportMode.value === 'web') {
-      // Bulk updates merge JSONB keys, so explicitly neutralize Codex-only
-      // settings that would otherwise remain active after a Web switch.
-      extra.openai_passthrough = false
-      extra.openai_oauth_passthrough = false
-      extra.openai_responses_flatten_namespaces = false
-      extra.openai_oauth_responses_websockets_v2_mode = 'off'
-      extra.openai_oauth_responses_websockets_v2_enabled = false
-      extra.codex_cli_only = false
-      extra.codex_cli_only_allow_app_server = false
-      extra.codex_fingerprint_mode = 'off'
-      extra.openai_long_context_billing_enabled = false
-      extra.openai_compact_mode = null
-    }
+  }
+  if (enablePrismPromptToolBridge.value && switchingToPrismTransport.value) {
+    ensureExtra().prism_prompt_tool_bridge = prismPromptToolBridge.value
   }
 
   // 同时校验可见性：勾选后又改了目标筛选条件时，不应把该键写到非 OAuth 账号上
@@ -2212,6 +2246,34 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     const umqExtra = ensureExtra()
     umqExtra.user_msg_queue_mode = userMsgQueueMode.value  // '' = 清除账号级覆盖
     umqExtra.user_msg_queue_enabled = false  // 清理旧字段（JSONB merge）
+  }
+
+  if (switchingToNonCodexTransport.value) {
+    // Apply after all optional fields so a previously checked Codex option
+    // cannot override the transport switch in this same bulk submission.
+    Object.assign(ensureExtra(), {
+      openai_passthrough: false,
+      openai_oauth_passthrough: false,
+      openai_responses_flatten_namespaces: false,
+      openai_oauth_responses_websockets_v2_mode: 'off',
+      openai_oauth_responses_websockets_v2_enabled: false,
+      codex_cli_only: false,
+      codex_cli_only_allow_app_server: false,
+      codex_fingerprint_mode: 'off',
+      openai_long_context_billing_enabled: false,
+      openai_compact_mode: null
+    })
+    if (openaiTransportMode.value === 'prism') {
+      Object.assign(ensureExtra(), {
+        codex_image_generation_bridge: null,
+        codex_image_generation_bridge_enabled: null,
+        codex_image_generation_explicit_tool_policy: null,
+        responses_websockets_v2_enabled: false,
+        openai_ws_enabled: false
+      })
+      credentials.compact_model_mapping = {}
+      credentialsChanged = true
+    }
   }
 
   if (credentialsChanged) {
@@ -2434,6 +2496,7 @@ watch(
       enableGroups.value = false
       enableOpenAIPassthrough.value = false
       enableOpenAITransport.value = false
+      enablePrismPromptToolBridge.value = false
       enableOpenAIFlattenNamespaces.value = false
       enableOpenAILongContextBilling.value = false
       enableOpenAIEndpointCapabilities.value = false
@@ -2474,6 +2537,7 @@ watch(
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiTransportMode.value = 'codex'
+      prismPromptToolBridge.value = false
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false

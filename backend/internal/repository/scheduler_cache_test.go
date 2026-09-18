@@ -20,6 +20,15 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestFilterSchedulerExtraKeepsOpenAITransport(t *testing.T) {
+	filtered := filterSchedulerExtra(map[string]any{
+		service.OpenAIWebTransportExtraKey: service.OpenAITransportPrism,
+		"access_token":                     "must-not-project",
+	})
+	require.Equal(t, service.OpenAITransportPrism, filtered[service.OpenAIWebTransportExtraKey])
+	require.NotContains(t, filtered, "access_token")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,

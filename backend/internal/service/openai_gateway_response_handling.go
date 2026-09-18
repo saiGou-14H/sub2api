@@ -54,11 +54,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	firstOutputTimeout := time.Duration(0)
-	if account != nil && account.Platform == PlatformOpenAI {
+	// Prism reaches this reader only after its remote turn has completed. Its
+	// local synthesized stream must not inherit native HTTP first-output retry
+	// deadlines or staging, which could replay already executed sandbox tools.
+	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI && !account.IsOpenAIPrismTransport()
+	if stageFirstOutput {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
 	}
 	guardFirstOutput := firstOutputTimeout > 0
-	stageFirstOutput := account != nil && account.Platform == PlatformOpenAI
 	var attemptResponseHeaders http.Header
 	if stageFirstOutput {
 		if s.responseHeaderFilter != nil {

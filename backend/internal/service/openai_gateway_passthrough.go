@@ -582,6 +582,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	if account != nil && account.IsOpenAIPrismTransport() {
+		return nil, errors.New("Prism accounts do not support OpenAI passthrough")
+	}
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:

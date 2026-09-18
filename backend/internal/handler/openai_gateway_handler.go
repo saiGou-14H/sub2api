@@ -392,6 +392,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	if !h.bindPrismProject(c, apiKey, false) {
+		return
+	}
+
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
@@ -715,7 +719,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		account := selection.Account
 		if previousResponseID != "" && requestPlatform == service.PlatformOpenAI && httpContinuationRequiresAPIKey(account) {
-			// API-key accounts and Web transport accounts can continue through the
+			// API-key, Web, and Prism transport accounts can continue through the
 			// gateway. Codex OAuth/SetupToken accounts still require native routing.
 			failedAccountIDs[account.ID] = struct{}{}
 			if selection.ReleaseFunc != nil {
@@ -728,7 +732,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				Scope:            service.GatewayFailureScopeRequest,
 				Reason:           service.OpenAIHTTPContinuationUnsupportedReason,
 				ClientStatusCode: http.StatusBadRequest,
-				ClientMessage:    "previous_response_id requires an OpenAI API-key account for HTTP requests",
+				ClientMessage:    "previous_response_id requires an OpenAI API-key, Web, or Prism transport account for HTTP requests",
 			}
 			reqLog.Debug("openai.account_skipped_http_continuation_unsupported",
 				zap.Int64("account_id", account.ID),
@@ -1134,6 +1138,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
 		h.anthropicErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
+		return
+	}
+
+	if !h.bindPrismProject(c, apiKey, true) {
 		return
 	}
 
@@ -3326,7 +3334,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	if failoverErr.Reason == service.OpenAIHTTPContinuationUnsupportedReason {
 		message := strings.TrimSpace(failoverErr.ClientMessage)
 		if message == "" {
-			message = "previous_response_id requires an OpenAI API-key account for HTTP requests"
+			message = "previous_response_id requires an OpenAI API-key, Web, or Prism transport account for HTTP requests"
 		}
 		h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", message, streamStarted)
 		return

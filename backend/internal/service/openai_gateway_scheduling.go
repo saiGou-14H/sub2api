@@ -522,7 +522,7 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 }
 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
-	if account == nil || !account.IsOpenAI() {
+	if account == nil || !account.IsOpenAI() || account.IsOpenAIPrismTransport() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	// 自动用卡有独立阈值：达到消费阈值时必须先退出调度；仅达到普通暂停阈值时，
@@ -800,6 +800,13 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+	if account != nil && account.IsOpenAIPrismTransport() {
+		if requireCompact || !account.IsModelSupported(requestedModel) {
+			return ""
+		}
+		model, _ := NormalizeOpenAIPrismModel(account.GetMappedModel(strings.TrimSpace(requestedModel)))
+		return model
+	}
 	if account != nil && account.IsOpenAIWebTransport() {
 		model, supported := NormalizeOpenAIWebModel(requestedModel)
 		if !supported {
@@ -867,6 +874,10 @@ func ResolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 // accounting, while upstreamModel is the model the scheduler has admitted.
 func resolveOpenAIForwardMappedModels(account *Account, requestedModel string, requireCompact bool) (billingModel, upstreamModel string) {
 	requestedModel = strings.TrimSpace(requestedModel)
+	if account != nil && account.IsOpenAIPrismTransport() {
+		upstreamModel = resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)
+		return upstreamModel, upstreamModel
+	}
 	if account != nil && account.IsOpenAIWebTransport() {
 		model, supported := NormalizeOpenAIWebModel(requestedModel)
 		if !supported {

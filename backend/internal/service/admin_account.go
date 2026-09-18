@@ -381,17 +381,22 @@ func ValidateOpenAITransportExtra(platform, accountType string, extra map[string
 	if extra == nil {
 		return nil
 	}
+	if bridge, exists := extra["prism_prompt_tool_bridge"]; exists && bridge != nil {
+		if _, ok := bridge.(bool); !ok {
+			return infraerrors.BadRequest("PRISM_TOOL_BRIDGE_INVALID", "prism_prompt_tool_bridge must be a boolean")
+		}
+	}
 	raw, exists := extra[OpenAIWebTransportExtraKey]
 	if !exists || raw == nil {
 		return nil
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be web, codex or prism")
 	}
 	normalized := strings.ToLower(strings.TrimSpace(value))
-	if normalized != OpenAITransportWeb && normalized != OpenAITransportCodex {
-		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+	if normalized != OpenAITransportWeb && normalized != OpenAITransportCodex && normalized != OpenAITransportPrism {
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be web, codex or prism")
 	}
 	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
 		return infraerrors.BadRequest("OPENAI_TRANSPORT_UNSUPPORTED", "openai_transport is only supported for OpenAI OAuth or setup-token accounts")
@@ -1051,7 +1056,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		result.LongContextInheritedCount = inheritedCount
 	}
-	if transport, _ := input.Extra[OpenAIWebTransportExtraKey].(string); openAISettings.transport && transport == OpenAITransportWeb {
+	if transport, _ := input.Extra[OpenAIWebTransportExtraKey].(string); openAISettings.transport && (transport == OpenAITransportWeb || transport == OpenAITransportPrism) {
 		// The bulk repository performs a top-level JSONB merge. Keep Web accounts
 		// isolated from stale Codex-only settings even for direct API callers.
 		input.Extra["openai_passthrough"] = false

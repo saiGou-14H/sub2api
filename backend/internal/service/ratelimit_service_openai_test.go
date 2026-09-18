@@ -268,6 +268,23 @@ func TestHandle429_OpenAIWebMessageLimitUsesDedicatedScope(t *testing.T) {
 	require.False(t, svcShouldRetryOpenAIWeb429(account, body))
 }
 
+func TestHandle429_OpenAIPrismUsesDedicatedScope(t *testing.T) {
+	repo := &oauth429RateLimitRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{
+		ID:       126,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism},
+	}
+	svc.handle429(context.Background(), account, http.Header{"Retry-After": []string{"60"}}, []byte(`{"error":{"message":"prism busy"}}`))
+
+	require.Zero(t, repo.setRateLimitedCalls, "Prism 429 must not write the global account reset")
+	require.Equal(t, 1, repo.setModelRateLimitCalls)
+	require.Equal(t, openAIPrismTransportRateLimitKey, repo.lastModelRateLimitKey)
+	require.Equal(t, "prism_rate_limited", account.OpenAITransportRateLimitReason())
+}
+
 func svcShouldRetryOpenAIWeb429(account *Account, body []byte) bool {
 	svc := &OpenAIGatewayService{}
 	return svc.ShouldRetryOpenAIOAuth429(account, http.Header{}, body)

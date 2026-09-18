@@ -22,7 +22,7 @@ const (
 // 的其余 active 账户一并置为 error 并立即熔断。触发账户自身不在 fan-out 范围内，
 // 仍由常规 402 处理标记。
 func (s *RateLimitService) maybeHandleOpenAITeamLinkedError(ctx context.Context, account *Account, statusCode int, responseBody []byte) {
-	if s == nil || s.accountRepo == nil || statusCode != http.StatusPaymentRequired || !isOpenAIOAuthAccount(account) {
+	if s == nil || s.accountRepo == nil || statusCode != http.StatusPaymentRequired || !isOpenAIOAuthAccount(account) || account.IsOpenAIPrismTransport() {
 		return
 	}
 	if gjson.GetBytes(responseBody, "detail.code").String() != "deactivated_workspace" {
@@ -47,7 +47,7 @@ func (s *RateLimitService) maybeHandleOpenAITeamLinkedError(ctx context.Context,
 	var targets []*Account
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.ID == account.ID || acc.IsShadow() || strings.TrimSpace(acc.GetChatGPTAccountID()) != teamID {
+		if acc.ID == account.ID || acc.IsShadow() || acc.IsOpenAIPrismTransport() || strings.TrimSpace(acc.GetChatGPTAccountID()) != teamID {
 			continue
 		}
 		targets = append(targets, acc)

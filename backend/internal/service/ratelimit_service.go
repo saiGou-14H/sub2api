@@ -1131,6 +1131,12 @@ func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *A
 // handle429 处理429限流错误
 // 解析响应头获取重置时间，标记账号为限流状态
 func (s *RateLimitService) handle429(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
+	if account != nil && account.IsOpenAIPrismTransport() {
+		resetAt := openAIPrismRateLimitResetTime(headers, time.Now())
+		s.persistOpenAITransportRateLimit(ctx, account, openAIPrismTransportRateLimitKey, resetAt, "prism_429")
+		s.notifyAccountSchedulingBlocked(account, resetAt, "prism_rate_limited")
+		return
+	}
 	// ChatGPT Web uses a body-driven hourly message bucket rather than the
 	// Codex x-codex-* quota headers. Keep it completely out of the global
 	// account reset and Codex retry path.
@@ -1355,6 +1361,12 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 	}
 
 	resetAt := time.Now().Add(cooldown)
+	if account != nil && account.Platform == PlatformOpenAI && account.IsOpenAIPrismTransport() {
+		s.persistOpenAITransportRateLimit(ctx, account, openAIPrismTransportRateLimitKey, resetAt, "prism_"+reason)
+		slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "transport", OpenAITransportPrism, "using_default", cooldown.String())
+		s.notifyAccountSchedulingBlocked(account, resetAt, "prism_rate_limited")
+		return
+	}
 	if account != nil && account.Platform == PlatformOpenAI && account.UsesOpenAICodexProtocol() {
 		s.persistOpenAITransportRateLimit(ctx, account, openAICodexTransportRateLimitKey, resetAt, "codex_"+reason)
 	}
@@ -2354,7 +2366,7 @@ func (s *RateLimitService) HandleOpenAIImageRateLimit(ctx context.Context, accou
 // Spark 的 x-codex-* 使用率和 reset 时间只代表 Spark 模型维度，不能写入账号级
 // RateLimitResetAt，否则同一 OAuth 账号上的其他模型也会被错误停调。
 func (s *RateLimitService) HandleOpenAICodexSparkRateLimit(ctx context.Context, account *Account, requestedModel string, statusCode int, headers http.Header, responseBody []byte) bool {
-	if s == nil || account == nil || s.accountRepo == nil || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) {
+	if s == nil || account == nil || s.accountRepo == nil || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsOpenAIPrismTransport() {
 		return false
 	}
 	if !isCodexSparkModel(requestedModel) || !account.ShouldHandleErrorCode(statusCode) {

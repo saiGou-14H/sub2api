@@ -73,7 +73,7 @@
         </p>
       </div>
 
-      <div v-if="isOpenAIAccount && !isOpenAIWebAccount" class="space-y-1.5">
+      <div v-if="isOpenAIAccount && !isOpenAIWebAccount && !isOpenAIPrismAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
           {{ t('admin.accounts.openai.testMode') }}
         </label>
@@ -431,6 +431,11 @@ const isOpenAIWebAccount = computed(() => {
   const transport = props.account?.extra?.openai_transport
   return typeof transport === 'string' && transport.trim().toLowerCase() === 'web'
 })
+const isOpenAIPrismAccount = computed(() =>
+  isOpenAIAccount.value &&
+  ['oauth', 'setup-token'].includes(props.account?.type || '') &&
+  String(props.account?.extra?.openai_transport || '').trim().toLowerCase() === 'prism'
+)
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
@@ -870,7 +875,7 @@ const startTest = async () => {
       prompt: supportsPromptInput.value ? testPrompt.value.trim() : ''
     }
     if (isOpenAIAccount.value) {
-      requestBody.mode = isOpenAIWebAccount.value ? 'web' : testMode.value
+      requestBody.mode = isOpenAIWebAccount.value ? 'web' : isOpenAIPrismAccount.value ? 'default' : testMode.value
     }
     if (isGrokAccount.value) {
       // Always send explicit Grok mode. search/tts/stt/realtime are standalone

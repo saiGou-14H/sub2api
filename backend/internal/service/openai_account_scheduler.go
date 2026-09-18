@@ -2118,6 +2118,10 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	useUpstreamTokenCost bool,
 	platformOverride ...string,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if project := PrismProjectFromContext(ctx); project != nil {
+		selection, err := s.SelectBoundPrismProjectAccount(ctx, groupID, project, requestedModel, excludedIDs, requiredCapability, requireCompact)
+		return selection, OpenAIAccountScheduleDecision{Layer: "prism_project"}, err
+	}
 	platform := PlatformOpenAI
 	if len(platformOverride) > 0 {
 		platform = platformOverride[0]
