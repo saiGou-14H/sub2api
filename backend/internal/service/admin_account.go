@@ -378,6 +378,9 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 // selector. It is meaningful only for OpenAI OAuth-like accounts so a stale or
 // misplaced value cannot silently change operator expectations.
 func ValidateOpenAITransportExtra(platform, accountType string, extra map[string]any) error {
+	if err := ValidateCodexTurnStateExtra(extra); err != nil {
+		return err
+	}
 	if extra == nil {
 		return nil
 	}
@@ -447,6 +450,13 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 		return normalized, err
 	}
 
+	// An older account editor may omit this independent opt-in. Preserve it
+	// unless the caller explicitly sends a boolean (including false).
+	if _, provided := input.Extra[CodexTurnStateEnabledExtraKey]; !provided {
+		if enabled, ok := account.Extra[CodexTurnStateEnabledExtraKey].(bool); ok {
+			normalized[CodexTurnStateEnabledExtraKey] = enabled
+		}
+	}
 	_, provided := input.Extra[openAILongContextBillingEnabledKey]
 	current, hasCurrent := account.Extra[openAILongContextBillingEnabledKey].(bool)
 	if !provided {
@@ -955,6 +965,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := ValidateCodexTurnStateExtra(updates); err != nil {
+		return err
+	}
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -992,6 +1005,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if err := ValidateCodexTurnStateExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
