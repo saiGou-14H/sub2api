@@ -1831,7 +1831,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
-	if err := s.applyCodexTicket(ctx, c, account, body, req.Header); err != nil {
+	if err := s.applyCodexTicket(ctx, c, account, body, req); err != nil {
 		return nil, err
 	}
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")

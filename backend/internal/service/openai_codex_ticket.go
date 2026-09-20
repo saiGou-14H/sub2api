@@ -23,8 +23,8 @@ func IsCodexTicketPolicyError(err error) bool {
 // Run after account echo isolation and all outbound identity/header rewriting.
 // The body already contains the final upstream model. Both legacy compact and
 // native V2 compaction bypass the experiment; the counter endpoint does not use this builder.
-func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Context, account *Account, body []byte, headers http.Header) error {
-	if s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) {
+func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Context, account *Account, body []byte, req *http.Request) error {
+	if req == nil || s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) {
 		return nil
 	}
 	model := gjson.GetBytes(body, "model").String()
@@ -32,7 +32,10 @@ func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Cont
 		s.codexTicketRuntime.ObserveCompactSkip(ctx, account, model)
 		return nil
 	}
-	err := s.codexTicketRuntime.Apply(ctx, account, model, headers)
+	receipt, err := s.codexTicketRuntime.ApplyWithReceipt(ctx, account, model, req.Header)
+	if err == nil {
+		attachCodexTicketReceipt(req, receipt)
+	}
 	if err != nil && c != nil && c.Writer != nil {
 		code := "CODEX_TICKET_CONTROL_UNAVAILABLE"
 		if errors.Is(err, ErrCodexTicketMissing) {
