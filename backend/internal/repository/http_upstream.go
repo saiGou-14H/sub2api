@@ -95,6 +95,7 @@ const (
 )
 
 const (
+	upstreamProtocolModeCodexHarvest     = "codex_harvest_h1"
 	upstreamProtocolModeDefault          = "default"
 	upstreamProtocolModeLongStreamH2     = "long_stream_h2"
 	upstreamProtocolModeOpenAIH1         = "openai_h1"
@@ -917,6 +918,9 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 
 func (s *httpUpstreamService) applyProfilePoolSettings(settings poolSettings, profile service.HTTPUpstreamProfile) poolSettings {
 	switch profile {
+	case service.HTTPUpstreamProfileCodexHarvest:
+		settings = poolSettings{maxIdleConns: 4, maxIdleConnsPerHost: 4, maxConnsPerHost: 4,
+			idleConnTimeout: 30 * time.Second, responseHeaderTimeout: 10 * time.Second}
 	case service.HTTPUpstreamProfileOpenAI:
 		settings.responseHeaderTimeout = 0
 		if s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIResponseHeaderTimeout > 0 {
@@ -1008,6 +1012,9 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
+	if profile == service.HTTPUpstreamProfileCodexHarvest {
+		return upstreamProtocolModeCodexHarvest
+	}
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
@@ -1343,6 +1350,10 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		if _, err := enableHTTP2KeepAlive(transport); err != nil {
 			return nil, err
 		}
+	case upstreamProtocolModeCodexHarvest:
+		transport.ForceAttemptHTTP2 = false
+		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+		transport.MaxResponseHeaderBytes = 64 << 10
 	case upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
