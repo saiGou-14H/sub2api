@@ -24,6 +24,7 @@ type AdminHandlers struct {
 	Redeem                 *admin.RedeemHandler
 	Promo                  *admin.PromoHandler
 	Setting                *admin.SettingHandler
+	CodexTicket            *admin.CodexTicketHandler
 	Ops                    *admin.OpsHandler
 	System                 *admin.SystemHandler
 	Subscription           *admin.SubscriptionHandler

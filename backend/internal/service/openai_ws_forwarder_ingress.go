@@ -116,7 +116,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	forceHTTPBridge := account.Platform == PlatformGrok ||
-		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
+		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account)) ||
+		s.codexTicketRequiresHTTPBridge(ctx, account)
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
 	if modeRouterV2Enabled && !forceHTTPBridge {
@@ -1449,6 +1450,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	for {
+		// Native connections cannot change upstream transports mid-session. Recheck
+		// on every turn (including retries), so a later opt-in requires reconnect.
+		if err := s.guardCodexTicketNativeWebSocket(ctx, account); err != nil {
+			return err
+		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {
 			if err := hooks.BeforeRequest(turn, currentPayload, currentOriginalModel); err != nil {
 				return err

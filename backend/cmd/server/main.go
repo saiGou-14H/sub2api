@@ -158,6 +158,9 @@ func runMainServer() {
 			log.Printf("Plugin manager started in degraded state: %v", err)
 		}
 	}
+	if app.CodexTicket != nil {
+		app.CodexTicket.Start(context.Background())
+	}
 	if app.PromptAudit != nil {
 		if err := app.PromptAudit.Start(context.Background()); err != nil {
 			// Startup continues so unrelated APIs stay up. Fail-closed (unavailable)
