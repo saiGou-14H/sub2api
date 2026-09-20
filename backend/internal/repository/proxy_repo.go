@@ -144,9 +144,28 @@ func proxyProbeIdentityFromService(proxyIn *service.Proxy) proxyProbeIdentity {
 }
 
 func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) (*dbent.Proxy, error) {
+	cfg, err := lockCodexTicketSettings(ctx, client)
+	if err != nil {
+		return nil, err
+	}
 	currentIdentity, err := lockProxyProbeIdentity(ctx, client, proxyIn.ID)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.HarvestProxyID != nil && *cfg.HarvestProxyID == proxyIn.ID {
+		current, err := client.Proxy.Get(ctx, proxyIn.ID)
+		if err != nil {
+			return nil, err
+		}
+		expiryChanged := (current.ExpiresAt == nil) != (proxyIn.ExpiresAt == nil)
+		if current.ExpiresAt != nil && proxyIn.ExpiresAt != nil {
+			expiryChanged = !current.ExpiresAt.Equal(*proxyIn.ExpiresAt)
+		}
+		if expiryChanged || currentIdentity != proxyProbeIdentityFromService(proxyIn) {
+			if err := bumpCodexTicketProxyRevision(ctx, client, cfg, proxyIn.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
@@ -274,8 +293,35 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
-	return err
+	client := r.client
+	var tx *dbent.Tx
+	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
+		client = contextTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && err != dbent.ErrTxStarted {
+			return err
+		}
+		if tx != nil {
+			defer tx.Rollback()
+			client = tx.Client()
+		}
+	}
+	cfg, err := lockCodexTicketSettings(ctx, client)
+	if err != nil {
+		return err
+	}
+	if cfg.HarvestProxyID != nil && *cfg.HarvestProxyID == id {
+		return service.ErrCodexTicketProxyInUse
+	}
+	if _, err = client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
 }
 
 func (r *proxyRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Proxy, *pagination.PaginationResult, error) {
@@ -658,7 +704,7 @@ func (r *proxyRepository) SweepExpiredProxies(ctx context.Context, now time.Time
 			logger.LegacyPrintf("repository.proxy", "[ProxyExpiry] proxy %d expired but fallback chain unresolved (cycle/all-expired); accounts kept", p.ID)
 		}
 
-		changedAccountIDs, sweepErr := r.sweepOneExpiredProxy(ctx, p.ID, target, change)
+		changedAccountIDs, sweepErr := r.sweepOneExpiredProxy(ctx, p.ID, target, change, now)
 		if sweepErr != nil {
 			return totalChanged, sweepErr
 		}
@@ -696,7 +742,10 @@ func sortedUniqueAccountIDs(accountIDs []int64) []int64 {
 
 // sweepOneExpiredProxy 在单事务内原子执行：标记代理 expired + 改投绑定账号。
 // 若 r.client 已绑定事务（测试注入场景），直接在 r.sql 上执行，由外层事务保证原子性。
-func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, proxyID int64, target *int64, change bool) ([]int64, error) {
+func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, proxyID int64, target *int64, change bool, now time.Time) ([]int64, error) {
+	if contextTx := dbent.TxFromContext(ctx); contextTx != nil {
+		return r.sweepOneExpiredProxyOnExec(ctx, contextTx, proxyID, target, change, now)
+	}
 	// 尝试开启子事务；若 r.client 已是事务 client，则返回 ErrTxStarted，退回使用 r.sql。
 	tx, txErr := r.client.Tx(ctx)
 	if txErr != nil {
@@ -704,13 +753,13 @@ func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, proxyID int6
 			return nil, txErr
 		}
 		// 已在外层事务中（集成测试场景），直接用 r.sql 执行
-		return r.sweepOneExpiredProxyOnExec(ctx, r.sql, proxyID, target, change)
+		return r.sweepOneExpiredProxyOnExec(ctx, r.sql, proxyID, target, change, now)
 	}
 
 	// 使用新事务执行
 	var accountIDs []int64
 	var err error
-	accountIDs, err = r.sweepOneExpiredProxyOnExec(ctx, tx, proxyID, target, change)
+	accountIDs, err = r.sweepOneExpiredProxyOnExec(ctx, tx, proxyID, target, change, now)
 	if err != nil {
 		_ = tx.Rollback()
 		return nil, err
@@ -722,7 +771,27 @@ func (r *proxyRepository) sweepOneExpiredProxy(ctx context.Context, proxyID int6
 }
 
 // sweepOneExpiredProxyOnExec 在给定的 sqlExecutor 上执行：标记 expired + 改投账号。
-func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec sqlExecutor, proxyID int64, target *int64, change bool) ([]int64, error) {
+func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec sqlExecutor, proxyID int64, target *int64, change bool, at ...time.Time) ([]int64, error) {
+	now := time.Now()
+	if len(at) > 0 {
+		now = at[0]
+	}
+	cfg, err := lockCodexTicketSettings(ctx, exec)
+	if err != nil {
+		return nil, err
+	}
+	// Recheck the snapshot under the proxy lock: an admin may have renewed it.
+	var status string
+	var expires sql.NullTime
+	if err := scanSingleRow(ctx, exec, `SELECT status, expires_at FROM proxies WHERE id=$1 AND deleted_at IS NULL FOR NO KEY UPDATE`, []any{proxyID}, &status, &expires); err != nil {
+		return nil, err
+	}
+	if status != service.StatusActive || !expires.Valid || expires.Time.After(now) {
+		return nil, nil
+	}
+	if err := bumpCodexTicketProxyRevision(ctx, exec, cfg, proxyID); err != nil {
+		return nil, err
+	}
 	if _, err := exec.ExecContext(ctx,
 		`UPDATE proxies SET status=$1, updated_at=NOW() WHERE id=$2 AND deleted_at IS NULL`,
 		service.StatusExpired, proxyID); err != nil {
@@ -738,10 +807,7 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		}
 		return nil, nil
 	}
-	var (
-		rows *sql.Rows
-		err  error
-	)
+	var rows *sql.Rows
 	// Match the current proxy even after an earlier fallback. Keep the first
 	// origin so manual revert still restores the originally assigned proxy.
 	if target == nil {

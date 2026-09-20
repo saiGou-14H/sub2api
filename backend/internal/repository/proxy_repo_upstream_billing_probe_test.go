@@ -24,6 +24,7 @@ func TestProxyUpdateInvalidatesBoundProbeSnapshotsAndEnqueuesOutboxAtomically(t 
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	expectCodexTicketConfigLock(mock, nil)
 	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
@@ -64,6 +65,7 @@ func TestProxyUpdateRollsBackWhenProbeInvalidationOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	expectCodexTicketConfigLock(mock, nil)
 	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
@@ -94,6 +96,7 @@ func TestProxyUpdateSkipsProbeInvalidationForNonIdentityChange(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	expectCodexTicketConfigLock(mock, nil)
 	mock.ExpectQuery(`(?s)` + regexp.QuoteMeta("SELECT protocol, host, port") + `.*` + regexp.QuoteMeta("FOR NO KEY UPDATE")).
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
