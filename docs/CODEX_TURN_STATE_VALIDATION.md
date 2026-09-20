@@ -1,5 +1,7 @@
 # Codex turn-state 开发与验证记录
 
+> 本文记录初版独立分支开发时的验证快照。该版本随后获用户授权发布到9999；2026-09-20再次获要求后已快进合入本地main继续优化。新的账号列表、状态查询、注入观测与失效刷新验证见 [CODEX_ACCOUNT_STATE_VALIDATION.md](CODEX_ACCOUNT_STATE_VALIDATION.md)。下文“原main未修改”“未部署”等为初版开发验收时事实，不是当前运行状态。
+
 ## 开发范围
 
 - 基线：`saiGou-14H/sub2api origin/main@b78dd86a4ecc74a1291d14efb30c6a5a59c4de5e`（开始开发时重新fetch确认）。
