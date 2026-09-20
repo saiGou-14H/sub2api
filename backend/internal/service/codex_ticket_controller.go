@@ -323,6 +323,8 @@ func (r *CodexTicketRuntime) harvest(generationCtx context.Context, owner string
 // generation ownership. Tests can supply a short task deadline without timers
 // or timeout settings leaking into the public runtime API.
 func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.Context, owner string, cfg CodexTicketSettings, proxyURL string, k CodexTicketKey, probe CodexTicketProbe) {
+	ctx, stopWatch := r.watchCodexTicketAccount(ctx, k, 2*time.Second)
+	defer stopWatch()
 	a, e := r.accounts.GetByID(ctx, k.AccountID)
 	if e != nil || a == nil || !a.CodexTurnStateEnabled() || !CodexTicketAccountSupported(a) || CodexTicketIdentityScope(a) != k.IdentityScope || !a.IsSchedulableForModelWithContext(ctx, k.Model) {
 		return
@@ -381,7 +383,7 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 			r.ready[k] = t.ExpiresAt
 			r.lastError = ""
 			r.mu.Unlock()
-		} else {
+		} else if ctx.Err() == nil {
 			r.setError("commit_unavailable")
 		}
 		return
@@ -390,7 +392,9 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 }
 
 func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner string, k CodexTicketKey, retry CodexTicketRetry, result CodexTicketProbeResult, err error) {
-	if ctx.Err() != nil {
+	// A disable or identity change may complete before the watcher observes it.
+	// Do not turn administrative cancellation into failure backoff or cooldown.
+	if ctx.Err() != nil || !r.codexTicketAccountCurrent(ctx, k) {
 		return
 	}
 	now, e := r.cache.Now(ctx)
@@ -438,7 +442,9 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 	// only clear their ordinary retry key, never this account-wide deadline.
 	if authRejected || quotaRejected || result.HTTPStatus == 429 {
 		if e := r.cache.ExtendProbeCooldown(ctx, owner, k, now.Add(delay)); e != nil {
-			r.setError("retry_unavailable")
+			if ctx.Err() == nil {
+				r.setError("retry_unavailable")
+			}
 			return
 		}
 	}
