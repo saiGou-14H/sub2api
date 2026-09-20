@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '@/api/client'
-import { getCodexTicketSettings, saveCodexTicketSettings, getCodexTicketStatus, getHarvestProxyOptions, testHarvestProxy, type CodexTicketConfig } from '../codexTicket'
+import { getCodexAccountStates, getCodexTicketSettings, saveCodexTicketSettings, getCodexTicketStatus, getHarvestProxyOptions, testHarvestProxy, type CodexTicketConfig } from '../codexTicket'
 vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn(), post: vi.fn() } }))
 beforeEach(() => vi.clearAllMocks())
 describe('Codex ticket admin API', () => {
+  it('queries deduplicated account IDs with AbortSignal and unwraps data', async () => {
+    const signal = new AbortController().signal
+    const data = { accounts: [] }
+    vi.mocked(apiClient.get).mockResolvedValue({ data })
+    expect(await getCodexAccountStates([1, 2, 1], signal)).toBe(data)
+    expect(apiClient.get).toHaveBeenCalledWith('/admin/settings/openai-codex-ticket/accounts', { params: { account_ids: '1,2' }, signal })
+    await expect(getCodexAccountStates([])).rejects.toThrow()
+    await expect(getCodexAccountStates(Array.from({ length: 101 }, (_, i) => i + 1))).rejects.toThrow()
+  })
   it('uses the admin path once and consumes already-unwrapped response data', async () => {
     const signal = new AbortController().signal
     const data = { settings: { revision: 'large-revision-9007199254740993' } }

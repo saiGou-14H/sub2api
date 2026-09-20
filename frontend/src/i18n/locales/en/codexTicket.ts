@@ -1,4 +1,16 @@
 export default {
+  accounts: {
+    title: 'Codex state', refresh: 'Refresh status', loading: 'Loading', empty: 'No model status',
+    failed: 'Status could not be read.', injected: 'Header set', history: 'Historical header injection',
+    captured_at: 'Captured', expires_at: 'Expires', refresh_at: 'Next refresh', next_attempt_at: 'Retry after',
+    injection_count: 'Injections in shared cache window', last_injected_at: 'Last header injection (history)',
+    decision: 'Latest decision', reason: 'Reason', error: 'Collection error', request: 'Request ID',
+    copy: 'Copy request ID', copied: 'Copied', copyFailed: 'Copy failed', unknown: 'Unknown category',
+    headerHint: 'header_set means only that an outbound request header was set. It does not confirm upstream acceptance or response quality.',
+    reasons: { ticket_ready: 'State available', ticket_missing: 'State missing', control_unavailable: 'Control unavailable', proxy_unavailable: 'Proxy unavailable', compact: 'Compaction request', identity_changed: 'Account identity changed', unknown: 'Unknown reason' },
+    outcomes: { header_set: 'Outbound header set', skipped: 'Skipped', rejected: 'Rejected', unknown: 'Unknown decision' },
+    statuses: { disabled: 'Disabled', unsupported: 'Unsupported', inactive: 'Inactive', waiting: 'Waiting', ready: 'State available', refreshing: 'Refreshing', expired: 'Expired', backoff: 'Retry backoff', proxy_unavailable: 'Proxy unavailable', unavailable: 'Unavailable' }
+  },
   title: 'Codex turn state (experimental)',
   description: 'The global switch and each account switch must both be enabled. Harvesting uses the selected managed proxy; business requests keep their account proxy. An unavailable proxy never falls back to a direct connection.',
   transportHint: 'Supports HTTP and the WebSocket HTTP bridge. Existing native WebSocket connections must reconnect after this feature is enabled. The runtime support list below is authoritative.',

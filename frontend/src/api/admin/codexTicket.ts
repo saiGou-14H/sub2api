@@ -31,6 +31,48 @@ export interface TicketSettingsSnapshot {
   runtime: TicketRuntimeStatus | null
   runtime_error_reason: string | null
 }
+export type CodexAccountStatus = 'disabled' | 'unsupported' | 'inactive' | 'waiting' | 'ready' | 'refreshing' | 'expired' | 'backoff' | 'proxy_unavailable' | 'unavailable'
+export interface CodexAccountModel {
+  model: string
+  status: CodexAccountStatus
+  captured_at: string | null
+  expires_at: string | null
+  refresh_at: string | null
+  next_attempt_at: string | null
+  last_error_code: string | null
+  injection_count: number
+  last_injected_at: string | null
+  last_request_id: string | null
+  last_outcome: string | null
+  last_reason: string | null
+}
+export interface CodexAccountState {
+  account_id: number
+  enabled: boolean
+  supported: boolean
+  status: CodexAccountStatus
+  models: CodexAccountModel[]
+}
+export interface CodexAccountsSnapshot {
+  desired_revision: string
+  applied_revision: string | null
+  global_enabled: boolean
+  proxy_state: string
+  server_time: string
+  counter_scope: 'shared_cache_window'
+  accounts: CodexAccountState[]
+}
+export async function getCodexAccountStates(accountIds: number[], signal?: AbortSignal): Promise<CodexAccountsSnapshot> {
+  const ids = [...new Set(accountIds)]
+  if (!ids.length || ids.length > 100 || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
+    throw new Error('Invalid account IDs')
+  }
+  const { data } = await apiClient.get<CodexAccountsSnapshot>(`${path}/accounts`, {
+    params: { account_ids: ids.join(',') }, signal
+  })
+  return data
+}
+
 const path = '/admin/settings/openai-codex-ticket'
 export async function getCodexTicketSettings(signal?: AbortSignal): Promise<TicketSettingsSnapshot> {
   const { data } = await apiClient.get<TicketSettingsSnapshot>(path, { signal })

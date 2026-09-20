@@ -1,0 +1,63 @@
+import { describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import en from '@/i18n/locales/en/codexTicket'
+import type { CodexAccountState } from '@/api/admin/codexTicket'
+import Badge from '../CodexAccountStateBadge.vue'
+import Dialog from '../CodexAccountStateDialog.vue'
+vi.mock('@/api/admin/codexTicket', () => ({ getCodexAccountStates: vi.fn() }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key.split('.').slice(1).reduce<unknown>((value, part) => (value as Record<string, unknown>)?.[part], en) ?? key }) }))
+const state = (id = 1): CodexAccountState => ({ account_id: id, enabled: true, supported: true, status: 'ready', models: [{ model: 'gpt-test', status: 'ready', captured_at: null, expires_at: null, refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 3, last_injected_at: null, last_request_id: 'request-one', last_outcome: 'header_set', last_reason: null }] })
+const global = { stubs: { BaseDialog: { template: '<div><slot/><slot name="footer"/></div>' }, Icon: true } }
+describe('Codex account UI', () => {
+  it('keeps two accounts separate and does not equate ready with header injection', () => {
+    const one = mount(Badge, { props: { accountId: 1, state: state() }, global })
+    const twoState = state(2)
+    twoState.models[0].last_outcome = 'skipped'
+    const two = mount(Badge, { props: { accountId: 2, state: twoState }, global })
+    expect(one.text()).toContain('Header set')
+    expect(two.text()).toContain('State available')
+    expect(two.text()).not.toContain('Header set')
+    const mismatched = mount(Badge, { props: { accountId: 2, state: state() }, global })
+    expect(mismatched.text()).toContain('Unavailable')
+    expect(mismatched.text()).not.toContain('Header set')
+  })
+  it('shows expired historical injections without green success', () => {
+    const expired = state()
+    expired.status = 'expired'
+    const wrapper = mount(Badge, { props: { accountId: 1, state: expired }, global })
+    expect(wrapper.text()).toContain('Expired')
+    expect(wrapper.text()).toContain('Historical header injection')
+    expect(wrapper.html()).not.toContain('text-green-600')
+  })
+  it.each(['disabled', 'unsupported', 'unavailable'] as const)('renders %s safely', status => {
+    const record = state()
+    record.status = status
+    const wrapper = mount(Badge, { props: { accountId: 1, state: record }, global })
+    expect(wrapper.text()).toContain(en.accounts.statuses[status])
+    expect(wrapper.html()).not.toContain('text-green-600')
+  })
+  it('shows model metadata, null times, closed errors and copies request IDs', async () => {
+    const record = state()
+    record.models[0].last_error_code = 'secret-token-error'
+    record.models[0].last_reason = 'secret-state-value'
+    const copy = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } })
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'Account A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.text()).toContain('gpt-test')
+    expect(wrapper.text()).toContain('Injections in shared cache window')
+    expect(wrapper.text()).toContain('3')
+    expect(wrapper.text()).toContain('Outbound header set')
+    expect(wrapper.text()).toContain('Last header injection (history)')
+    expect(wrapper.text()).not.toContain('secret-')
+    await wrapper.get('[aria-label="Copy request ID"]').trigger('click')
+    expect(copy).toHaveBeenCalledWith('request-one')
+    await wrapper.setProps({ account: { id: 2, name: 'Account B' } })
+    expect(wrapper.text()).not.toContain('gpt-test')
+    expect(wrapper.text()).not.toContain('request-one')
+    expect(wrapper.text()).toContain('No model status')
+    await wrapper.setProps({ state: undefined, failed: true })
+    expect(wrapper.text()).toContain('Status could not be read')
+    await wrapper.get('[aria-label="Refresh status"]').trigger('click')
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+})

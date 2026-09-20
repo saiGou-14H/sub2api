@@ -1,4 +1,16 @@
 export default {
+  accounts: {
+    title: 'Codex 状态', refresh: '刷新状态', loading: '读取中', empty: '暂无模型状态',
+    failed: '状态读取失败。', injected: '请求头已写入', history: '历史请求头注入',
+    captured_at: '捕获时间', expires_at: '过期时间', refresh_at: '下次刷新', next_attempt_at: '退避截止',
+    injection_count: '共享缓存窗口内注入次数', last_injected_at: '最近请求头注入（历史）',
+    decision: '最近决策', reason: '原因', error: '采集错误', request: '请求 ID',
+    copy: '复制请求 ID', copied: '已复制', copyFailed: '复制失败', unknown: '未知分类',
+    headerHint: 'header_set 仅表示出站请求头已写入，不证明上游接收或响应质量。',
+    reasons: { ticket_ready: '状态可用', ticket_missing: '缺少状态', control_unavailable: '运行时控制不可用', proxy_unavailable: '代理不可用', compact: '压缩请求', identity_changed: '账号身份已变化', unknown: '未知原因' },
+    outcomes: { header_set: '出站请求头已写入', skipped: '已跳过', rejected: '已拒绝', unknown: '未知决策' },
+    statuses: { disabled: '已关闭', unsupported: '不支持', inactive: '未激活', waiting: '等待采集', ready: '状态可用', refreshing: '刷新中', expired: '已过期', backoff: '退避等待', proxy_unavailable: '代理不可用', unavailable: '不可用' }
+  },
   title: 'Codex 状态采集与注入（实验性）',
   description: '全局开关与每个账号的独立开关必须同时开启。采集使用所选托管代理，业务请求沿用账号代理；采集代理不可用时不会回退到直连。',
   transportHint: '支持 HTTP 及 WebSocket HTTP 桥。已建立的原生 WebSocket 连接在启用后需要重连；实际支持范围以以下运行时清单为准。',
