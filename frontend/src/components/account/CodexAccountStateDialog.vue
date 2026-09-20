@@ -11,6 +11,8 @@ defineEmits<{ close: []; refresh: [] }>()
 const { t } = useI18n()
 const copied = ref('')
 const own = computed(() => props.account && props.state?.account_id === props.account.id ? props.state : undefined)
+const canShowModelVerification = computed(() => own.value?.enabled === true && own.value.supported === true &&
+  !['unavailable', 'unsupported', 'disabled', 'inactive', 'proxy_unavailable'].includes(safeCodexStatus(own.value.status)))
 const dates = ['captured_at', 'expires_at', 'refresh_at', 'next_attempt_at', 'verified_at', 'last_injected_at', 'last_invalidated_at'] as const
 const errors = ['model_mismatch', 'verification_failed', 'state_312', 'transport_unsupported', 'identity_unresolved', 'token_unavailable', 'stream_failed', 'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable', 'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost', 'snapshot_unavailable', 'collector_unavailable', 'candidate_read_failed', 'commit_unavailable', 'probe_failed', 'probe_timeout', 'retry_unavailable']
 const reasons = ['ticket_ready', 'ticket_missing', 'control_unavailable', 'proxy_unavailable', 'compact', 'identity_changed']
@@ -46,7 +48,7 @@ async function copy(value: string) {
     <p v-if="!own?.models.length" class="py-6 text-sm text-gray-500">{{ t(loading ? 'codexTicket.accounts.loading' : 'codexTicket.accounts.empty') }}</p>
     <section v-for="(model, index) in own?.models ?? []" :key="`${model.model}-${index}`" class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-600">
       <div class="flex flex-wrap justify-between gap-2 text-sm font-medium"><span class="break-all">{{ model.model }}</span><span :class="model.status === 'ready' && own?.status === 'ready' ? 'text-green-600 dark:text-green-400' : 'text-gray-500'">{{ t(`codexTicket.accounts.statuses.${safeCodexStatus(model.status)}`) }}</span></div>
-      <p class="mt-2 text-xs text-gray-500" data-testid="codex-verification">{{ t(model.verified === true && ['ready', 'refreshing'].includes(model.status) && ['ready', 'refreshing'].includes(own?.status ?? '') ? 'codexTicket.accounts.verified' : 'codexTicket.accounts.notVerified') }}</p>
+      <p class="mt-2 text-xs text-gray-500" data-testid="codex-verification">{{ t(model.verified === true && ['ready', 'refreshing'].includes(model.status) && canShowModelVerification ? 'codexTicket.accounts.verified' : 'codexTicket.accounts.notVerified') }}</p>
       <dl class="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div><dt class="text-xs text-gray-500">{{ t('codexTicket.accounts.actual_model') }}</dt><dd class="break-all">{{ model.actual_model || '-' }}</dd></div>
         <div><dt class="text-xs text-gray-500">{{ t('codexTicket.accounts.verification_model') }}</dt><dd class="break-all">{{ model.verification_model || '-' }}</dd></div>

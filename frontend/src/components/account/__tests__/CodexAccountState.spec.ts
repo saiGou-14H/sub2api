@@ -38,6 +38,30 @@ describe('Codex account UI', () => {
     expect(wrapper.text()).toContain(en.accounts.verified_at)
     expect(wrapper.html()).not.toContain('text-green-600')
   })
+  it.each(['expired', 'invalidated', 'backoff', 'waiting'] as const)('keeps per-model verification under aggregate %s', status => {
+    const record = state()
+    record.status = status
+    record.models.push({ ...record.models[0], model: 'other', status })
+    record.models.push({ ...record.models[0], model: 'refreshing-model', status: 'refreshing' })
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.findAll('[data-testid="codex-verification"]').map(node => node.text())).toEqual([
+      en.accounts.verified, en.accounts.notVerified, en.accounts.verified
+    ])
+    expect(wrapper.text()).toContain(en.accounts.statuses[status])
+    expect(wrapper.html()).not.toContain('text-green-600')
+  })
+  it.each(['unavailable', 'unsupported', 'disabled', 'inactive', 'proxy_unavailable'] as const)('blocks model verification for account %s', status => {
+    const record = state()
+    record.status = status
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.get('[data-testid="codex-verification"]').text()).toBe(en.accounts.notVerified)
+  })
+  it.each(['enabled', 'supported'] as const)('requires account %s before showing model verification', field => {
+    const record = state()
+    record[field] = false
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.get('[data-testid="codex-verification"]').text()).toBe(en.accounts.notVerified)
+  })
   it('requires verified true and never displays unknown invalidation text', () => {
     const record = state()
     Object.assign(record.models[0], { verified: false, verified_at: '2026-01-01T00:00:00Z', last_invalidation_reason: 'secret-state' })
