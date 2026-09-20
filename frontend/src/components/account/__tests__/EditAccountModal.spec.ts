@@ -330,6 +330,50 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it.each([undefined, null, false, 'true', 1, true])('reads strict Codex account opt-in: %s', async (stored) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { codex_turn_state_enabled: stored, custom_metadata: { keep: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="edit-codex-turn-state"]')
+    expect(toggle.element.checked).toBe(stored === true)
+    await toggle.setValue(true)
+    await toggle.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      codex_turn_state_enabled: false, custom_metadata: { keep: true }
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['web', 'prism'])('retains opt-in through %s transport and back', async (transport) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra.codex_turn_state_enabled = true
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue(transport)
+    expect(wrapper.find('[data-testid="edit-codex-turn-state"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      codex_turn_state_enabled: true, openai_transport: transport
+    })
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue('codex')
+    expect(wrapper.get<HTMLInputElement>('[data-testid="edit-codex-turn-state"]').element.checked).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { type: 'apikey' }, { platform: 'anthropic' }, { parent_account_id: 3 },
+    { credentials: { auth_mode: 'agentIdentity' } },
+    { credentials: { openai_auth_mode: 'agentIdentity' } },
+    { extra: { openai_transport: 'web' } }, { extra: { openai_transport: 'prism' } }
+  ])('hides Codex opt-in for excluded account %j', async (overrides) => {
+    const account = { ...buildOpenAIOAuthParentAccount(), ...overrides }
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="edit-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2028-02-29T12:34:00'))

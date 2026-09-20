@@ -82,6 +82,19 @@
         </div>
       </div>
 
+      <p v-if="allOpenAIOAuth" class="input-hint" data-testid="bulk-codex-turn-state-eligibility">
+        {{ t('codexTicket.bulkEligibilityHint') }}
+      </p>
+      <div v-if="showCodexTurnState" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="input-label" for="bulk-codex-turn-state">{{ t('codexTicket.accountEnabled') }}</label>
+        <select id="bulk-codex-turn-state" v-model="codexTurnStateMode" class="input" data-testid="bulk-codex-turn-state">
+          <option value="unchanged">{{ t('codexTicket.unchanged') }}</option>
+          <option value="on">{{ t('codexTicket.on') }}</option>
+          <option value="off">{{ t('codexTicket.off') }}</option>
+        </select>
+        <p class="input-hint">{{ t('codexTicket.accountHint') }}</p>
+      </div>
+
       <!-- OpenAI OAuth-like upstream transport -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between gap-4">
@@ -1599,9 +1612,11 @@ import {
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 import { openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
+import { supportsCodexTurnState, type CodexTurnStateAccount } from '@/utils/codexTurnState'
 interface Props {
   show: boolean
   accountIds: number[]
+  selectedAccounts?: CodexTurnStateAccount[]
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
   target?: {
@@ -1780,6 +1795,16 @@ const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
 const openaiTransportOptions = computed(() => openAITransportOptions(t))
+const codexTurnStateMode = ref<'unchanged' | 'on' | 'off'>('unchanged')
+const showCodexTurnState = computed(() => {
+  if (targetMode.value !== 'selected' || !allOpenAIOAuth.value || !props.accountIds.length) return false
+  const accounts = props.selectedAccounts ?? []
+  return props.accountIds.every(id => {
+    const account = accounts.find(account => account.id === id)
+    return !!account && supportsCodexTurnState(account,
+      enableOpenAITransport.value ? openaiTransportMode.value : undefined)
+  })
+})
 const prismPromptToolBridge = ref(false)
 const switchingToPrismTransport = computed(() =>
   enableOpenAITransport.value && allOpenAIOAuth.value && openaiTransportMode.value === 'prism'
@@ -2077,6 +2102,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (showCodexTurnState.value && codexTurnStateMode.value !== 'unchanged') {
+    ensureExtra().codex_turn_state_enabled = codexTurnStateMode.value === 'on'
+  }
+
   if (enableOpenAITransport.value && allOpenAIOAuth.value) {
     const extra = ensureExtra()
     extra.openai_transport = openaiTransportMode.value
@@ -2332,6 +2361,7 @@ const handleSubmit = async () => {
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
+    (showCodexTurnState.value && codexTurnStateMode.value !== 'unchanged') ||
     (enableOpenAITransport.value && allOpenAIOAuth.value) ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2537,6 +2567,7 @@ watch(
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiTransportMode.value = 'codex'
+      codexTurnStateMode.value = 'unchanged'
       prismPromptToolBridge.value = false
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false

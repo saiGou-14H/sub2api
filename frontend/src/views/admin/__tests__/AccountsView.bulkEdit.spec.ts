@@ -120,7 +120,7 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target'],
+  props: ['show', 'target', 'selectedAccounts'],
   template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
 }
 
@@ -163,6 +163,61 @@ describe('admin AccountsView bulk edit scope', () => {
     getAllGroups.mockResolvedValue([])
     probeUpstreamBilling.mockResolvedValue({})
     probeUpstreamBillingBatch.mockResolvedValue([])
+  })
+
+  it('passes only selected rows with transport, identity and shadow metadata to bulk edit', async () => {
+    const rows = [
+      { id: 1, name: 'Codex', platform: 'openai', type: 'oauth', status: 'active', schedulable: true,
+        parent_account_id: null, credentials: { auth_mode: 'oauth' }, extra: { openai_transport: 'codex' } },
+      { id: 2, name: 'Identity shadow', platform: 'openai', type: 'oauth', status: 'active', schedulable: true,
+        parent_account_id: 1, credentials: { auth_mode: 'agentIdentity' }, extra: { openai_transport: 'web' } }
+    ]
+    listAccounts.mockResolvedValue({ items: rows, total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /></div>' },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: true,
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+    const modal = wrapper.getComponent(BulkEditAccountModalStub)
+    expect(modal.props('selectedAccounts')).toEqual([])
+    const checkboxes = wrapper.findAll('[data-test="select-row"] input[type="checkbox"]')
+    await checkboxes[0].setValue(true)
+    expect(modal.props('selectedAccounts')).toEqual([rows[0]])
+    await checkboxes[1].setValue(true)
+    expect(modal.props('selectedAccounts')).toEqual(rows)
+    await checkboxes[0].setValue(false)
+    expect(modal.props('selectedAccounts')).toEqual([rows[1]])
+    wrapper.unmount()
   })
 
   it('opens bulk edit in filtered-results mode from the bulk actions dropdown', async () => {

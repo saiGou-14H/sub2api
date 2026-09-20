@@ -98,6 +98,74 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it.each(['on', 'off'])('saves explicit Codex opt-in %s as a boolean patch', async (mode) => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: id === 1 ? 'oauth' : 'setup-token', extra: {} }))
+    })
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="bulk-codex-turn-state"]')
+    expect(select.element.value).toBe('unchanged')
+    await select.setValue(mode)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { codex_turn_state_enabled: mode === 'on' } })
+    wrapper.unmount()
+  })
+
+  it('unchanged and non-Codex transport updates omit the new account opt-in key', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth', extra: { codex_turn_state_enabled: true } }))
+    })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { extra: { openai_transport: 'codex' } })
+    await wrapper.get('[data-testid="bulk-codex-turn-state"]').setValue('off')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('web')
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { extra: expect.objectContaining({ openai_transport: 'web' }) })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.lastCall?.[1]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('codex')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="bulk-codex-turn-state"]').element.value).toBe('off')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { type: 'apikey' }, { platform: 'anthropic' }, { parent_account_id: 3 },
+    { credentials: { auth_mode: 'agentIdentity' } },
+    { extra: { openai_transport: 'web' } }, { extra: { openai_transport: 'prism' } }
+  ])('hides bulk opt-in for any excluded target %j', async (overrides) => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [
+        { id: 1, platform: 'openai', type: 'oauth' },
+        { id: 2, platform: 'openai', type: 'oauth', ...overrides }
+      ]
+    })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('explains complete-selection eligibility while hiding the option for filtered targets', () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth' })),
+      target: { mode: 'filtered', previewCount: 2, selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }
+    })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="bulk-codex-turn-state-eligibility"]').text()).toBe('codexTicket.bulkEligibilityHint')
+    wrapper.unmount()
+  })
+
+  it('does not infer eligibility from platform/type without account details', () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
     const wrapper = mountModal()
 

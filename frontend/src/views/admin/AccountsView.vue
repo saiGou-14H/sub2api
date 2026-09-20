@@ -462,6 +462,7 @@
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"
+      :selected-accounts="accounts.filter(account => isSelected(account.id))"
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
       :target="bulkEditTarget ?? undefined"

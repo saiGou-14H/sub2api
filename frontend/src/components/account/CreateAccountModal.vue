@@ -2992,6 +2992,13 @@
         <label class="input-label">{{ t('admin.accounts.openai.transportMode') }}</label>
         <Select v-model="openaiTransportMode" :options="openaiTransportOptions" data-testid="create-openai-transport-select" />
         <p class="input-hint">{{ t('admin.accounts.openai.transportModeDesc') }}</p>
+        <div v-if="showCodexTurnState" class="mt-4">
+          <label class="flex items-center gap-3">
+            <input v-model="codexTurnStateEnabled" type="checkbox" data-testid="create-codex-turn-state" />
+            <span>{{ t('codexTicket.accountEnabled') }}</span>
+          </label>
+          <p class="input-hint">{{ t('codexTicket.accountHint') }}</p>
+        </div>
         <div v-if="openaiTransportMode === 'prism'" class="mt-4 space-y-3">
           <div>
             <label class="input-label" for="create-prism-access-token">{{ t('admin.accounts.openai.prismAccessToken') }}</label>
@@ -4338,6 +4345,11 @@ const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
 const openaiTransportOptions = computed(() => openAITransportOptions(t))
+const codexTurnStateEnabled = ref(false)
+const showCodexTurnState = computed(() =>
+  form.platform === 'openai' && accountCategory.value === 'oauth-based' &&
+  openaiTransportMode.value === 'codex' && oauthFlowRef.value?.inputMethod !== 'agent_identity'
+)
 const prismAccessToken = ref('')
 const prismSessionToken = ref('')
 const prismPromptToolBridge = ref(false)
@@ -4820,6 +4832,7 @@ watch(
     }
     if (newPlatform !== 'openai') {
       openaiTransportMode.value = 'codex'
+      codexTurnStateEnabled.value = false
       prismAccessToken.value = ''
       prismSessionToken.value = ''
       prismPromptToolBridge.value = false
@@ -5276,6 +5289,7 @@ const resetForm = () => {
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
   openaiTransportMode.value = 'codex'
+  codexTurnStateEnabled.value = false
   prismAccessToken.value = ''
   prismSessionToken.value = ''
   prismPromptToolBridge.value = false
@@ -5354,6 +5368,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   const extra: Record<string, unknown> = { ...(base || {}) }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_transport = openaiTransportMode.value
+    if (oauthFlowRef.value?.inputMethod !== 'agent_identity' &&
+      (openaiTransportMode.value === 'codex' || codexTurnStateEnabled.value)) {
+      extra.codex_turn_state_enabled = codexTurnStateEnabled.value
+    }
     if (openaiTransportMode.value === 'prism') {
       extra.prism_prompt_tool_bridge = prismPromptToolBridge.value
     } else {
@@ -6350,14 +6368,15 @@ const formatCodexImportMessages = (messages?: CodexSessionImportMessage[]) => {
     .join('\n')
 }
 
-const isAgentIdentityImportContent = (content: string) => {
+const isAgentIdentityImportContent = (content: string, requireAll = true) => {
   const isAgentIdentityValue = (value: unknown): boolean => {
-    if (Array.isArray(value)) return value.length > 0 && value.every(isAgentIdentityValue)
+    if (Array.isArray(value)) return value.length > 0 &&
+      (requireAll ? value.every(isAgentIdentityValue) : value.some(isAgentIdentityValue))
     if (!value || typeof value !== 'object') return false
     const record = value as Record<string, unknown>
     const authMode = record.auth_mode ?? record.authMode
     const agentIdentity = record.agent_identity ?? record.agentIdentity
-    return (typeof authMode === 'string' && authMode.toLowerCase() === 'agentidentity')
+    return (typeof authMode === 'string' && authMode.trim().toLowerCase().replace(/[_-]/g, '') === 'agentidentity')
       || (!!agentIdentity && typeof agentIdentity === 'object')
   }
 
@@ -6367,7 +6386,8 @@ const isAgentIdentityImportContent = (content: string) => {
     const lines = content.split('\n').map((line) => line.trim()).filter(Boolean)
     if (lines.length === 0) return false
     try {
-      return lines.every((line) => isAgentIdentityValue(JSON.parse(line)))
+      const values = lines.map((line) => JSON.parse(line))
+      return requireAll ? values.every(isAgentIdentityValue) : values.some(isAgentIdentityValue)
     } catch {
       return false
     }
@@ -6396,6 +6416,8 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
   try {
     const extra = buildOpenAICodexImportExtra()
+    // The import endpoint can receive identity JSON through the ordinary session tab too.
+    if (extra && isAgentIdentityImportContent(trimmed, false)) delete extra.codex_turn_state_enabled
     const result = await adminAPI.accounts.importCodexSession({
       content: trimmed,
       name: form.name,

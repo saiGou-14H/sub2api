@@ -216,6 +216,51 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it.each([false, true])('creates a Codex account with explicit opt-in %s', async (enabled) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="create-codex-turn-state"]')
+    expect(toggle.element.checked).toBe(false)
+    await toggle.setValue(enabled)
+    const transport = wrapper.getComponent('[data-testid="create-openai-transport-select"]')
+    transport.vm.$emit('update:modelValue', 'web')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="create-codex-turn-state"]').exists()).toBe(false)
+    transport.vm.$emit('update:modelValue', 'codex')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="create-codex-turn-state"]').element.checked).toBe(enabled)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex turn state')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_turn_state_enabled).toBe(enabled)
+    wrapper.unmount()
+  })
+
+  it('does not show or write Codex opt-in for API key accounts', async () => {
+    const wrapper = await submitApiKeyAccount('openai')
+    expect(wrapper.find('[data-testid="create-codex-turn-state"]').exists()).toBe(false)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    wrapper.unmount()
+  })
+
+  it.each([
+    JSON.stringify({ auth_mode: '  Agent_Identity  ' }),
+    JSON.stringify({ auth_mode: 'agentIdentity' }),
+    JSON.stringify([{ access_token: 'oauth' }, { agent_identity: {} }]),
+    `${JSON.stringify({ access_token: 'oauth' })}\n${JSON.stringify({ authMode: 'agentIdentity' })}`
+  ])('omits opt-in from identity and mixed imports even after selecting it in step one: %s', async (content) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-codex-turn-state"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Identity')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('import-codex-session', content)
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    wrapper.unmount()
+  })
+
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-31T12:34:00'))
