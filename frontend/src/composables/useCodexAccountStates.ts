@@ -31,7 +31,8 @@ export function useCodexAccountStates(ids: Ref<number[]>, queryKey?: Ref<string>
         ['ready', 'refreshing'].includes(model.status) && model.expires_at && Date.parse(model.expires_at) <= now.value
           ? 'expired' as const : safeCodexStatus(model.status) }))
       const expired = models.some(model => model.status === 'expired')
-      result[id] = { ...record, models, status: ['ready', 'refreshing'].includes(record.status) && expired ? 'expired' : safeCodexStatus(record.status) }
+      const live = models.some(model => ['ready', 'refreshing'].includes(model.status))
+      result[id] = { ...record, models, status: ['ready', 'refreshing'].includes(record.status) && expired && !live ? 'expired' : safeCodexStatus(record.status) }
     }
     return result
   })
@@ -52,8 +53,8 @@ export function useCodexAccountStates(ids: Ref<number[]>, queryKey?: Ref<string>
     if (!future.length) return
     expiryTimer = setTimeout(() => {
       tick()
+      scheduleExpiry()
       if (!expiryRead && !loading.value) { expiryRead = true; void refresh(false) }
-      else scheduleExpiry()
     }, Math.min(2147483647, Math.max(1, Math.min(...future) - now.value)))
   }
   async function refresh(manual = true) {

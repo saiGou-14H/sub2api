@@ -21,6 +21,22 @@ describe('Codex account UI', () => {
     expect(mismatched.text()).toContain('Unavailable')
     expect(mismatched.text()).not.toContain('Header set')
   })
+  it('retains dated historical injection after the latest decision skips', () => {
+    const record = state()
+    const timestamp = '2026-01-01T01:02:03Z'
+    record.models[0].last_outcome = 'skipped'
+    record.models[0].last_injected_at = timestamp
+    const wrapper = mount(Badge, { props: { accountId: 1, state: record }, global })
+    expect(wrapper.text()).toContain('Historical header injection')
+    expect(wrapper.text()).toContain(new Date(timestamp).toLocaleString())
+    expect(wrapper.text()).not.toContain('Header set')
+  })
+  it.each(['ticket_ready', 'ticket_missing', 'control_unavailable', 'proxy_unavailable', 'compact', 'identity_changed'] as const)('localizes the closed reason %s', reason => {
+    const record = state()
+    record.models[0].last_reason = reason
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.text()).toContain(en.accounts.reasons[reason])
+  })
   it('shows expired historical injections without green success', () => {
     const expired = state()
     expired.status = 'expired'

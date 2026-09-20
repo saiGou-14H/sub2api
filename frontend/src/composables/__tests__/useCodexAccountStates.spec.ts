@@ -106,6 +106,36 @@ describe('visible Codex account state', () => {
     expect(oldSignal.aborted).toBe(true)
     expect(state.states.value[1].status).toBe('backoff')
   })
+  it('keeps a valid refreshing model alive alongside an expired model', async () => {
+    const payload = snapshot([1])
+    payload.accounts[0].status = 'refreshing'
+    const live = { ...account(1).models[0], model: 'live', status: 'refreshing' as const, expires_at: new Date(base + 10000).toISOString() }
+    payload.accounts[0].models.push(live)
+    api.mockResolvedValueOnce(payload)
+    const state = setup()
+    await flushPromises()
+    api.mockReturnValue(new Promise(() => {}))
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(state.states.value[1].models.map(model => model.status)).toEqual(['expired', 'refreshing'])
+    expect(state.states.value[1].status).toBe('refreshing')
+    await vi.advanceTimersByTimeAsync(9000)
+    expect(state.states.value[1].status).toBe('expired')
+    expect(api).toHaveBeenCalledTimes(2)
+  })
+  it('preserves explicit unavailable and unsupported even when global enabled is false', async () => {
+    const payload = snapshot([1, 2])
+    payload.global_enabled = false
+    payload.accounts[0].status = 'unavailable'
+    payload.accounts[0].enabled = false
+    payload.accounts[1].status = 'unsupported'
+    payload.accounts[1].enabled = false
+    payload.accounts[1].supported = false
+    api.mockResolvedValue(payload)
+    const state = setup([1, 2])
+    await flushPromises()
+    expect(state.states.value[1].status).toBe('unavailable')
+    expect(state.states.value[2].status).toBe('unsupported')
+  })
   it('honors disabled and unsupported states', async () => {
     const payload = snapshot([1, 2])
     payload.accounts[0].enabled = false

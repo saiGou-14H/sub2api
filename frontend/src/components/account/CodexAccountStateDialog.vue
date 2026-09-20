@@ -29,7 +29,8 @@ async function copy(value: string) {
 </script>
 
 <template>
-  <BaseDialog :show="!!account" :title="`${t('codexTicket.accounts.title')} · ${account?.name ?? ''} #${account?.id ?? ''}`" width="wide" @close="$emit('close')">
+  <BaseDialog :show="!!account" :title="t('codexTicket.accounts.title')" width="wide" @close="$emit('close')">
+    <h4 class="mb-4 min-w-0 break-all text-base font-semibold text-gray-900 dark:text-gray-100">{{ account?.name }} <span class="text-gray-500">#{{ account?.id }}</span></h4>
     <div class="flex items-center justify-between gap-3">
       <span class="text-sm" :class="own?.status === 'ready' ? 'text-green-600 dark:text-green-400' : 'text-gray-500'">{{ t(`codexTicket.accounts.statuses.${safeCodexStatus(own?.status ?? 'unavailable')}`) }}</span>
       <button class="btn btn-secondary p-2" type="button" :disabled="loading" :title="t('codexTicket.accounts.refresh')" :aria-label="t('codexTicket.accounts.refresh')" @click="$emit('refresh')"><Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" /></button>
