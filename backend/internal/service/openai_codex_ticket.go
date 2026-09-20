@@ -24,10 +24,14 @@ func IsCodexTicketPolicyError(err error) bool {
 // The body already contains the final upstream model. Both legacy compact and
 // native V2 compaction bypass the experiment; the counter endpoint does not use this builder.
 func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Context, account *Account, body []byte, headers http.Header) error {
-	if s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) || isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body) {
+	if s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) {
 		return nil
 	}
 	model := gjson.GetBytes(body, "model").String()
+	if isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body) {
+		s.codexTicketRuntime.ObserveCompactSkip(ctx, account, model)
+		return nil
+	}
 	err := s.codexTicketRuntime.Apply(ctx, account, model, headers)
 	if err != nil && c != nil && c.Writer != nil {
 		code := "CODEX_TICKET_CONTROL_UNAVAILABLE"

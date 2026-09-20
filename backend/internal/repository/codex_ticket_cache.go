@@ -117,9 +117,13 @@ func (c *codexTicketCache) CommitIfCurrent(ctx context.Context, o string, t serv
 	if e != nil {
 		return false, e
 	}
+	metadata, e := json.Marshal(service.CodexTicketMetadata{CapturedAt: t.CapturedAt, ExpiresAt: t.ExpiresAt})
+	if e != nil {
+		return false, e
+	}
 	n, e := c.client.Eval(ctx, codexLuaFence+`local expiry=tonumber(ARGV[4]);if expiry<=now then return 0 end
 local payload=cjson.decode(ARGV[3]);if string.len(payload.State)~=c.settings.target_length then return 0 end
-redis.call('SET',KEYS[3],ARGV[3],'PX',expiry-now);redis.call('DEL',KEYS[4]);return 1`, []string{codexPrefix + "leader", codexPrefix + "control", codexPayloadKey(t.Key), codexRetryKey(t.Key)}, o, fmt.Sprint(t.Key.Revision), string(b), t.ExpiresAt.UnixMilli()).Int()
+redis.call('SET',KEYS[3],ARGV[3],'PX',expiry-now);redis.call('DEL',KEYS[4]);redis.call('SET',KEYS[5],ARGV[5],'PX',ARGV[6]);return 1`, []string{codexPrefix + "leader", codexPrefix + "control", codexPayloadKey(t.Key), codexRetryKey(t.Key), codexMetadataKey(t.Key)}, o, fmt.Sprint(t.Key.Revision), string(b), t.ExpiresAt.UnixMilli(), string(metadata), codexObservationTTL.Milliseconds()).Int()
 	return n == 1, e
 }
 func (c *codexTicketCache) AcquireProbeBudget(ctx context.Context, o string, r uint64, limit int) (bool, error) {

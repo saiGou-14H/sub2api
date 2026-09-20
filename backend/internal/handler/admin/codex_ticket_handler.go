@@ -20,9 +20,10 @@ import (
 // before serving requests; no controller is started by this handler.
 type CodexTicketStatusProvider func(context.Context, service.CodexTicketSettings) (any, error)
 type CodexTicketHandler struct {
-	repo    service.CodexTicketSettingsRepository
-	proxies service.ProxyRepository
-	status  CodexTicketStatusProvider
+	repo     service.CodexTicketSettingsRepository
+	proxies  service.ProxyRepository
+	status   CodexTicketStatusProvider
+	accounts func(context.Context, []int64) (service.CodexTicketAccountsStatus, error)
 }
 
 func NewCodexTicketHandler(repo service.CodexTicketSettingsRepository, proxies service.ProxyRepository) *CodexTicketHandler {

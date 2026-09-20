@@ -563,6 +563,7 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			adminSettings.GET("/openai-codex-ticket", h.Admin.CodexTicket.Get)
 			adminSettings.PUT("/openai-codex-ticket", h.Admin.CodexTicket.Put)
 			adminSettings.GET("/openai-codex-ticket/status", h.Admin.CodexTicket.Status)
+			adminSettings.GET("/openai-codex-ticket/accounts", h.Admin.CodexTicket.Accounts)
 		}
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)

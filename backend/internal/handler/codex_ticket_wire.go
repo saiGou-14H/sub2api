@@ -14,5 +14,6 @@ func ProvideCodexTicketHandler(repo service.CodexTicketSettingsRepository, proxi
 	h.SetStatusProvider(func(ctx context.Context, _ service.CodexTicketSettings) (any, error) {
 		return runtime.Status(ctx)
 	})
+	h.SetAccountsProvider(runtime.AccountStatuses)
 	return h
 }

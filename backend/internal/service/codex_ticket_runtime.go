@@ -102,19 +102,28 @@ func (r *CodexTicketRuntime) Apply(ctx context.Context, a *Account, model string
 	if !cfg.Enabled || !codexTicketModelEnabled(cfg, model) {
 		return nil
 	}
+	k := CodexTicketKey{cfg.Revision, fresh.ID, scope, model}
+	outcome, reason := "skipped", "ticket_missing"
+	defer func() { r.observeDecision(ctx, k, outcome, reason) }()
 	now := v.ServerTime
 	if now.IsZero() || c.ValidUntilMS <= now.UnixMilli() {
+		reason = "control_unavailable"
 		if string(cfg.MissingPolicy) == "reject" {
+			outcome = "rejected"
 			return ErrCodexTicketControlUnavailable
 		}
 		return nil
 	}
-	k := CodexTicketKey{cfg.Revision, fresh.ID, scope, model}
 	if c.ProxyState == "active" && (c.ProxyExpiresAtMS == 0 || c.ProxyExpiresAtMS > now.UnixMilli()) && v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, cfg, now) == nil {
 		h.Set("X-Codex-Turn-State", v.Ticket.State)
+		outcome, reason = "header_set", "ticket_ready"
 		return nil
 	}
+	if c.ProxyState != "active" || (c.ProxyExpiresAtMS > 0 && c.ProxyExpiresAtMS <= now.UnixMilli()) {
+		reason = "proxy_unavailable"
+	}
 	if string(cfg.MissingPolicy) == "reject" {
+		outcome = "rejected"
 		return ErrCodexTicketMissing
 	}
 	return nil
