@@ -31,6 +31,7 @@ func TestCodexHarvestTransportProfile(t *testing.T) {
 	tr, err := buildUpstreamTransport(settings, proxy, mode)
 	require.NoError(t, err)
 	defer tr.CloseIdleConnections()
+	require.True(t, tr.DisableKeepAlives)
 	require.False(t, tr.ForceAttemptHTTP2)
 	require.NotNil(t, tr.TLSNextProto)
 	require.Empty(t, tr.TLSNextProto)
@@ -81,6 +82,7 @@ func TestCodexHarvestProxySchemeDialPaths(t *testing.T) {
 			require.NoError(t, err)
 			tr := entry.client.Transport.(*http.Transport)
 			defer tr.CloseIdleConnections()
+			require.True(t, tr.DisableKeepAlives)
 			require.False(t, tr.ForceAttemptHTTP2)
 			require.NotNil(t, tr.TLSNextProto)
 			require.Empty(t, tr.TLSNextProto)
@@ -95,6 +97,33 @@ func TestCodexHarvestProxySchemeDialPaths(t *testing.T) {
 			require.Equal(t, tc.first, got.first)
 		})
 	}
+}
+
+func TestCodexHarvestDoesNotReuseConnections(t *testing.T) {
+	addresses := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		addresses <- r.RemoteAddr
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	s := NewHTTPUpstream(nil).(*httpUpstreamService)
+	settings := s.applyProfilePoolSettings(defaultPoolSettings(nil), service.HTTPUpstreamProfileCodexHarvest)
+	transport, err := buildUpstreamTransport(settings, nil, upstreamProtocolModeCodexHarvest)
+	require.NoError(t, err)
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
+	for i := 0; i < 2; i++ {
+		resp, err := client.Get(server.URL)
+		require.NoError(t, err)
+		_, err = io.Copy(io.Discard, resp.Body)
+		require.NoError(t, resp.Body.Close())
+		require.NoError(t, err)
+	}
+	require.NotEqual(t, <-addresses, <-addresses)
+	business, err := buildUpstreamTransport(defaultPoolSettings(nil), nil, upstreamProtocolModeOpenAIH1)
+	require.NoError(t, err)
+	defer business.CloseIdleConnections()
+	require.False(t, business.DisableKeepAlives, "business transport must retain its pooling policy")
 }
 
 func TestCodexHarvestNeverNegotiatesH2(t *testing.T) {

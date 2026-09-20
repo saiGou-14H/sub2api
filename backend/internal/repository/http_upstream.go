@@ -1351,6 +1351,7 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 			return nil, err
 		}
 	case upstreamProtocolModeCodexHarvest:
+		transport.DisableKeepAlives = true
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 		transport.MaxResponseHeaderBytes = 64 << 10
