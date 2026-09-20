@@ -5,13 +5,16 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestCodexTicketHTTPBuildersUseFinalModelAndOptIn(t *testing.T) {
@@ -57,6 +60,93 @@ func TestCodexTicketHTTPBuildersUseFinalModelAndOptIn(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "client-echo", request.Header.Get("X-Codex-Turn-State"))
 		})
+	}
+}
+
+func TestCodexTicketHTTPCompactV2PreservesEchoGuard(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, hasTicket := range []bool{false, true} {
+			for _, sameAccount := range []bool{false, true} {
+				t.Run(fmt.Sprintf("passthrough=%t/ticket=%t/same-account=%t", passthrough, hasTicket, sameAccount), func(t *testing.T) {
+					runtime, accounts, store, key := ticketRuntimeFixture()
+					store.v.Control.Settings.MissingPolicy = CodexTicketReject
+					if !hasTicket {
+						store.v.Ticket = nil
+					}
+					s := &OpenAIGatewayService{accountRepo: accounts, codexTicketRuntime: runtime}
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+					c.Request.Header.Set("X-Codex-Turn-State", "client-echo")
+					c.Request.Header.Set("session_id", "compact-session")
+					origin := *accounts.a
+					if !sameAccount {
+						origin.ID++
+					}
+					s.noteOpenAICodexTurnStateProvenance(c, &origin)
+					body := []byte(fmt.Sprintf(`{"model":%q,"stream":true,"input":[{"type":"compaction_trigger"},{"role":"user","content":"hi"}]}`, key.Model))
+					var req *http.Request
+					var err error
+					if passthrough {
+						req, err = s.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, accounts.a, body, "test-token")
+					} else {
+						req, err = s.buildUpstreamRequest(context.Background(), c, accounts.a, body, "test-token", true, "", true)
+					}
+					require.NoError(t, err, "V2 compact must bypass missing-ticket rejection")
+					want := ""
+					if sameAccount {
+						want = "client-echo"
+					}
+					require.Equal(t, want, req.Header.Get("X-Codex-Turn-State"))
+				})
+			}
+		}
+	}
+}
+
+func TestCodexTicketHTTPForwardUsesActualFinalModel(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, targetConfigured := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/target-configured=%t", passthrough, targetConfigured), func(t *testing.T) {
+				runtime, accounts, store, key := ticketRuntimeFixture()
+				requestModel, mappedModel := "astra-public", key.Model
+				if !targetConfigured {
+					requestModel, mappedModel = key.Model, "gpt-5.4"
+					store.v.Ticket = nil
+				}
+				finalModel := mappedModel
+				if passthrough {
+					// Main deliberately ignores normal account model_mapping in passthrough.
+					// Keep a conflicting mapping to prove policy uses the unchanged wire model.
+					requestModel, mappedModel = mappedModel, requestModel
+					finalModel = requestModel
+				}
+				accounts.a.Credentials["access_token"] = "test-token"
+				accounts.a.Credentials["model_mapping"] = map[string]any{requestModel: mappedModel}
+				accounts.a.Extra["openai_passthrough"] = passthrough
+				accounts.a.Extra["openai_oauth_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mapped\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\ndata: [DONE]\n\n")),
+				}}
+				s := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: accounts, httpUpstream: upstream, codexTicketRuntime: runtime}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+				c.Request.Header.Set("X-Codex-Turn-State", "client-echo")
+				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+				body := []byte(fmt.Sprintf(`{"model":%q,"stream":true,"input":[{"role":"user","content":"hi"}]}`, requestModel))
+				_, err := s.Forward(context.Background(), c, accounts.a, body)
+				require.NoError(t, err)
+				require.NotNil(t, upstream.lastReq)
+				require.Equal(t, finalModel, gjson.GetBytes(upstream.lastBody, "model").String())
+				want := "client-echo"
+				if targetConfigured {
+					want = store.v.Ticket.State
+				}
+				require.Equal(t, want, upstream.lastReq.Header.Get("X-Codex-Turn-State"))
+			})
+		}
 	}
 }
 

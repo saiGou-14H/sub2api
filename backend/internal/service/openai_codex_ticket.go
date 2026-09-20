@@ -21,10 +21,10 @@ func IsCodexTicketPolicyError(err error) bool {
 }
 
 // Run after account echo isolation and all outbound identity/header rewriting.
-// The body already contains the final upstream model. Legacy compact has a
-// different protocol; the dedicated counter endpoint does not use this builder.
+// The body already contains the final upstream model. Both legacy compact and
+// native V2 compaction bypass the experiment; the counter endpoint does not use this builder.
 func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Context, account *Account, body []byte, headers http.Header) error {
-	if s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) || isOpenAIResponsesCompactPath(c) {
+	if s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) || isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body) {
 		return nil
 	}
 	model := gjson.GetBytes(body, "model").String()

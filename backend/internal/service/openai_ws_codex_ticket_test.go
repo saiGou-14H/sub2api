@@ -168,6 +168,8 @@ func (u *codexWSHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*
 type codexWSCache struct {
 	CodexTicketRuntimeStore
 	settings *codexWSSettings
+	missing  bool
+	reject   bool
 }
 
 func (c codexWSCache) ReadForRequest(ctx context.Context, id int64, scope string, model string) (CodexTicketRuntimeView, error) {
@@ -177,8 +179,61 @@ func (c codexWSCache) ReadForRequest(ctx context.Context, id int64, scope string
 	}
 	now := time.Now()
 	ticket := &CodexTicket{Key: CodexTicketKey{Revision: cfg.Revision, AccountID: id, IdentityScope: scope, Model: model}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if c.missing {
+		ticket = nil
+	}
+	if c.reject {
+		cfg.MissingPolicy = CodexTicketReject
+	}
 	return CodexTicketRuntimeView{Control: CodexTicketControl{Settings: cfg, ProxyState: "active", ValidUntilMS: now.Add(6 * time.Second).UnixMilli()}, Ticket: ticket, ServerTime: now}, nil
 }
+func TestCodexTicketWSCompactV2BypassesExperiment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing=%t", missing), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 5
+			account := codexWSAccount(OpenAIWSIngressModePassthrough, true)
+			settings := &codexWSSettings{enabled: true}
+			upstream := &codexWSHTTPUpstream{}
+			svc := newPassthroughLifecycleService(cfg, newStagedPassthroughConn())
+			svc.httpUpstream = upstream
+			svc.codexTicketRuntime = NewCodexTicketRuntime(settings, nil, &codexWSAccounts{a: account}, codexWSCache{settings: settings, missing: missing, reject: true})
+			server, serverErr := startPassthroughHookRecordingServer(t, ctx, svc, account, nil)
+			defer server.Close()
+			client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-6-astra","input":[{"type":"compaction_trigger"}]}`)
+			defer client.CloseNow()
+			_, err := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+			require.NoError(t, err)
+			upstream.mu.Lock()
+			headers := append([]http.Header(nil), upstream.headers...)
+			upstream.mu.Unlock()
+			require.Len(t, headers, 1, "compact must reach HTTP upstream even under reject policy without a ticket")
+			require.Empty(t, headers[0].Get("X-Codex-Turn-State"), "compact must not inject an available experimental ticket")
+			if !missing {
+				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-astra","input":[{"role":"user","content":"hi"}]}`)))
+				_, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
+				require.NoError(t, err)
+				upstream.mu.Lock()
+				headers = append([]http.Header(nil), upstream.headers...)
+				upstream.mu.Unlock()
+				require.Len(t, headers, 2)
+				require.Equal(t, "gAAAAA"+strings.Repeat("a", 286), headers[1].Get("X-Codex-Turn-State"), "a subsequent generation must still apply ticket policy")
+			}
+			require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+			select {
+			case err := <-serverErr:
+				require.NoError(t, err)
+			case <-time.After(3 * time.Second):
+				t.Fatal("bridge did not finish")
+			}
+		})
+	}
+}
+
 func TestCodexTicketWSOptInForcesBridgeAndKeepsItAfterDisable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
