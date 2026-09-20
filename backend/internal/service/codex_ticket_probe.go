@@ -26,7 +26,100 @@ const (
 // billing records. It can still consume upstream quota. It intentionally
 // does not use forwarding request builders, scheduling, or user session state.
 // Error messages contain only stable codes, never upstream errors or payloads.
-func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID int64, model, proxyURL string) (result CodexTicketProbeResult, err error) {
+func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID int64, model, proxyURL string) (CodexTicketProbeResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	task, ok := ctx.Value(codexTicketProbeTaskKey{}).(codexTicketProbeTask)
+	fail := func(code string) (CodexTicketProbeResult, error) {
+		return CodexTicketProbeResult{ErrorCode: code}, errors.New(code)
+	}
+	if !validCodexProbeProxy(proxyURL) {
+		return fail("proxy_unavailable")
+	}
+	if !ok || task.VerificationGuard == nil || task.Key.AccountID != accountID || task.Key.Model != model || !codexTicketModelEnabled(task.Settings, model) {
+		return fail("verification_failed")
+	}
+	if s == nil || s.accountRepo == nil {
+		return fail("identity_unresolved")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || !CodexTicketAccountSupported(account) || account.ID != accountID || !account.CodexTurnStateEnabled() || CodexTicketIdentityScope(account) != task.Key.IdentityScope {
+		return fail("identity_unresolved")
+	}
+	var policy, route string
+	if s.codexTicketRuntime != nil {
+		account, policy, route, err = s.codexTicketRuntime.resolveCodexTicketPolicy(ctx, account, time.Now())
+	} else {
+		account, policy, route, err = resolveCodexTicketAccountPolicy(ctx, nil, account, time.Now())
+	}
+	if err != nil || policy != task.Key.PolicyScope {
+		return fail("proxy_unavailable")
+	}
+	cfg, err := CodexTicketAccountSettings(task.Settings, account)
+	if err != nil || cfg.TargetLength != task.Settings.TargetLength {
+		return fail("verification_failed")
+	}
+	capture, err := s.codexTicketProbeStage(ctx, account, model, proxyURL, "")
+	capture.PolicyScope = policy
+	if err != nil {
+		return capture, err
+	}
+	if validCodexProbeState(capture.State, 312) {
+		capture.State = ""
+		capture.Completed = false
+		capture.ErrorCode = "state_312"
+		return capture, errors.New("state_312")
+	}
+	if !validCodexProbeState(capture.State, cfg.TargetLength) {
+		capture.State = ""
+		capture.Completed = false
+		capture.ErrorCode = "verification_failed"
+		return capture, errors.New("verification_failed")
+	}
+	candidate := capture.State
+	fresh, businessRoute, err := task.VerificationGuard(ctx, true)
+	if err != nil || !CodexTicketAccountSupported(fresh) || fresh.ID != accountID || !fresh.CodexTurnStateEnabled() || CodexTicketIdentityScope(fresh) != task.Key.IdentityScope || CodexTicketPolicyScope(fresh, time.Now()) != policy || businessRoute != route {
+		return fail("verification_failed")
+	}
+	verification, err := s.codexTicketProbeStage(ctx, fresh, model, businessRoute, candidate)
+	verification.IdentityScope = task.Key.IdentityScope
+	verification.PolicyScope = policy
+	if err != nil {
+		return verification, err
+	}
+	if validCodexProbeState(verification.State, 312) {
+		verification.State = ""
+		verification.Completed = false
+		verification.ErrorCode = "state_312"
+		return verification, errors.New("state_312")
+	}
+	confirmed, confirmedRoute, err := task.VerificationGuard(ctx, false)
+	if err != nil || !CodexTicketAccountSupported(confirmed) || confirmed.ID != accountID || !confirmed.CodexTurnStateEnabled() || CodexTicketIdentityScope(confirmed) != task.Key.IdentityScope || CodexTicketPolicyScope(confirmed, time.Now()) != policy || confirmedRoute != businessRoute {
+		return fail("verification_failed")
+	}
+	capture.Verified = true
+	capture.VerifiedAt = time.Now()
+	capture.VerificationModel = verification.ActualModel
+	capture.State = candidate
+	return capture, nil
+}
+
+func validCodexProbeState(state string, length int) bool {
+	if len(state) != length || !strings.HasPrefix(state, "gAAAAA") {
+		return false
+	}
+	for _, ch := range state {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '=') {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, account *Account, model, proxyURL, injectedState string) (result CodexTicketProbeResult, err error) {
 	fail := func(code string) (CodexTicketProbeResult, error) {
 		result.State = ""
 		result.Completed = false
@@ -38,7 +131,7 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if !validCodexProbeProxy(proxyURL) {
+	if proxyURL != "" && !validCodexProbeProxy(proxyURL) {
 		return fail("invalid_proxy")
 	}
 	if strings.TrimSpace(model) == "" {
@@ -47,8 +140,7 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	if s == nil || s.accountRepo == nil || s.httpUpstream == nil {
 		return fail("probe_unavailable")
 	}
-	account, e := s.accountRepo.GetByID(ctx, accountID)
-	if e != nil || account == nil {
+	if !CodexTicketAccountSupported(account) {
 		return fail("account_unavailable")
 	}
 	if !account.CodexTurnStateEnabled() {
@@ -88,6 +180,9 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	applyOpenAICodexProbeHeaders(req.Header)
 	req.Header.Set("session_id", session)
 	req.Header.Set("conversation_id", session)
+	if injectedState != "" {
+		req.Header.Set("X-Codex-Turn-State", injectedState)
+	}
 	resp, e := s.httpUpstream.Do(req, proxyURL, account.ID, 4)
 	if e != nil {
 		return fail("transport_error")
@@ -104,20 +199,28 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	if resp.StatusCode != http.StatusOK {
 		return fail("http_status")
 	}
-	if code := readCodexProbeCompletion(resp.Body); code != "" {
+	if code := readCodexProbeCompletion(resp.Body, model); code != "" {
 		return fail(code)
 	}
 	states := resp.Header.Values("X-Codex-Turn-State")
-	if len(states) != 1 || states[0] == "" {
+	if len(states) > 1 {
 		return fail("state_missing")
 	}
-	result.State = states[0]
+	if len(states) == 1 {
+		result.State = states[0]
+	}
+	if injectedState == "" && result.State == "" {
+		return fail("state_missing")
+	}
+	result.ActualModel = model
 	result.Completed = true
 	return result, nil
 }
 
 func codexProbeRuntimeErrorCode(code string) string {
 	switch code {
+	case "model_mismatch", "verification_failed", "state_312":
+		return code
 	case "transport_unsupported":
 		return "transport_unsupported"
 	case "invalid_proxy", "transport_error":
@@ -168,7 +271,7 @@ func codexProbeHeadersBounded(h http.Header) bool {
 // Only a fully delimited completed event with matching response status is
 // successful. EOF and [DONE] are not evidence of completion. Bounds apply to
 // all bytes (including comments) and to each frame, not just individual lines.
-func readCodexProbeCompletion(r io.Reader) string {
+func readCodexProbeCompletion(r io.Reader, expectedModel ...string) string {
 	limited := &io.LimitedReader{R: r, N: codexProbeBodyLimit + 1}
 	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 4096), codexProbeFrameLimit+1)
@@ -213,6 +316,7 @@ func readCodexProbeCompletion(r io.Reader) string {
 						Code string `json:"code"`
 					} `json:"error"`
 					Response struct {
+						Model  string `json:"model"`
 						Status string `json:"status"`
 						Error  struct {
 							Code string `json:"code"`
@@ -234,6 +338,9 @@ func readCodexProbeCompletion(r io.Reader) string {
 				case "response.completed":
 					if event.Response.Status != "completed" {
 						return "response_failed"
+					}
+					if len(expectedModel) > 0 && (event.Response.Model == "" || event.Response.Model != expectedModel[0]) {
+						return "model_mismatch"
 					}
 					return ""
 				}

@@ -61,7 +61,7 @@ type ticketTestStore struct {
 	budget  bool
 }
 
-func (s *ticketTestStore) ReadForRequest(context.Context, int64, string, string) (CodexTicketRuntimeView, error) {
+func (s *ticketTestStore) ReadForRequest(context.Context, int64, string, string, ...string) (CodexTicketRuntimeView, error) {
 	return s.v, s.err
 }
 func (s *ticketTestStore) ReadRetry(context.Context, CodexTicketKey) (CodexTicketRetry, error) {
@@ -89,8 +89,8 @@ func ticketRuntimeFixture() (*CodexTicketRuntime, *ticketTestAccounts, *ticketTe
 	a := &Account{ID: 1, Platform: "openai", Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Extra: map[string]any{"codex_turn_state_enabled": true}, Credentials: map[string]any{"chatgpt_account_id": "identity"}}
 	accounts := &ticketTestAccounts{a: a}
 	now := time.Now()
-	key := CodexTicketKey{cfg.Revision, a.ID, CodexTicketIdentityScope(a), cfg.Models[0]}
-	ticket := &CodexTicket{Key: key, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour)}
+	key := CodexTicketKey{Revision: cfg.Revision, AccountID: a.ID, IdentityScope: CodexTicketIdentityScope(a), Model: cfg.Models[0], PolicyScope: CodexTicketPolicyScope(a, now)}
+	ticket := &CodexTicket{Key: key, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour), Verified: true, VerifiedAt: now, ActualModel: key.Model, VerificationModel: key.Model, TargetLength: cfg.TargetLength}
 	store := &ticketTestStore{v: CodexTicketRuntimeView{Control: CodexTicketControl{Settings: cfg, ProxyState: "active", ValidUntilMS: now.Add(6 * time.Second).UnixMilli()}, Ticket: ticket, ServerTime: now}, budget: true}
 	return NewCodexTicketRuntime(&ticketTestSettings{cfg: cfg}, nil, accounts, store), accounts, store, key
 }
@@ -127,7 +127,7 @@ func TestCodexTicketHarvestPrecommitAccountRecheck(t *testing.T) {
 	cfg := s.v.Control.Settings
 	r.harvest(context.Background(), "owner", cfg, "http://proxy", k, func(context.Context, int64, string, string) (CodexTicketProbeResult, error) {
 		a.a.Extra = map[string]any{"codex_turn_state_enabled": false}
-		return CodexTicketProbeResult{State: s.v.Ticket.State, IdentityScope: k.IdentityScope, HTTPStatus: 200, Completed: true}, nil
+		return CodexTicketProbeResult{State: s.v.Ticket.State, IdentityScope: k.IdentityScope, HTTPStatus: 200, Completed: true, Verified: true, PolicyScope: k.PolicyScope, ActualModel: k.Model, VerificationModel: k.Model}, nil
 	})
 	require.Zero(t, s.commits)
 }

@@ -36,7 +36,9 @@ func (r *CodexTicketRuntime) codexTicketAccountCurrent(ctx context.Context, key 
 	check, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	account, err := r.accounts.GetByID(check, key.AccountID)
-	return err == nil && check.Err() == nil && account != nil && account.ID == key.AccountID &&
-		account.CodexTurnStateEnabled() && CodexTicketIdentityScope(account) == key.IdentityScope &&
-		account.IsSchedulableForModelWithContext(check, key.Model)
+	if err != nil || check.Err() != nil || !CodexTicketAccountSupported(account) || account.ID != key.AccountID || !account.CodexTurnStateEnabled() || CodexTicketIdentityScope(account) != key.IdentityScope || !account.IsSchedulableForModelWithContext(check, key.Model) {
+		return false
+	}
+	_, policy, _, err := r.resolveCodexTicketPolicy(check, account, time.Now())
+	return err == nil && policy == key.PolicyScope
 }

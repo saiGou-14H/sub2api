@@ -172,13 +172,17 @@ type codexWSCache struct {
 	reject   bool
 }
 
-func (c codexWSCache) ReadForRequest(ctx context.Context, id int64, scope string, model string) (CodexTicketRuntimeView, error) {
+func (c codexWSCache) ReadForRequest(ctx context.Context, id int64, scope string, model string, policy ...string) (CodexTicketRuntimeView, error) {
 	cfg, err := c.settings.Load(ctx)
 	if err != nil {
 		return CodexTicketRuntimeView{}, err
 	}
 	now := time.Now()
-	ticket := &CodexTicket{Key: CodexTicketKey{Revision: cfg.Revision, AccountID: id, IdentityScope: scope, Model: model}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour)}
+	policyScope := ""
+	if len(policy) > 0 {
+		policyScope = policy[0]
+	}
+	ticket := &CodexTicket{Key: CodexTicketKey{Revision: cfg.Revision, AccountID: id, IdentityScope: scope, Model: model, PolicyScope: policyScope}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour), Verified: true, VerifiedAt: now, ActualModel: model, VerificationModel: model, TargetLength: cfg.TargetLength}
 	if c.missing {
 		ticket = nil
 	}

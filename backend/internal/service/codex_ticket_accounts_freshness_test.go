@@ -45,7 +45,7 @@ func TestCodexTicketAccountsMetadataIsNotReadiness(t *testing.T) {
 			now := s.v.ServerTime
 			row := s.rows[k]
 			row.Ticket = nil
-			row.Metadata = &CodexTicketMetadata{now, now.Add(time.Minute)}
+			row.Metadata = &CodexTicketMetadata{CapturedAt: now, ExpiresAt: now.Add(time.Minute), VerifiedAt: now, ActualModel: k.Model, VerificationModel: k.Model}
 			switch kind {
 			case "zero_capture":
 				row.Metadata.CapturedAt = time.Time{}

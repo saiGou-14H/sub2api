@@ -37,7 +37,7 @@ type ticketIsolationStore struct {
 	misroute bool
 }
 
-func (s *ticketIsolationStore) ReadForRequest(_ context.Context, id int64, scope, model string) (CodexTicketRuntimeView, error) {
+func (s *ticketIsolationStore) ReadForRequest(_ context.Context, id int64, scope, model string, _ ...string) (CodexTicketRuntimeView, error) {
 	v := s.v
 	v.Ticket = s.tickets[id]
 	if s.misroute {
@@ -59,7 +59,7 @@ func TestCodexTicketHTTPAccountIsolationAcrossRefreshAndFailover(t *testing.T) {
 			makeTicket := func(id int64, fill string) *CodexTicket {
 				k := key
 				k.AccountID = id
-				return &CodexTicket{Key: k, State: "gAAAAA" + strings.Repeat(fill, base.v.Control.Settings.TargetLength-6), CapturedAt: base.v.ServerTime, ExpiresAt: base.v.ServerTime.Add(time.Hour)}
+				return &CodexTicket{Key: k, State: "gAAAAA" + strings.Repeat(fill, base.v.Control.Settings.TargetLength-6), CapturedAt: base.v.ServerTime, ExpiresAt: base.v.ServerTime.Add(time.Hour), Verified: true, VerifiedAt: base.v.ServerTime, ActualModel: k.Model, VerificationModel: k.Model, TargetLength: base.v.Control.Settings.TargetLength}
 			}
 			store := &ticketIsolationStore{ticketTestStore: base, tickets: map[int64]*CodexTicket{1: makeTicket(1, "a"), 2: makeTicket(2, "b")}}
 			runtime.cache = store

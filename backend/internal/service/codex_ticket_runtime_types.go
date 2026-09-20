@@ -16,11 +16,16 @@ type CodexTicketKey struct {
 	Revision             uint64
 	AccountID            int64
 	IdentityScope, Model string
+	PolicyScope          string
 }
 type CodexTicket struct {
-	Key                   CodexTicketKey
-	State                 string
-	CapturedAt, ExpiresAt time.Time
+	Key                            CodexTicketKey
+	State                          string
+	CapturedAt, ExpiresAt          time.Time
+	Verified                       bool
+	VerifiedAt                     time.Time
+	ActualModel, VerificationModel string
+	TargetLength                   int
 }
 type CodexTicketControl struct {
 	Owner            string              `json:"owner"`
@@ -50,7 +55,7 @@ type CodexTicketRuntimeStore interface {
 	RenewLeader(context.Context, string, time.Duration) (bool, error)
 	ReleaseLeader(context.Context, string) error
 	PublishControl(context.Context, CodexTicketControl) (bool, error)
-	ReadForRequest(context.Context, int64, string, string) (CodexTicketRuntimeView, error)
+	ReadForRequest(context.Context, int64, string, string, ...string) (CodexTicketRuntimeView, error)
 	CheckCurrent(context.Context, string, uint64) (bool, error)
 	CommitIfCurrent(context.Context, string, CodexTicket) (bool, error)
 	AcquireProbeBudget(context.Context, string, uint64, int) (bool, error)
@@ -60,11 +65,15 @@ type CodexTicketRuntimeStore interface {
 	ExtendProbeCooldown(context.Context, string, CodexTicketKey, time.Time) error
 }
 type CodexTicketProbeResult struct {
-	State, IdentityScope string
-	HTTPStatus           int
-	RetryAfter           string
-	Completed            bool
-	ErrorCode            string
+	State, IdentityScope           string
+	HTTPStatus                     int
+	RetryAfter                     string
+	Completed                      bool
+	ErrorCode                      string
+	PolicyScope                    string
+	Verified                       bool
+	VerifiedAt                     time.Time
+	ActualModel, VerificationModel string
 }
 type CodexTicketProbe func(context.Context, int64, string, string) (CodexTicketProbeResult, error)
 type CodexTicketRuntimeStatus struct {
@@ -85,8 +94,11 @@ func CodexTicketModelHash(s string) string {
 	return hex.EncodeToString(v[:])
 }
 func ValidateCodexTicket(t CodexTicket, k CodexTicketKey, c CodexTicketSettings, now time.Time) error {
-	if t.Key != k || k.Revision != c.Revision || k.AccountID <= 0 || k.IdentityScope == "" || k.Model == "" {
+	if t.Key != k || k.Revision != c.Revision || k.AccountID <= 0 || k.IdentityScope == "" || k.Model == "" || k.PolicyScope == "" {
 		return errors.New("ticket scope mismatch")
+	}
+	if !t.Verified || t.VerifiedAt.IsZero() || t.VerifiedAt.Before(t.CapturedAt) || t.VerifiedAt.After(now.Add(5*time.Second)) || t.VerifiedAt.After(t.ExpiresAt) || t.ActualModel != k.Model || t.VerificationModel != k.Model || t.TargetLength != c.TargetLength {
+		return errors.New("ticket verification invalid")
 	}
 	if len(t.State) != c.TargetLength || !strings.HasPrefix(t.State, "gAAAAA") {
 		return errors.New("ticket format mismatch")

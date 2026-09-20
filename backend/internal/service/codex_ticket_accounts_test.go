@@ -46,9 +46,13 @@ type ticketObservationStore struct {
 	batchError    error
 }
 
-func (s *ticketObservationStore) ReadForRequest(_ context.Context, id int64, scope, model string) (CodexTicketRuntimeView, error) {
+func (s *ticketObservationStore) ReadForRequest(_ context.Context, id int64, scope, model string, policy ...string) (CodexTicketRuntimeView, error) {
 	v := s.v
-	v.Ticket = s.rows[CodexTicketKey{v.Control.Settings.Revision, id, scope, model}].Ticket
+	policyScope := ""
+	if len(policy) > 0 {
+		policyScope = policy[0]
+	}
+	v.Ticket = s.rows[CodexTicketKey{Revision: v.Control.Settings.Revision, AccountID: id, IdentityScope: scope, Model: model, PolicyScope: policyScope}].Ticket
 	return v, s.err
 }
 func (s *ticketObservationStore) ReadCodexTicketAccounts(_ context.Context, keys []CodexTicketKey) (map[CodexTicketKey]CodexTicketAccountSnapshot, error) {
@@ -191,7 +195,7 @@ func TestCodexTicketAccountExpiryCooldownAndUnavailable(t *testing.T) {
 	now := s.v.ServerTime
 	row := s.rows[k]
 	row.Ticket = nil
-	row.Metadata = &CodexTicketMetadata{now.Add(-time.Hour), now.Add(-time.Second)}
+	row.Metadata = &CodexTicketMetadata{CapturedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Second), VerifiedAt: now.Add(-time.Hour), ActualModel: k.Model, VerificationModel: k.Model}
 	s.rows[k] = row
 	out, err := r.AccountStatuses(ctx, []int64{1, 2})
 	require.NoError(t, err)
@@ -203,7 +207,7 @@ func TestCodexTicketAccountExpiryCooldownAndUnavailable(t *testing.T) {
 	out, err = r.AccountStatuses(ctx, []int64{1, 2})
 	require.NoError(t, err)
 	require.Equal(t, "backoff", out.Accounts[0].Status)
-	require.Equal(t, row.CooldownUntil, *out.Accounts[0].Models[0].NextAttemptAt)
+	require.True(t, row.CooldownUntil.Equal(*out.Accounts[0].Models[0].NextAttemptAt))
 	require.Equal(t, "probe_failed", *out.Accounts[0].Models[0].LastErrorCode)
 	s.rows[kb].Ticket.ExpiresAt = now.Add(time.Second)
 	out, err = r.AccountStatuses(ctx, []int64{2})

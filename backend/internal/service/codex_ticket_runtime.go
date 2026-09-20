@@ -72,61 +72,76 @@ func (r *CodexTicketRuntime) setError(code string) { r.mu.Lock(); r.lastError = 
 // Apply re-reads the account immediately before making the decision. The caller
 // supplies a supported HTTP path and final upstream model, after its echo guard.
 func (r *CodexTicketRuntime) Apply(ctx context.Context, a *Account, model string, h http.Header) error {
-	// Shared request builders also handle API-key, Web and Prism accounts.
-	// They must exit before any repository/cache dependency or failure policy.
+	_, err := r.ApplyWithReceipt(ctx, a, model, h)
+	return err
+}
+
+func (r *CodexTicketRuntime) ApplyWithReceipt(ctx context.Context, a *Account, model string, h http.Header) (*CodexTicketReceipt, error) {
 	if !CodexTicketAccountSupported(a) || h == nil {
-		return nil
+		return nil, nil
 	}
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	fresh, err := r.accounts.GetByID(readCtx, a.ID)
-	cancel()
 	if err != nil {
-		return r.unavailableDecision(ctx, a, model)
+		return nil, r.unavailableDecision(ctx, a, model)
 	}
-	if fresh == nil || !fresh.CodexTurnStateEnabled() || !CodexTicketAccountSupported(fresh) {
-		return nil
+	if !CodexTicketAccountSupported(fresh) || !fresh.CodexTurnStateEnabled() {
+		return nil, nil
+	}
+	if fresh.ID != a.ID {
+		return nil, r.unavailableDecision(ctx, a, model)
+	}
+	fresh, policy, _, policyErr := r.resolveCodexTicketPolicy(readCtx, fresh, time.Now())
+	if policyErr != nil {
+		return nil, r.unavailableDecision(ctx, a, model)
 	}
 	scope := CodexTicketIdentityScope(fresh)
-	// The request may already carry credentials from the supplied snapshot.
-	// Never attach the new identity's ticket to an older identity's request.
-	if scope != CodexTicketIdentityScope(a) {
+	// Headers and transport may already use the supplied snapshot. Never attach
+	// a new identity/plan/route's ticket to that older request.
+	if scope != CodexTicketIdentityScope(a) || CodexTicketPolicyScope(a, time.Now()) != policy {
 		scope = ""
 	}
-	v, err := r.cache.ReadForRequest(ctx, fresh.ID, scope, model)
+	v, err := r.cache.ReadForRequest(ctx, fresh.ID, scope, model, policy)
 	if err != nil {
-		return r.unavailableDecision(ctx, fresh, model)
+		return nil, r.unavailableDecision(ctx, fresh, model)
 	}
 	c := v.Control
-	cfg := c.Settings
-	r.rememberSettings(cfg)
-	if !cfg.Enabled || !codexTicketModelEnabled(cfg, model) {
-		return nil
+	r.rememberSettings(c.Settings)
+	cfg, err := CodexTicketAccountSettings(c.Settings, fresh)
+	if err != nil {
+		return nil, r.unavailableDecision(ctx, fresh, model)
 	}
-	k := CodexTicketKey{cfg.Revision, fresh.ID, scope, model}
+	if !cfg.Enabled || !codexTicketModelEnabled(cfg, model) {
+		return nil, nil
+	}
+	k := CodexTicketKey{Revision: cfg.Revision, AccountID: fresh.ID, IdentityScope: scope, Model: model, PolicyScope: policy}
 	outcome, reason := "skipped", "ticket_missing"
 	defer func() { r.observeDecision(ctx, k, outcome, reason) }()
 	now := v.ServerTime
 	if now.IsZero() || c.ValidUntilMS <= now.UnixMilli() {
 		reason = "control_unavailable"
-		if string(cfg.MissingPolicy) == "reject" {
+		if cfg.MissingPolicy == CodexTicketReject {
 			outcome = "rejected"
-			return ErrCodexTicketControlUnavailable
+			return nil, ErrCodexTicketControlUnavailable
 		}
-		return nil
+		return nil, nil
 	}
-	if c.ProxyState == "active" && (c.ProxyExpiresAtMS == 0 || c.ProxyExpiresAtMS > now.UnixMilli()) && v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, cfg, now) == nil {
+	if CodexTicketPolicyScope(fresh, now) != policy {
+		reason = "proxy_unavailable"
+	} else if c.ProxyState == "active" && (c.ProxyExpiresAtMS == 0 || c.ProxyExpiresAtMS > now.UnixMilli()) && v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, cfg, now) == nil {
 		h.Set("X-Codex-Turn-State", v.Ticket.State)
 		outcome, reason = "header_set", "ticket_ready"
-		return nil
+		return &CodexTicketReceipt{Key: k, CapturedAt: v.Ticket.CapturedAt, state: v.Ticket.State}, nil
 	}
 	if c.ProxyState != "active" || (c.ProxyExpiresAtMS > 0 && c.ProxyExpiresAtMS <= now.UnixMilli()) {
 		reason = "proxy_unavailable"
 	}
-	if string(cfg.MissingPolicy) == "reject" {
+	if cfg.MissingPolicy == CodexTicketReject {
 		outcome = "rejected"
-		return ErrCodexTicketMissing
+		return nil, ErrCodexTicketMissing
 	}
-	return nil
+	return nil, nil
 }
 
 // On a degraded path, fail closed only for an explicitly opted-in account and
@@ -187,6 +202,7 @@ func (r *CodexTicketRuntime) countEligibleReady(ctx context.Context, revision ui
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	scopes := make(map[int64]string, len(ids))
+	policies := make(map[int64]string, len(ids))
 	for start := 0; start < len(ids); start += 100 {
 		end := start + 100
 		if end > len(ids) {
@@ -199,7 +215,12 @@ func (r *CodexTicketRuntime) countEligibleReady(ctx context.Context, revision ui
 		for _, account := range accounts {
 			if account != nil && account.CodexTurnStateEnabled() && CodexTicketAccountSupported(account) {
 				if scope := CodexTicketIdentityScope(account); scope != "" {
+					_, policy, _, err := r.resolveCodexTicketPolicy(readCtx, account, now.Add(time.Since(started)))
+					if err != nil {
+						continue
+					}
 					scopes[account.ID] = scope
+					policies[account.ID] = policy
 				}
 			}
 		}
@@ -213,7 +234,7 @@ func (r *CodexTicketRuntime) countEligibleReady(ctx context.Context, revision ui
 		if !exists {
 			continue
 		}
-		if scopes[key.AccountID] != key.IdentityScope || !currentExpiry.After(now) {
+		if scopes[key.AccountID] != key.IdentityScope || policies[key.AccountID] != key.PolicyScope || !currentExpiry.After(now) {
 			// A newer concurrent commit will be checked on the next status read.
 			if currentExpiry.Equal(observedExpiry) {
 				delete(r.ready, key)

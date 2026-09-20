@@ -125,11 +125,12 @@ func TestCodexProbeStableQuotaCodesRedacted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := "event: error\ndata: " + tc.payload + "\n\n"
 			require.Equal(t, tc.want, readCodexProbeCompletion(strings.NewReader(body)))
-			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: codexProbeAccount()}}
+			a := codexProbeAccount()
+			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: a}}
 			svc.httpUpstream = &codexProbeUpstream{call: func(*http.Request, string, int64, int) (*http.Response, error) {
 				return &http.Response{StatusCode: 200, Header: http.Header{"Retry-After": []string{"7200"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			}}
-			result, err := svc.ProbeCodexTicket(context.Background(), 7, "model", "http://localhost:1")
+			result, err := svc.ProbeCodexTicket(codexProbeTestContext(a, "model"), 7, "model", "http://localhost:1")
 			require.EqualError(t, err, tc.want)
 			require.NotContains(t, err.Error(), "SECRET")
 			require.Empty(t, result.State)

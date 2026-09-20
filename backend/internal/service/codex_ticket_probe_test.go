@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -38,15 +39,52 @@ func codexProbeAccount() *Account {
 	return &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "private-token", "chatgpt_account_id": "identity"}, Extra: map[string]any{CodexTurnStateEnabledExtraKey: true}}
 }
 
+func codexProbeTestContext(account *Account, model string) context.Context {
+	cfg := DefaultCodexTicketSettings()
+	cfg.Models = []string{model}
+	cfg.Revision = 1
+	if derived, err := CodexTicketAccountSettings(cfg, account); err == nil {
+		cfg = derived
+	}
+	task := codexTicketProbeTask{
+		Key:               CodexTicketKey{Revision: cfg.Revision, AccountID: account.ID, IdentityScope: CodexTicketIdentityScope(account), Model: model, PolicyScope: CodexTicketPolicyScope(account, time.Now())},
+		Settings:          cfg,
+		VerificationGuard: func(context.Context, bool) (*Account, string, error) { fresh := *account; return &fresh, "", nil },
+	}
+	return context.WithValue(context.Background(), codexTicketProbeTaskKey{}, task)
+}
+
+func codexProbeCompleteModel(model string) string {
+	return fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":%q}}\n\n", model)
+}
+func codexProbeValidCandidate() string {
+	return "gAAAAA" + strings.Repeat("a", DefaultCodexTicketSettings().TargetLength-6)
+}
+func codexProbeSuccessResponse(model, state string) *http.Response {
+	h := http.Header{}
+	if state != "" {
+		h.Set("X-Codex-Turn-State", state)
+	}
+	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(codexProbeCompleteModel(model)))}
+}
+
 const codexProbeComplete = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
 
 func TestCodexProbeRequestIsolation(t *testing.T) {
 	repo := &codexProbeAccounts{account: codexProbeAccount()}
 	sessions := map[string]bool{}
+	calls := 0
+	var captureDeadline time.Time
 	svc := &OpenAIGatewayService{accountRepo: repo}
 	svc.httpUpstream = &codexProbeUpstream{call: func(r *http.Request, p string, id int64, n int) (*http.Response, error) {
+		calls++
+		capture := calls%2 == 1
 		require.Equal(t, chatgptCodexURL, r.URL.String())
-		require.Equal(t, "http://127.0.0.1:8888", p)
+		if capture {
+			require.Equal(t, "http://127.0.0.1:8888", p)
+		} else {
+			require.Empty(t, p, "verification uses the account's direct business route")
+		}
 		require.Equal(t, int64(7), id)
 		require.Equal(t, 4, n)
 		require.Equal(t, HTTPUpstreamProfileCodexHarvest, HTTPUpstreamProfileFromContext(r.Context()))
@@ -54,12 +92,21 @@ func TestCodexProbeRequestIsolation(t *testing.T) {
 		deadline, ok := r.Context().Deadline()
 		require.True(t, ok)
 		require.LessOrEqual(t, time.Until(deadline), 30*time.Second)
+		if capture {
+			captureDeadline = deadline
+		} else {
+			require.True(t, captureDeadline.Equal(deadline), "both stages share the original 30s deadline")
+		}
 		require.Equal(t, "Bearer private-token", r.Header.Get("Authorization"))
 		require.NotEmpty(t, r.Header.Get("User-Agent"))
 		require.NotEmpty(t, r.Header.Get("originator"))
 		require.NotEmpty(t, r.Header.Get("version"))
 		require.NotEmpty(t, r.Header.Get("X-Codex-Window-ID"))
-		require.Empty(t, r.Header.Get("X-Codex-Turn-State"))
+		if capture {
+			require.Empty(t, r.Header.Get("X-Codex-Turn-State"))
+		} else {
+			require.Equal(t, codexProbeValidCandidate(), r.Header.Get("X-Codex-Turn-State"))
+		}
 		session := r.Header.Get("session_id")
 		require.NotEmpty(t, session)
 		require.False(t, sessions[session])
@@ -72,16 +119,36 @@ func TestCodexProbeRequestIsolation(t *testing.T) {
 		require.Equal(t, false, body["store"])
 		require.NotContains(t, body, "previous_response_id")
 		require.NotContains(t, body, "tools")
-		return &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": []string{"private-state"}}, Body: io.NopCloser(strings.NewReader(codexProbeComplete))}, nil
+		if capture {
+			return codexProbeSuccessResponse("requested-model", codexProbeValidCandidate()), nil
+		}
+		return codexProbeSuccessResponse("requested-model", ""), nil
 	}}
 	for i := 0; i < 2; i++ {
-		result, err := svc.ProbeCodexTicket(context.Background(), 7, "requested-model", "http://127.0.0.1:8888")
+		ctx := codexProbeTestContext(repo.account, "requested-model")
+		task := ctx.Value(codexTicketProbeTaskKey{}).(codexTicketProbeTask)
+		guardCalls := []bool{}
+		task.VerificationGuard = func(_ context.Context, consume bool) (*Account, string, error) {
+			guardCalls = append(guardCalls, consume)
+			fresh := *repo.account
+			return &fresh, "", nil
+		}
+		ctx = context.WithValue(ctx, codexTicketProbeTaskKey{}, task)
+		result, err := svc.ProbeCodexTicket(ctx, 7, "requested-model", "http://127.0.0.1:8888")
 		require.NoError(t, err)
 		require.True(t, result.Completed)
-		require.Equal(t, "private-state", result.State)
+		require.True(t, result.Verified)
+		require.False(t, result.VerifiedAt.IsZero())
+		require.Equal(t, "requested-model", result.ActualModel)
+		require.Equal(t, "requested-model", result.VerificationModel)
+		require.Equal(t, []bool{true, false}, guardCalls)
+		require.Equal(t, codexProbeValidCandidate(), result.State)
 		require.Equal(t, CodexTicketIdentityScope(repo.account), result.IdentityScope)
+		require.Equal(t, CodexTicketPolicyScope(repo.account, time.Now()), result.PolicyScope)
 	}
 	require.Equal(t, 2, repo.calls)
+	require.Equal(t, 4, calls)
+	require.Len(t, sessions, 4)
 }
 
 type codexProbeTokenCache struct{ OpenAITokenCache }
@@ -95,9 +162,9 @@ func TestCodexProbeUsesTokenProvider(t *testing.T) {
 	svc := &OpenAIGatewayService{accountRepo: repo, openAITokenProvider: NewOpenAITokenProvider(repo, &codexProbeTokenCache{}, nil)}
 	svc.httpUpstream = &codexProbeUpstream{call: func(r *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 		require.Equal(t, "Bearer fresh-cache-token", r.Header.Get("Authorization"))
-		return &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": []string{"state"}}, Body: io.NopCloser(strings.NewReader(codexProbeComplete))}, nil
+		return codexProbeSuccessResponse("model", codexProbeValidCandidate()), nil
 	}}
-	_, err := svc.ProbeCodexTicket(context.Background(), 7, "model", "http://localhost:1")
+	_, err := svc.ProbeCodexTicket(codexProbeTestContext(repo.account, "model"), 7, "model", "http://localhost:1")
 	require.NoError(t, err)
 }
 
@@ -111,18 +178,25 @@ func TestCodexProbeProxySchemesAndPluginRolloutMiss(t *testing.T) {
 			manager := &PluginManager{}
 			manager.route.Store(&pluginRoute{rolloutPercent: 1})
 			require.False(t, manager.ShouldRouteOpenAIOAuth(account))
-			called := false
+			calls := 0
 			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: account}, pluginManager: manager}
 			proxyURL := scheme + "://127.0.0.1:8080"
 			svc.httpUpstream = &codexProbeUpstream{call: func(req *http.Request, p string, _ int64, _ int) (*http.Response, error) {
-				called = true
-				require.Equal(t, proxyURL, p)
+				calls++
+				if calls == 1 {
+					require.Equal(t, proxyURL, p)
+					require.Empty(t, req.Header.Get("X-Codex-Turn-State"))
+				} else {
+					require.Empty(t, p)
+					require.Equal(t, codexProbeValidCandidate(), req.Header.Get("X-Codex-Turn-State"))
+				}
 				require.Equal(t, HTTPUpstreamProfileCodexHarvest, HTTPUpstreamProfileFromContext(req.Context()))
-				return &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": []string{"state"}}, Body: io.NopCloser(strings.NewReader(codexProbeComplete))}, nil
+				return codexProbeSuccessResponse("model", codexProbeValidCandidate()), nil
 			}}
-			result, err := svc.ProbeCodexTicket(context.Background(), account.ID, "model", proxyURL)
+			result, err := svc.ProbeCodexTicket(codexProbeTestContext(account, "model"), account.ID, "model", proxyURL)
 			require.NoError(t, err)
-			require.True(t, called)
+			require.Equal(t, 2, calls)
+			require.True(t, result.Verified)
 			require.True(t, result.Completed)
 		})
 	}
@@ -134,9 +208,9 @@ func TestCodexProbeRejectsBeforeTransport(t *testing.T) {
 		enabled           any
 		plugin            bool
 	}{
-		{"empty proxy", "", "invalid_proxy", true, false}, {"unsupported scheme", "ftp://localhost:1", "invalid_proxy", true, false},
-		{"bad port", "http://localhost:99999", "invalid_proxy", true, false}, {"missing host", "http://:80", "invalid_proxy", true, false},
-		{"false", "http://localhost:1", "account_disabled", false, false}, {"string true", "http://localhost:1", "account_disabled", "true", false},
+		{"empty proxy", "", "proxy_unavailable", true, false}, {"unsupported scheme", "ftp://localhost:1", "proxy_unavailable", true, false},
+		{"bad port", "http://localhost:99999", "proxy_unavailable", true, false}, {"missing host", "http://:80", "proxy_unavailable", true, false},
+		{"false", "http://localhost:1", "identity_unresolved", false, false}, {"string true", "http://localhost:1", "identity_unresolved", "true", false},
 		{"plugin", "http://localhost:1", "transport_unsupported", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,9 +224,9 @@ func TestCodexProbeRejectsBeforeTransport(t *testing.T) {
 				svc.pluginManager = &PluginManager{}
 				svc.pluginManager.route.Store(&pluginRoute{rolloutPercent: 100})
 			}
-			got, err := svc.ProbeCodexTicket(context.Background(), 7, "model", tc.proxy)
+			got, err := svc.ProbeCodexTicket(codexProbeTestContext(a, "model"), 7, "model", tc.proxy)
 			require.EqualError(t, err, tc.code)
-			require.Equal(t, map[string]string{"invalid_proxy": "proxy_unavailable", "account_disabled": "identity_unresolved", "transport_unsupported": "transport_unsupported", "http_status": "", "transport_error": "proxy_unavailable", "completion_missing": "stream_failed", "state_missing": "stream_failed", "headers_too_large": "stream_failed"}[tc.code], got.ErrorCode)
+			require.Equal(t, tc.code, got.ErrorCode)
 			require.Empty(t, got.State)
 		})
 	}
@@ -171,11 +245,12 @@ func TestCodexProbeResponseFailures(t *testing.T) {
 		{name: "unavailable", status: 503, code: "http_status"},
 		{name: "transport", transportErr: true, code: "transport_error"},
 		{name: "missing completion", status: 200, body: "data: [DONE]\n\n", state: "private-state", code: "completion_missing"},
-		{name: "missing state", status: 200, body: codexProbeComplete, code: "state_missing"},
-		{name: "headers", status: 200, body: codexProbeComplete, hugeHeaders: true, code: "headers_too_large"},
+		{name: "missing state", status: 200, body: codexProbeCompleteModel("model"), code: "state_missing"},
+		{name: "headers", status: 200, body: codexProbeCompleteModel("model"), hugeHeaders: true, code: "headers_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: codexProbeAccount()}}
+			a := codexProbeAccount()
+			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: a}}
 			svc.httpUpstream = &codexProbeUpstream{call: func(*http.Request, string, int64, int) (*http.Response, error) {
 				if tc.transportErr {
 					return nil, errors.New("private-token private-state private-body")
@@ -189,7 +264,7 @@ func TestCodexProbeResponseFailures(t *testing.T) {
 				}
 				return &http.Response{StatusCode: tc.status, Header: h, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 			}}
-			got, err := svc.ProbeCodexTicket(context.Background(), 7, "model", "http://localhost:1")
+			got, err := svc.ProbeCodexTicket(codexProbeTestContext(a, "model"), 7, "model", "http://localhost:1")
 			require.EqualError(t, err, tc.code)
 			require.Equal(t, map[string]string{"invalid_proxy": "proxy_unavailable", "account_disabled": "identity_unresolved", "transport_unsupported": "transport_unsupported", "http_status": "", "transport_error": "proxy_unavailable", "completion_missing": "stream_failed", "state_missing": "stream_failed", "headers_too_large": "stream_failed"}[tc.code], got.ErrorCode)
 			require.Empty(t, got.State)
@@ -200,6 +275,107 @@ func TestCodexProbeResponseFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCodexProbeTwoStageModelAndStateFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		stage             int
+		body, state, code string
+	}{
+		{"capture model missing", 1, codexProbeComplete, codexProbeValidCandidate(), "model_mismatch"},
+		{"capture model wrong", 1, codexProbeCompleteModel("other-model"), codexProbeValidCandidate(), "model_mismatch"},
+		{"capture malformed state", 1, codexProbeCompleteModel("model"), "private-state", "verification_failed"},
+		{"capture length312", 1, codexProbeCompleteModel("model"), "gAAAAA" + strings.Repeat("a", 306), "state_312"},
+		{"verify model missing", 2, codexProbeComplete, "", "model_mismatch"},
+		{"verify model wrong", 2, codexProbeCompleteModel("other-model"), "", "model_mismatch"},
+		{"verify state312", 2, codexProbeCompleteModel("model"), "gAAAAA" + strings.Repeat("a", 306), "state_312"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := codexProbeAccount()
+			calls := 0
+			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: a}}
+			svc.httpUpstream = &codexProbeUpstream{call: func(req *http.Request, route string, _ int64, _ int) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					require.Equal(t, "http://localhost:1", route)
+					require.Empty(t, req.Header.Get("X-Codex-Turn-State"))
+				} else {
+					require.Empty(t, route)
+					require.Equal(t, codexProbeValidCandidate(), req.Header.Get("X-Codex-Turn-State"))
+				}
+				if calls == tc.stage {
+					h := http.Header{}
+					if tc.state != "" {
+						h.Set("X-Codex-Turn-State", tc.state)
+					}
+					return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+				}
+				return codexProbeSuccessResponse("model", codexProbeValidCandidate()), nil
+			}}
+			result, err := svc.ProbeCodexTicket(codexProbeTestContext(a, "model"), a.ID, "model", "http://localhost:1")
+			require.EqualError(t, err, tc.code)
+			require.Equal(t, tc.code, result.ErrorCode)
+			require.False(t, result.Verified)
+			require.False(t, result.Completed)
+			require.Empty(t, result.State)
+			require.Equal(t, tc.stage, calls)
+		})
+	}
+}
+
+func TestCodexProbeVerificationGuardRejectsWithoutReplay(t *testing.T) {
+	for _, denyAt := range []int{1, 2} {
+		t.Run(fmt.Sprint(denyAt), func(t *testing.T) {
+			a := codexProbeAccount()
+			ctx := codexProbeTestContext(a, "model")
+			task := ctx.Value(codexTicketProbeTaskKey{}).(codexTicketProbeTask)
+			guards := []bool{}
+			calls := 0
+			task.VerificationGuard = func(_ context.Context, consume bool) (*Account, string, error) {
+				guards = append(guards, consume)
+				if len(guards) == denyAt {
+					return nil, "", errors.New("budget or fresh fence denied")
+				}
+				return a, "", nil
+			}
+			ctx = context.WithValue(ctx, codexTicketProbeTaskKey{}, task)
+			svc := &OpenAIGatewayService{accountRepo: &codexProbeAccounts{account: a}, httpUpstream: &codexProbeUpstream{call: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					require.Empty(t, req.Header.Get("X-Codex-Turn-State"))
+					return codexProbeSuccessResponse("model", codexProbeValidCandidate()), nil
+				}
+				require.Equal(t, codexProbeValidCandidate(), req.Header.Get("X-Codex-Turn-State"))
+				return codexProbeSuccessResponse("model", ""), nil
+			}}}
+			result, err := svc.ProbeCodexTicket(ctx, a.ID, "model", "http://localhost:1")
+			require.EqualError(t, err, "verification_failed")
+			require.Empty(t, result.State)
+			require.False(t, result.Verified)
+			require.False(t, result.Completed)
+			require.Equal(t, denyAt, calls)
+			require.Len(t, guards, denyAt)
+			require.True(t, guards[0])
+			if denyAt == 2 {
+				require.False(t, guards[1])
+			}
+		})
+	}
+}
+
+func TestCodexProbeRequiresControllerTaskBeforeTransport(t *testing.T) {
+	a := codexProbeAccount()
+	repo := &codexProbeAccounts{account: a}
+	svc := &OpenAIGatewayService{accountRepo: repo, httpUpstream: &codexProbeUpstream{call: func(*http.Request, string, int64, int) (*http.Response, error) {
+		t.Fatal("unbudgeted transport")
+		return nil, nil
+	}}}
+	// This deliberately omits the helper: unbudgeted direct calls must fail.
+	result, err := svc.ProbeCodexTicket(context.Background(), a.ID, "model", "http://localhost:1")
+	require.EqualError(t, err, "verification_failed")
+	require.Empty(t, result.State)
+	require.Zero(t, repo.calls)
 }
 
 func TestCodexProbeSSEBoundsAndCompletion(t *testing.T) {

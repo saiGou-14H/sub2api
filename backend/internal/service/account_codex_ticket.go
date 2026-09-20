@@ -11,6 +11,43 @@ import (
 )
 
 const CodexTurnStateEnabledExtraKey = "codex_turn_state_enabled"
+const CodexTurnStatePlanExtraKey = "codex_turn_state_plan"
+
+// CodexTicketPlan is an explicit administrator selection, never an inference
+// from upstream claims, credentials, account names, or ticket contents.
+func CodexTicketPlan(a *Account) string {
+	if a == nil {
+		return ""
+	}
+	value, exists := a.Extra[CodexTurnStatePlanExtraKey]
+	if !exists {
+		return "inherit"
+	}
+	plan, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	switch plan {
+	case "inherit", "pro", "team":
+		return plan
+	}
+	return ""
+}
+
+// CodexTicketAccountSettings derives an account-local value without mutating
+// global configuration. Plan selection says nothing about the real subscription.
+func CodexTicketAccountSettings(cfg CodexTicketSettings, a *Account) (CodexTicketSettings, error) {
+	switch CodexTicketPlan(a) {
+	case "inherit":
+	case "pro":
+		cfg.TargetLength = 292
+	case "team":
+		cfg.TargetLength = 332
+	default:
+		return CodexTicketSettings{}, ErrCodexTicketInvalidConfig
+	}
+	return cfg, nil
+}
 
 // CodexTicketAccountSupported excludes other OpenAI transports even when they
 // expose the same model names. A missing account switch never opts in.
@@ -63,6 +100,9 @@ func ValidateCodexTurnStateExtra(extra map[string]any) error {
 		if _, ok := value.(bool); !ok {
 			return infraerrors.BadRequest("CODEX_TURN_STATE_INVALID", "codex_turn_state_enabled must be a boolean")
 		}
+	}
+	if CodexTicketPlan(&Account{Extra: extra}) == "" {
+		return infraerrors.BadRequest("CODEX_TURN_STATE_PLAN_INVALID", "codex_turn_state_plan must be inherit, pro, or team")
 	}
 	return nil
 }

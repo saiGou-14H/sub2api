@@ -49,7 +49,7 @@ redis.call('SET',KEYS[2],ARGV[2],'PX',v.valid_until_ms-now);return 1`, []string{
 	return n == 1, e
 }
 func codexPayloadKey(k service.CodexTicketKey) string {
-	return fmt.Sprintf("%sticket:%d:%d:%s:%s", codexPrefix, k.Revision, k.AccountID, service.CodexTicketModelHash(k.IdentityScope), service.CodexTicketModelHash(k.Model))
+	return fmt.Sprintf("%sticket:%d:%d:%s:%s:%s", codexPrefix, k.Revision, k.AccountID, service.CodexTicketModelHash(k.IdentityScope), service.CodexTicketModelHash(k.Model), service.CodexTicketModelHash(k.PolicyScope))
 }
 func codexRetryKey(k service.CodexTicketKey) string { return codexPayloadKey(k) + ":retry" }
 
@@ -67,13 +67,17 @@ func (c *codexTicketCache) ExtendProbeCooldown(ctx context.Context, _ string, k 
 	return c.client.Eval(ctx, codexLuaNow+`local deadline=tonumber(ARGV[1]); local old=tonumber(redis.call('GET',KEYS[1]) or '0');
 if deadline>now and deadline>old then redis.call('SET',KEYS[1],ARGV[1],'PX',deadline-now) end return 1`, []string{codexCooldownKey(k)}, until.UnixMilli()).Err()
 }
-func (c *codexTicketCache) ReadForRequest(ctx context.Context, id int64, scope, model string) (service.CodexTicketRuntimeView, error) {
+func (c *codexTicketCache) ReadForRequest(ctx context.Context, id int64, scope, model string, policyScopes ...string) (service.CodexTicketRuntimeView, error) {
+	policy := ""
+	if len(policyScopes) > 0 {
+		policy = policyScopes[0]
+	}
 	started := time.Now()
 	var v service.CodexTicketRuntimeView
 	a, e := c.client.Eval(ctx, codexLuaNow+`local raw=redis.call('GET',KEYS[1]); if not raw then return {} end
 local c=cjson.decode(raw);if c.valid_until_ms<=now then return {} end
-local key=ARGV[1]..c.settings.revision..':'..ARGV[2]..':'..ARGV[3]..':'..ARGV[4]
-return {raw,redis.call('GET',key) or '',tostring(now)}`, []string{codexPrefix + "control"}, codexPrefix+"ticket:", id, service.CodexTicketModelHash(scope), service.CodexTicketModelHash(model)).Slice()
+local key=ARGV[1]..c.settings.revision..':'..ARGV[2]..':'..ARGV[3]..':'..ARGV[4]..':'..ARGV[5]
+return {raw,redis.call('GET',key) or '',tostring(now)}`, []string{codexPrefix + "control"}, codexPrefix+"ticket:", id, service.CodexTicketModelHash(scope), service.CodexTicketModelHash(model), service.CodexTicketModelHash(policy)).Slice()
 	if e != nil {
 		return v, e
 	}
@@ -106,23 +110,30 @@ func (c *codexTicketCache) CheckCurrent(ctx context.Context, o string, r uint64)
 	return n == 1, e
 }
 func (c *codexTicketCache) CommitIfCurrent(ctx context.Context, o string, t service.CodexTicket) (bool, error) {
-	view, e := c.ReadForRequest(ctx, t.Key.AccountID, t.Key.IdentityScope, t.Key.Model)
+	view, e := c.ReadForRequest(ctx, t.Key.AccountID, t.Key.IdentityScope, t.Key.Model, t.Key.PolicyScope)
 	if e != nil {
 		return false, e
 	}
-	if e = service.ValidateCodexTicket(t, t.Key, view.Control.Settings, view.ServerTime); e != nil {
+	cfg := view.Control.Settings
+	cfg.TargetLength = t.TargetLength
+	if t.TargetLength < 64 || t.TargetLength > 4096 {
+		return false, service.ErrCodexTicketControlUnavailable
+	}
+	if e = service.ValidateCodexTicket(t, t.Key, cfg, view.ServerTime); e != nil {
 		return false, e
 	}
 	b, e := json.Marshal(t)
 	if e != nil {
 		return false, e
 	}
-	metadata, e := json.Marshal(service.CodexTicketMetadata{CapturedAt: t.CapturedAt, ExpiresAt: t.ExpiresAt})
+	metadata, e := json.Marshal(service.CodexTicketMetadata{CapturedAt: t.CapturedAt, ExpiresAt: t.ExpiresAt, VerifiedAt: t.VerifiedAt, ActualModel: t.ActualModel, VerificationModel: t.VerificationModel})
 	if e != nil {
 		return false, e
 	}
 	n, e := c.client.Eval(ctx, codexLuaFence+`local expiry=tonumber(ARGV[4]);if expiry<=now then return 0 end
-local payload=cjson.decode(ARGV[3]);if string.len(payload.State)~=c.settings.target_length then return 0 end
+local payload=cjson.decode(ARGV[3]);local target=tonumber(payload.TargetLength)
+if not target or target<64 or target>4096 or string.len(payload.State)~=target or payload.Verified~=true or not payload.Key.PolicyScope or payload.Key.PolicyScope=='' or payload.ActualModel~=payload.Key.Model or payload.VerificationModel~=payload.Key.Model or not payload.VerifiedAt then return 0 end
+local configured=false;for _,model in ipairs(c.settings.models) do if model==payload.Key.Model then configured=true end end;if not configured then return 0 end
 redis.call('SET',KEYS[3],ARGV[3],'PX',expiry-now);redis.call('DEL',KEYS[4]);redis.call('SET',KEYS[5],ARGV[5],'PX',ARGV[6]);return 1`, []string{codexPrefix + "leader", codexPrefix + "control", codexPayloadKey(t.Key), codexRetryKey(t.Key), codexMetadataKey(t.Key)}, o, fmt.Sprint(t.Key.Revision), string(b), t.ExpiresAt.UnixMilli(), string(metadata), codexObservationTTL.Milliseconds()).Int()
 	return n == 1, e
 }

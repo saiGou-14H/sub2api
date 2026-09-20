@@ -457,6 +457,13 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 			normalized[CodexTurnStateEnabledExtraKey] = enabled
 		}
 	}
+	if _, provided := input.Extra[CodexTurnStatePlanExtraKey]; !provided {
+		if _, exists := account.Extra[CodexTurnStatePlanExtraKey]; exists {
+			if plan := CodexTicketPlan(account); plan != "" {
+				normalized[CodexTurnStatePlanExtraKey] = plan
+			}
+		}
+	}
 	_, provided := input.Extra[openAILongContextBillingEnabledKey]
 	current, hasCurrent := account.Extra[openAILongContextBillingEnabledKey].(bool)
 	if !provided {

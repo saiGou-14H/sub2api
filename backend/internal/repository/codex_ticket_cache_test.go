@@ -31,7 +31,7 @@ func ticketCacheFixture(t *testing.T) (*codexTicketCache, *miniredis.Miniredis, 
 	cfg.Enabled = true
 	cfg.Revision = 1
 	control := service.CodexTicketControl{Owner: "one", Settings: cfg, ProxyState: "active", ValidUntilMS: now.Add(6 * time.Second).UnixMilli()}
-	ticket := service.CodexTicket{Key: service.CodexTicketKey{Revision: 1, AccountID: 3, IdentityScope: "scope", Model: cfg.Models[0]}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second)}
+	ticket := service.CodexTicket{Key: service.CodexTicketKey{Revision: 1, AccountID: 3, IdentityScope: "scope", Model: cfg.Models[0], PolicyScope: "policy"}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: true, VerifiedAt: now, ActualModel: cfg.Models[0], VerificationModel: cfg.Models[0], TargetLength: cfg.TargetLength}
 	ok, e := cache.TryAcquireLeader(ctx, "one", 15*time.Second)
 	require.NoError(t, e)
 	require.True(t, ok)
@@ -46,10 +46,10 @@ func TestCodexTicketCacheFencingAndIsolation(t *testing.T) {
 	ok, e := c.CommitIfCurrent(ctx, "one", ticket)
 	require.NoError(t, e)
 	require.True(t, ok)
-	view, e := c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model)
+	view, e := c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model, ticket.Key.PolicyScope)
 	require.NoError(t, e)
 	require.Equal(t, ticket.State, view.Ticket.State)
-	view, e = c.ReadForRequest(ctx, 3, "other", ticket.Key.Model)
+	view, e = c.ReadForRequest(ctx, 3, "other", ticket.Key.Model, ticket.Key.PolicyScope)
 	require.NoError(t, e)
 	require.Nil(t, view.Ticket)
 	ok, e = c.CommitIfCurrent(ctx, "old", ticket)
@@ -62,7 +62,7 @@ func TestCodexTicketCacheFencingAndIsolation(t *testing.T) {
 	ok, e = c.CommitIfCurrent(ctx, "one", ticket)
 	require.Error(t, e)
 	require.False(t, ok)
-	view, e = c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model)
+	view, e = c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model, ticket.Key.PolicyScope)
 	require.NoError(t, e)
 	require.Nil(t, view.Ticket)
 	control.Settings.Revision = 1
@@ -107,7 +107,7 @@ func TestCodexTicketCacheFreshnessBudgetAndProxyExpiry(t *testing.T) {
 	ok, e = c.CheckCurrent(ctx, "one", 1)
 	require.NoError(t, e)
 	require.False(t, ok)
-	_, e = c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model)
+	_, e = c.ReadForRequest(ctx, 3, "scope", ticket.Key.Model, ticket.Key.PolicyScope)
 	require.ErrorIs(t, e, service.ErrCodexTicketControlUnavailable)
 	control.ValidUntilMS = now.Add(12 * time.Second).UnixMilli()
 	control.ProxyExpiresAtMS = now.Add(6 * time.Second).UnixMilli()
@@ -186,7 +186,7 @@ func TestCodexTicketCacheTakeoverFencesRetryAndDoesNotExtendTicket(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, ok)
 	require.NoError(t, cache.ReleaseLeader(ctx, "one"))
-	view, err := cache.ReadForRequest(ctx, ticket.Key.AccountID, ticket.Key.IdentityScope, ticket.Key.Model)
+	view, err := cache.ReadForRequest(ctx, ticket.Key.AccountID, ticket.Key.IdentityScope, ticket.Key.Model, ticket.Key.PolicyScope)
 	require.NoError(t, err)
 	require.Equal(t, "two", view.Control.Owner)
 	ok, err = cache.CommitIfCurrent(ctx, "two", ticket)

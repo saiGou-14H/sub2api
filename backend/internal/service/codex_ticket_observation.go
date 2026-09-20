@@ -10,7 +10,7 @@ import (
 
 func (r *CodexTicketRuntime) observeDecision(ctx context.Context, k CodexTicketKey, outcome, reason string) {
 	store, ok := r.cache.(CodexTicketObservationStore)
-	if !ok || k.IdentityScope == "" {
+	if !ok || k.IdentityScope == "" || k.PolicyScope == "" {
 		return
 	}
 	id, _ := ctx.Value(ctxkey.ClientRequestID).(string)
@@ -37,9 +37,16 @@ func (r *CodexTicketRuntime) ObserveCompactSkip(ctx context.Context, a *Account,
 	if err != nil || !CodexTicketAccountSupported(fresh) || !fresh.CodexTurnStateEnabled() || CodexTicketIdentityScope(fresh) == "" || CodexTicketIdentityScope(fresh) != CodexTicketIdentityScope(a) {
 		return
 	}
-	v, err := r.cache.ReadForRequest(op, a.ID, CodexTicketIdentityScope(fresh), model)
+	fresh, policy, _, err := r.resolveCodexTicketPolicy(op, fresh, time.Now())
+	if err != nil || CodexTicketPolicyScope(a, time.Now()) != policy {
+		return
+	}
+	v, err := r.cache.ReadForRequest(op, a.ID, CodexTicketIdentityScope(fresh), model, policy)
 	if err != nil || !v.Control.Settings.Enabled || !codexTicketModelEnabled(v.Control.Settings, model) || v.ServerTime.IsZero() || v.Control.ValidUntilMS <= v.ServerTime.UnixMilli() {
 		return
 	}
-	r.observeDecision(op, CodexTicketKey{v.Control.Settings.Revision, a.ID, CodexTicketIdentityScope(fresh), model}, "skipped", "compact")
+	if CodexTicketPolicyScope(fresh, v.ServerTime) != policy {
+		return
+	}
+	r.observeDecision(op, CodexTicketKey{Revision: v.Control.Settings.Revision, AccountID: a.ID, IdentityScope: CodexTicketIdentityScope(fresh), Model: model, PolicyScope: policy}, "skipped", "compact")
 }

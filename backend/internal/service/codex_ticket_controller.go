@@ -211,7 +211,11 @@ func (r *CodexTicketRuntime) collect(ctx context.Context, owner string, cfg Code
 	var workers sync.WaitGroup
 	var mu sync.Mutex
 	queued := map[CodexTicketKey]bool{}
-	for i := 0; i < cfg.MaxConcurrency; i++ {
+	// Every successful harvest needs capture plus verification. Do not let all
+	// workers spend a small minute budget on captures with nothing left to verify.
+	// A configured budget of one remains bounded but cannot produce a new ticket.
+	workerLimit := min(cfg.MaxConcurrency, max(1, cfg.MaxProbesPerMinute/2))
+	for i := 0; i < workerLimit; i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -258,11 +262,18 @@ func (r *CodexTicketRuntime) collect(ctx context.Context, owner string, cfg Code
 				if scope == "" {
 					continue
 				}
+				op, cancel = context.WithTimeout(ctx, 2*time.Second)
+				a, policy, _, policyErr := r.resolveCodexTicketPolicy(op, a, time.Now())
+				cancel()
+				accountCfg, configErr := CodexTicketAccountSettings(cfg, a)
+				if policyErr != nil || configErr != nil {
+					continue
+				}
 				for _, model := range cfg.Models {
 					if !a.IsSchedulableForModelWithContext(ctx, model) {
 						continue
 					}
-					k := CodexTicketKey{cfg.Revision, a.ID, scope, model}
+					k := CodexTicketKey{Revision: cfg.Revision, AccountID: a.ID, IdentityScope: scope, Model: model, PolicyScope: policy}
 					mu.Lock()
 					exists := queued[k]
 					mu.Unlock()
@@ -270,7 +281,7 @@ func (r *CodexTicketRuntime) collect(ctx context.Context, owner string, cfg Code
 						continue
 					}
 					op, cancel = context.WithTimeout(ctx, 2*time.Second)
-					v, e := r.cache.ReadForRequest(op, a.ID, scope, model)
+					v, e := r.cache.ReadForRequest(op, a.ID, scope, model, policy)
 					retry, re := r.cache.ReadRetry(op, k)
 					cancel()
 					if e != nil || re != nil {
@@ -279,7 +290,7 @@ func (r *CodexTicketRuntime) collect(ctx context.Context, owner string, cfg Code
 					if v.Control.Settings.Revision != cfg.Revision || retry.NextAttemptAt.After(v.ServerTime) {
 						continue
 					}
-					if v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, cfg, v.ServerTime) == nil {
+					if v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, accountCfg, v.ServerTime) == nil {
 						r.mu.Lock()
 						r.ready[k] = v.Ticket.ExpiresAt
 						r.mu.Unlock()
@@ -329,6 +340,14 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil || a == nil || !a.CodexTurnStateEnabled() || !CodexTicketAccountSupported(a) || CodexTicketIdentityScope(a) != k.IdentityScope || !a.IsSchedulableForModelWithContext(ctx, k.Model) {
 		return
 	}
+	a, policy, _, e := r.resolveCodexTicketPolicy(ctx, a, time.Now())
+	if e != nil || policy != k.PolicyScope {
+		return
+	}
+	cfg, e = CodexTicketAccountSettings(cfg, a)
+	if e != nil {
+		return
+	}
 	retry, e := r.cache.ReadRetry(ctx, k)
 	if e != nil {
 		return
@@ -354,6 +373,7 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil || blocked || ctx.Err() != nil {
 		return
 	}
+	ctx = context.WithValue(ctx, codexTicketProbeTaskKey{}, codexTicketProbeTask{Key: k, Settings: cfg, VerificationGuard: r.codexVerificationGuard(owner, cfg, k)})
 	result, err := probe(ctx, k.AccountID, k.Model, proxyURL)
 	if !r.recordObservedProbeRestriction(ctx, k, result, now.Add(time.Since(observedClock))) {
 		return
@@ -375,10 +395,17 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil {
 		return
 	}
-	t := CodexTicket{Key: k, State: result.State, CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second)}
-	if err == nil && result.HTTPStatus == http.StatusOK && result.Completed && result.IdentityScope == k.IdentityScope && ValidateCodexTicket(t, k, cfg, now) == nil {
-		a, e = r.accounts.GetByID(ctx, k.AccountID)
-		if e != nil || a == nil || !a.CodexTurnStateEnabled() || !CodexTicketAccountSupported(a) || CodexTicketIdentityScope(a) != k.IdentityScope {
+	t := CodexTicket{Key: k, State: result.State, CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: result.Verified, VerifiedAt: now, ActualModel: result.ActualModel, VerificationModel: result.VerificationModel, TargetLength: cfg.TargetLength}
+	if err == nil && result.HTTPStatus == http.StatusOK && result.Completed && result.IdentityScope == k.IdentityScope && result.PolicyScope == k.PolicyScope && ValidateCodexTicket(t, k, cfg, now) == nil {
+		if !r.codexTicketAccountCurrent(ctx, k) {
+			return
+		}
+		blocked, e = r.probeRestrictionActive(ctx, k)
+		if e != nil || blocked {
+			return
+		}
+		ok, e = r.cache.CheckCurrent(ctx, owner, k.Revision)
+		if e != nil || !ok {
 			return
 		}
 		ok, e = r.cache.CommitIfCurrent(ctx, owner, t)
@@ -421,7 +448,7 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 	// Adapters can refine classification using a closed set of safe codes.
 	// Never surface their raw transport error or an arbitrary ErrorCode value.
 	switch result.ErrorCode {
-	case "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable":
+	case "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable", "model_mismatch", "verification_failed", "state_312":
 		code = result.ErrorCode
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
