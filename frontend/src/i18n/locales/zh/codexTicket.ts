@@ -61,6 +61,8 @@ export default {
     candidate_read_failed: '读取待采集账号失败。',
     commit_unavailable: '暂无法提交采集结果。',
     probe_failed: '采集探测失败。',
+    probe_timeout: '采集探测超时。',
+    retry_unavailable: '暂无法保存采集重试状态。',
     unknown: '采集遇到未识别的错误分类，请检查服务端脱敏日志。'
   },
   runtimeCounts: '可用：{ready} · 待处理：{pending} · 进行中：{inflight}',

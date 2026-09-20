@@ -61,6 +61,8 @@ export default {
     candidate_read_failed: 'Collection candidate accounts could not be read.',
     commit_unavailable: 'The collection result could not be committed.',
     probe_failed: 'The collection probe failed.',
+    probe_timeout: 'The collection probe timed out.',
+    retry_unavailable: 'The collection retry state could not be saved.',
     unknown: 'Collection reported an unrecognized error category. Check the redacted server logs.'
   },
   runtimeCounts: 'Ready: {ready} · Pending: {pending} · In flight: {inflight}',

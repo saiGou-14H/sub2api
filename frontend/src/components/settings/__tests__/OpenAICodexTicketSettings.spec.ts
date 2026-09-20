@@ -54,10 +54,18 @@ describe('Codex ticket settings', () => {
     expect(wrapper.get('[data-testid="runtime-counter-scope"]').text()).toBe('codexTicket.unknownCounterScope')
     expect(wrapper.text()).not.toContain('future_scope')
   })
-  it.each(['transport_unsupported', 'rate_limited', 'authentication_failed'])('maps the fixed runtime classification %s', async code => {
+  it.each(['transport_unsupported', 'rate_limited', 'authentication_failed', 'probe_timeout', 'retry_unavailable'])('maps the fixed runtime classification %s', async code => {
     api.getCodexTicketSettings.mockResolvedValue({ ...snapshot(), runtime: { ...runtime(), last_error_code: code } })
     const wrapper = await render()
     expect(wrapper.get('[data-testid="runtime-error"]').text()).toBe(`codexTicket.runtimeErrors.${code}`)
+  })
+  it.each(['probe_timeout', 'retry_unavailable'])('updates the runtime classification to %s after polling', async code => {
+    const wrapper = await render()
+    expect(wrapper.find('[data-testid="runtime-error"]').exists()).toBe(false)
+    api.getCodexTicketStatus.mockResolvedValue({ ...runtime(), phase: 'degraded', last_error_code: code })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.get('[data-testid="runtime-error"]').text()).toBe(`codexTicket.runtimeErrors.${code}`)
+    expect(wrapper.get('[data-testid="runtime-state"]').text()).toBe('codexTicket.phases.degraded')
   })
   it('never exposes an unrecognized last_error_code or upstream error body', async () => {
     const rawError = '{"access_token":"do-not-display","error":"upstream body"}'

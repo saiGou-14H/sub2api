@@ -83,7 +83,7 @@ const runtimeErrorCodes = [
   'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable',
   'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost',
   'snapshot_unavailable', 'collector_unavailable', 'candidate_read_failed',
-  'commit_unavailable', 'probe_failed'
+  'commit_unavailable', 'probe_failed', 'probe_timeout', 'retry_unavailable'
 ]
 const runtimeErrorLabel = computed(() => {
   const code = runtime.value?.last_error_code
