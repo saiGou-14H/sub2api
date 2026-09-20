@@ -327,6 +327,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
 	duplicate, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
 		return nil, err
@@ -378,8 +381,16 @@ func ValidateOpenAILongContextBillingExtra(platform string, extra map[string]any
 // selector. It is meaningful only for OpenAI OAuth-like accounts so a stale or
 // misplaced value cannot silently change operator expectations.
 func ValidateOpenAITransportExtra(platform, accountType string, extra map[string]any) error {
+	if err := ValidateCodexTurnStateExtra(extra); err != nil {
+		return err
+	}
 	if extra == nil {
 		return nil
+	}
+	if bridge, exists := extra["prism_prompt_tool_bridge"]; exists && bridge != nil {
+		if _, ok := bridge.(bool); !ok {
+			return infraerrors.BadRequest("PRISM_TOOL_BRIDGE_INVALID", "prism_prompt_tool_bridge must be a boolean")
+		}
 	}
 	raw, exists := extra[OpenAIWebTransportExtraKey]
 	if !exists || raw == nil {
@@ -387,11 +398,11 @@ func ValidateOpenAITransportExtra(platform, accountType string, extra map[string
 	}
 	value, ok := raw.(string)
 	if !ok {
-		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be web, codex or prism")
 	}
 	normalized := strings.ToLower(strings.TrimSpace(value))
-	if normalized != OpenAITransportWeb && normalized != OpenAITransportCodex {
-		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be either web or codex")
+	if normalized != OpenAITransportWeb && normalized != OpenAITransportCodex && normalized != OpenAITransportPrism {
+		return infraerrors.BadRequest("OPENAI_TRANSPORT_INVALID", "openai_transport must be web, codex or prism")
 	}
 	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) {
 		return infraerrors.BadRequest("OPENAI_TRANSPORT_UNSUPPORTED", "openai_transport is only supported for OpenAI OAuth or setup-token accounts")
@@ -442,6 +453,20 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 		return normalized, err
 	}
 
+	// An older account editor may omit this independent opt-in. Preserve it
+	// unless the caller explicitly sends a boolean (including false).
+	if _, provided := input.Extra[CodexTurnStateEnabledExtraKey]; !provided {
+		if enabled, ok := account.Extra[CodexTurnStateEnabledExtraKey].(bool); ok {
+			normalized[CodexTurnStateEnabledExtraKey] = enabled
+		}
+	}
+	if _, provided := input.Extra[CodexTurnStatePlanExtraKey]; !provided {
+		if _, exists := account.Extra[CodexTurnStatePlanExtraKey]; exists {
+			if plan := CodexTicketPlan(account); plan != "" {
+				normalized[CodexTurnStatePlanExtraKey] = plan
+			}
+		}
+	}
 	_, provided := input.Extra[openAILongContextBillingEnabledKey]
 	current, hasCurrent := account.Extra[openAILongContextBillingEnabledKey].(bool)
 	if !provided {
@@ -563,6 +588,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 
 	// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
+	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
 	// Never persist ephemeral SSO/password secrets after OAuth conversion.
@@ -695,6 +723,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
+			return nil, err
+		}
+		if err := NormalizeOpenCodeGoProtocolRulesCredentials(account.Credentials); err != nil {
 			return nil, err
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
@@ -950,6 +981,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := ValidateCodexTurnStateExtra(updates); err != nil {
+		return err
+	}
 	updates = sanitizedCodexFingerprintExtraUpdates(updates)
 	updates = stripOpenAIAutoResetCreditManagedExtra(updates, true)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
@@ -987,6 +1021,9 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if err := ValidateCodexTurnStateExtra(input.Extra); err != nil {
+		return nil, err
+	}
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	input.Extra = sanitizedCodexFingerprintExtraUpdates(input.Extra)
 	input.Extra = stripOpenAIAutoResetCreditManagedExtra(input.Extra, true)
@@ -1051,7 +1088,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		result.LongContextInheritedCount = inheritedCount
 	}
-	if transport, _ := input.Extra[OpenAIWebTransportExtraKey].(string); openAISettings.transport && transport == OpenAITransportWeb {
+	if transport, _ := input.Extra[OpenAIWebTransportExtraKey].(string); openAISettings.transport && (transport == OpenAITransportWeb || transport == OpenAITransportPrism) {
 		// The bulk repository performs a top-level JSONB merge. Keep Web accounts
 		// isolated from stale Codex-only settings even for direct API callers.
 		input.Extra["openai_passthrough"] = false
@@ -1145,6 +1182,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 校验并规范化请求头覆写配置（批量路径为 JSONB 顶层 key 合并，直接校验增量即可）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
+	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
 	// Bulk may mix platforms; always drop ephemeral SSO/password keys (cookie

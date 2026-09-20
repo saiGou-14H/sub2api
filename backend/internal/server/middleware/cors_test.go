@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -132,6 +133,41 @@ func TestCORS_PreflightDisallowedOrigin_ReturnsForbidden(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code,
 		"不允许的 origin 的 preflight 请求应返回 403")
+}
+
+func TestCORS_PrismHeadersRespectConfiguredOrigins(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		allowed []string
+		origin  string
+		status  int
+	}{
+		{"configured origin", []string{"https://client.example.com"}, "https://client.example.com", http.StatusNoContent},
+		{"wildcard origin", []string{"*"}, "https://client.example.com", http.StatusNoContent},
+		{"unlisted origin", []string{"https://client.example.com"}, "https://other.example.com", http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodOptions, "/v1/responses", nil)
+			c.Request.Header.Set("Origin", test.origin)
+			c.Request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			c.Request.Header.Set("Access-Control-Request-Headers", "authorization, content-type, x-prism-project-id, x-prism-progress")
+			CORS(config.CORSConfig{AllowedOrigins: test.allowed})(c)
+			assert.Equal(t, test.status, w.Code)
+			if test.status == http.StatusNoContent {
+				headers := strings.ToLower(w.Header().Get("Access-Control-Allow-Headers"))
+				assert.Contains(t, headers, "x-prism-project-id")
+				assert.Contains(t, headers, "x-prism-progress")
+				assert.Contains(t, headers, "authorization")
+				assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "X-Prism-Sync-Status")
+			} else {
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Headers"))
+				assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+				assert.Empty(t, w.Header().Get("Access-Control-Expose-Headers"))
+			}
+		})
+	}
 }
 
 func TestCORS_PreflightAllowedOrigin_ReturnsNoContent(t *testing.T) {

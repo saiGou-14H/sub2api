@@ -1418,6 +1418,13 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	hasAnyMapping := false
 
 	for _, acc := range accounts {
+		if acc.IsOpenAIPrismTransport() {
+			hasAnyMapping = true
+			for _, model := range OpenAIPrismAccountModels(&acc) {
+				modelSet[model] = struct{}{}
+			}
+			continue
+		}
 		if acc.IsOpenAIWebTransport() {
 			refreshOpenAIWebModelCatalog(ctx, s.accountRepo, s.httpUpstream, &acc)
 		}
@@ -1524,6 +1531,9 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 }
 
 func explicitModelMappingClaims(account Account, model string) bool {
+	if account.IsOpenAIPrismTransport() {
+		return account.IsModelSupported(model)
+	}
 	if account.IsOpenAIWebTransport() {
 		canonical, supported := NormalizeOpenAIWebModel(model)
 		if !supported {

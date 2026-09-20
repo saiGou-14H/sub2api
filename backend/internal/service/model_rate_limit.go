@@ -17,6 +17,7 @@ const (
 	// reusing the existing persisted model_rate_limits JSONB structure.
 	openAIWebTransportRateLimitKey   = "openai_transport_web"
 	openAICodexTransportRateLimitKey = "openai_transport_codex"
+	openAIPrismTransportRateLimitKey = "openai_transport_prism"
 	// anthropicFableRateLimitKey 是 Anthropic 7d_oi（Fable 专属 7d 窗口）限流的
 	// 家族级 scope：命中后所有 Fable 变体（含 [1m] 等后缀）都不再调度到该账号。
 	anthropicFableRateLimitKey = "claude-fable-5"
@@ -27,6 +28,12 @@ const (
 // window was observed.
 func (a *Account) OpenAITransportRateLimitReason() string {
 	if a == nil || !a.IsOpenAIOAuthLike() {
+		return ""
+	}
+	if a.IsOpenAIPrismTransport() {
+		if a.isRateLimitActiveForKey(openAIPrismTransportRateLimitKey) {
+			return "prism_rate_limited"
+		}
 		return ""
 	}
 	if a.IsOpenAIWebTransport() {
@@ -51,6 +58,9 @@ func (a *Account) OpenAITransportRateLimitReason() string {
 func (a *Account) OpenAITransportRateLimitRemaining() time.Duration {
 	if a == nil || !a.IsOpenAIOAuthLike() {
 		return 0
+	}
+	if a.IsOpenAIPrismTransport() {
+		return a.getRateLimitRemainingForKey(openAIPrismTransportRateLimitKey)
 	}
 	if a.IsOpenAIWebTransport() {
 		return a.getRateLimitRemainingForKey(openAIWebTransportRateLimitKey)
@@ -124,7 +134,9 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	// model-specific bucket. Including it here covers legacy GatewayService
 	// sticky/routing paths that only call IsSchedulableForModelWithContext.
 	if a.IsOpenAIOAuthLike() {
-		if a.IsOpenAIWebTransport() {
+		if a.IsOpenAIPrismTransport() {
+			keys = append(keys, openAIPrismTransportRateLimitKey)
+		} else if a.IsOpenAIWebTransport() {
 			keys = append(keys, openAIWebTransportRateLimitKey)
 		} else {
 			keys = append(keys, openAICodexTransportRateLimitKey)

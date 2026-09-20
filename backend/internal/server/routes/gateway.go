@@ -48,7 +48,8 @@ func RegisterGatewayRoutes(
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI, service.PlatformGrok,
-			service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax:
+			service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+			service.PlatformMiniMax, service.PlatformOpenCodeGo:
 			// 国产 OpenAI 兼容供应商与 openai/grok 一样经 OpenAI 网关转发。
 			return true
 		default:
@@ -57,7 +58,7 @@ func RegisterGatewayRoutes(
 	}
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax:
+		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax, service.PlatformOpenCodeGo:
 			h.OpenAIGateway.CountTokens(c)
 		case service.PlatformGrok:
 			h.OpenAIGateway.GrokCountTokens(c)
@@ -189,6 +190,7 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	registerPrismProjectRoutes(gateway, h.OpenAIGateway.CreatePrismProject, h.OpenAIGateway.PrismProject)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
@@ -208,6 +210,8 @@ func RegisterGatewayRoutes(
 		// /models endpoint with a client_version query and expect the ChatGPT
 		// Codex manifest format; other clients keep the OpenAI-style list.
 		gateway.GET("/models", modelsHandler)
+		// Single-model discovery never selects the Codex client_version manifest.
+		gateway.GET("/models/:model", h.Gateway.Models)
 		gateway.GET("/usage", h.Gateway.Usage)
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
@@ -365,6 +369,11 @@ func RegisterGatewayRoutes(
 	rootRoute := func(method, path string, limit gin.HandlerFunc, handler gin.HandlerFunc) {
 		r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic, handler)
 	}
+	for _, prefix := range []string{"/api/v3", "/v3", "/v1", ""} {
+		rootRoute(http.MethodPost, prefix+"/contents/generations/tasks", bodyLimit, h.OpenAIGateway.SeedanceTasks)
+		rootRoute(http.MethodGet, prefix+"/contents/generations/tasks/:task_id", bodyLimit, h.OpenAIGateway.SeedanceTasks)
+		rootRoute(http.MethodDelete, prefix+"/contents/generations/tasks/:task_id", bodyLimit, h.OpenAIGateway.SeedanceTasks)
+	}
 	rootRoute(http.MethodPost, "/responses", bodyLimit, responsesHandler)
 	rootRoute(http.MethodPost, "/responses/*subpath", bodyLimit, guardResponsesSubpath(responsesHandler))
 	rootRoute(http.MethodPost, "/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
@@ -372,6 +381,7 @@ func RegisterGatewayRoutes(
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
 	rootRoute(http.MethodGet, "/models", bodyLimit, modelsHandler)
+	rootRoute(http.MethodGet, "/models/:model", bodyLimit, h.Gateway.Models)
 	rootRoute(http.MethodPost, "/messages/count_tokens", bodyLimit, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), groupModelAllowlist, compositeTarget, requireGroupAnthropic)
@@ -649,6 +659,38 @@ func compositeGeminiModelFromParams(c *gin.Context) string {
 		return strings.TrimSpace(modelAction[:idx])
 	}
 	return modelAction
+}
+
+// Register before model-reading middleware: uploads are multipart, and existing
+// project operations resolve their model and ownership from service state.
+func registerPrismProjectRoutes(gateway *gin.RouterGroup, create gin.HandlerFunc, operate func(*gin.Context, string)) {
+	gateway.POST("/prism/projects", create)
+	for _, route := range []struct {
+		method    string
+		path      string
+		operation string
+	}{
+		{http.MethodGet, "", "access"},
+		{http.MethodGet, "/conversation-history", "history"},
+		{http.MethodGet, "/delta-files", "delta-files"},
+		{http.MethodGet, "/sync-status", "sync-status"},
+		{http.MethodPost, "/files", "upload"},
+		{http.MethodPatch, "/thumbnail", "thumbnail"},
+		{http.MethodPost, "/render", "render"},
+		{http.MethodGet, "/render-status", "render-status"},
+		{http.MethodGet, "/pdf", "pdf"},
+		{http.MethodGet, "/logs", "logs"},
+		{http.MethodGet, "/synctex", "synctex"},
+		{http.MethodGet, "/word-count", "word-count"},
+		{http.MethodGet, "/latest-render", "latest-render"},
+		{http.MethodGet, "/version-history", "version-history"},
+		{http.MethodPost, "/heartbeat", "heartbeat"},
+		{http.MethodPost, "/wait-for-sync", "wait-for-sync"},
+	} {
+		gateway.Handle(route.method, "/prism/projects/:project_id"+route.path, func(c *gin.Context) {
+			operate(c, route.operation)
+		})
+	}
 }
 
 func compositeRouteEndpointForPath(path string) string {

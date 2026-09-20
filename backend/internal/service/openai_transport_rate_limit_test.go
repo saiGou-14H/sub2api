@@ -16,6 +16,7 @@ func TestOpenAITransportRateLimitReasonSeparatesWebAndCodex(t *testing.T) {
 	}{
 		{name: "web", transport: OpenAITransportWeb, scope: openAIWebTransportRateLimitKey, want: "web_rate_limited"},
 		{name: "codex", transport: OpenAITransportCodex, scope: openAICodexTransportRateLimitKey, want: "codex_rate_limited"},
+		{name: "prism", transport: OpenAITransportPrism, scope: openAIPrismTransportRateLimitKey, want: "prism_rate_limited"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

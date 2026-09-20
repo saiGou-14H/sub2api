@@ -33,8 +33,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	if account != nil && account.IsOpenAIPrismTransport() {
+		SetActualOpenAIUpstreamEndpoint(c, OpenAIPrismStartPath)
+		return s.forwardAnthropicViaOpenAIPrism(ctx, c, account, body, defaultMappedModel)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -43,12 +48,23 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, err
 	}
 
-	// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点时，
-	// /v1/messages 请求零转换直通（仅模型名映射 + 少量 body 清洗），完整保留
-	// thinking / tool_use / cache 语义，适配 Claude Code 等原生客户端。
-	// 必须先于 ShouldUseResponsesAPI 分流：Anthropic 协议账号经 probe 落标
-	// openai_responses_supported=false，会先命中下方的 CC 直转分支。
-	if account.IsAnthropicProtocol() || account.IsAdaptiveAPIProtocol() {
+	// OpenCode Go：按模型原生协议分流。规则未命中兜底 Chat Completions。
+	if account.IsOpenCodeGo() {
+		mapped := resolveOpenCodeGoMappedModel(account, body, defaultMappedModel)
+		switch openCodeGoNativeProtocol(account, mapped) {
+		case APIProtocolAnthropic:
+			return s.forwardAnthropicViaNativeAnthropicEndpoint(ctx, c, account, body, defaultMappedModel)
+		case APIProtocolResponses:
+			break
+		default:
+			return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		}
+	} else if account.IsAnthropicProtocol() || account.IsAdaptiveAPIProtocol() {
+		// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点时，
+		// /v1/messages 请求零转换直通（仅模型名映射 + 少量 body 清洗），完整保留
+		// thinking / tool_use / cache 语义，适配 Claude Code 等原生客户端。
+		// 必须先于 ShouldUseResponsesAPI 分流：Anthropic 协议账号经 probe 落标
+		// openai_responses_supported=false，会先命中下方的 CC 直转分支。
 		return s.forwardAnthropicViaNativeAnthropicEndpoint(ctx, c, account, body, defaultMappedModel)
 	}
 
@@ -57,6 +73,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
+	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
 
 	startTime := time.Now()
 
@@ -530,6 +547,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		notifyOpenAIAutoReset(*account.ParentAccountID)
 	}
 
+	stampOpenAIResponsesUpstreamEndpoint(c, result)
 	return result, handleErr
 }
 

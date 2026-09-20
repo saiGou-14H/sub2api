@@ -907,10 +907,16 @@ func TestHTTPContinuationRestrictionAllowsWebAccounts(t *testing.T) {
 		Platform: service.PlatformOpenAI,
 		Extra:    map[string]any{service.OpenAIWebTransportExtraKey: service.OpenAITransportWeb},
 	}
+	prismAccount := &service.Account{
+		Type:     service.AccountTypeOAuth,
+		Platform: service.PlatformOpenAI,
+		Extra:    map[string]any{service.OpenAIWebTransportExtraKey: service.OpenAITransportPrism},
+	}
 	codexAccount := &service.Account{Type: service.AccountTypeOAuth, Platform: service.PlatformOpenAI}
 	apiKeyAccount := &service.Account{Type: service.AccountTypeAPIKey, Platform: service.PlatformOpenAI}
 
 	assert.False(t, httpContinuationRequiresAPIKey(webAccount))
+	assert.False(t, httpContinuationRequiresAPIKey(prismAccount))
 	assert.True(t, httpContinuationRequiresAPIKey(codexAccount))
 	assert.False(t, httpContinuationRequiresAPIKey(apiKeyAccount))
 }

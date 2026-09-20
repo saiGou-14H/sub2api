@@ -66,6 +66,15 @@ func isOpenAIWebMessageLimitBody(responseBody []byte) bool {
 	return false
 }
 
+// Prism only shares HTTP Retry-After semantics with the other transports.
+// Never infer a Codex quota window from a Prism response or stale account data.
+func openAIPrismRateLimitResetTime(headers http.Header, now time.Time) time.Time {
+	if resetAt := parseRetryAfterResetTime(headers, now); resetAt != nil && resetAt.After(now) {
+		return *resetAt
+	}
+	return now.Add(openAIOAuth429FallbackCooldown)
+}
+
 // OpenAIOAuth429FailoverState tracks the request-local follow-up budget after
 // the first Grok OAuth 429. Once that 429 occurs, exactly one different account
 // may be attempted; any failure from that follow-up account ends failover.
@@ -261,6 +270,11 @@ func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(ctx context.Context
 	if s == nil || !isOpenAIOAuthAccount(account) {
 		return
 	}
+	if account.IsOpenAIPrismTransport() {
+		s.BlockAccountScheduling(account, openAIPrismRateLimitResetTime(headers, time.Now()), "prism_rate_limited")
+		s.openaiOAuth429RetryStartedAt.Delete(account.ID)
+		return
+	}
 	// ChatGPT Web has a separate hourly message bucket. Do not count it in the
 	// Codex OAuth storm/retry window and do not write the global account reset.
 	if account.IsOpenAIWebTransport() {
@@ -314,7 +328,7 @@ func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccount(account *A
 }
 
 func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccountWithResponse(account *Account, statusCode int, shouldDisable bool, headers http.Header, responseBody []byte) bool {
-	if shouldDisable || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() {
+	if shouldDisable || statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() || account.IsOpenAIPrismTransport() {
 		return false
 	}
 	disposition, _ := classifyOpenAIOAuth429(headers, responseBody)
@@ -332,7 +346,7 @@ func (s *OpenAIGatewayService) shouldRetryOpenAIOAuth429OnSameAccountWithRespons
 // ShouldRetryOpenAIOAuth429 lets RateLimitService defer persistent account
 // cooldown until the gateway's same-account retry window is exhausted.
 func (s *OpenAIGatewayService) ShouldRetryOpenAIOAuth429(account *Account, headers http.Header, responseBody []byte) bool {
-	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() || s.isOpenAIAccountRuntimeBlocked(account) {
+	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIWebTransport() || account.IsOpenAIPrismTransport() || s.isOpenAIAccountRuntimeBlocked(account) {
 		return false
 	}
 	disposition, _ := classifyOpenAIOAuth429(headers, responseBody)
@@ -343,7 +357,7 @@ func (s *OpenAIGatewayService) ShouldRetryOpenAIOAuth429(account *Account, heade
 }
 
 func (s *OpenAIGatewayService) openAIOAuth429RetryWindowActive(account *Account) bool {
-	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() {
+	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIPrismTransport() {
 		return false
 	}
 	now := time.Now()
@@ -357,7 +371,7 @@ func (s *OpenAIGatewayService) openAIOAuth429RetryWindowActive(account *Account)
 }
 
 func (s *OpenAIGatewayService) openAIOAuth429RetryDeadline(account *Account) time.Time {
-	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() {
+	if s == nil || !isOpenAIOAuthAccount(account) || account.IsShadow() || account.IsOpenAIPrismTransport() {
 		return time.Time{}
 	}
 	value, ok := s.openaiOAuth429RetryStartedAt.Load(account.ID)
@@ -668,7 +682,7 @@ func (s *OpenAIGatewayService) ShouldStopOpenAIOAuth429Failover(account *Account
 		}
 		return false
 	}
-	if statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) {
+	if statusCode != http.StatusTooManyRequests || !isOpenAIOAuthAccount(account) || account.IsOpenAIPrismTransport() {
 		return false
 	}
 	// Each OpenAI OAuth candidate has already consumed its full same-account

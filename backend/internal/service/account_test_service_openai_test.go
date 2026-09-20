@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,7 @@ type openAIAccountTestRepo struct {
 	rateLimitedID      int64
 	rateLimitedAt      *time.Time
 	modelRateLimitKey  string
+	modelRateLimitID   int64
 	modelRateLimitAt   *time.Time
 	clearedErrorID     int64
 	setErrorID         int64
@@ -92,7 +94,8 @@ func (r *openAIAccountTestRepo) SetRateLimited(_ context.Context, id int64, rese
 	return nil
 }
 
-func (r *openAIAccountTestRepo) SetModelRateLimit(_ context.Context, _ int64, scope string, resetAt time.Time, _ ...string) error {
+func (r *openAIAccountTestRepo) SetModelRateLimit(_ context.Context, id int64, scope string, resetAt time.Time, _ ...string) error {
+	r.modelRateLimitID = id
 	r.modelRateLimitKey = scope
 	r.modelRateLimitAt = &resetAt
 	return nil
@@ -419,6 +422,188 @@ func TestAccountTestService_ReconcileOpenAIWeb429UsesDedicatedScope(t *testing.T
 	require.True(t, repo.modelRateLimitAt.After(time.Now().Add(59*time.Minute)))
 	require.Equal(t, "web_rate_limited", account.OpenAITransportRateLimitReason())
 	require.Nil(t, account.RateLimitResetAt)
+}
+
+func TestAccountTestService_ReconcileOpenAIPrism429UsesDedicatedScope(t *testing.T) {
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{
+		ID:       97,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+		Extra:    map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism},
+	}
+
+	svc.reconcileOpenAI429State(context.Background(), account, http.Header{}, []byte(`{"error":{"message":"rate limited"}}`))
+
+	require.Zero(t, repo.rateLimitedID)
+	require.Equal(t, openAIPrismTransportRateLimitKey, repo.modelRateLimitKey)
+	require.NotNil(t, repo.modelRateLimitAt)
+	require.True(t, repo.modelRateLimitAt.After(time.Now().Add(4*time.Second)))
+	require.Equal(t, "prism_rate_limited", account.OpenAITransportRateLimitReason())
+	require.Nil(t, account.RateLimitResetAt)
+}
+
+type prismAccountTestUpstream struct {
+	prismTestUpstream
+	errorStatus  int
+	errorMessage string
+	errorHeaders http.Header
+	accountIDs   []int64
+	concurrency  []int
+}
+
+func (u *prismAccountTestUpstream) Do(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	u.concurrency = append(u.concurrency, concurrency)
+	if u.errorStatus != 0 {
+		u.requests = append(u.requests, req)
+		body, _ := json.Marshal(map[string]any{"error": map[string]string{"message": u.errorMessage}})
+		return &http.Response{StatusCode: u.errorStatus, Header: u.errorHeaders.Clone(), Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	}
+	return u.prismTestUpstream.Do(req, proxy, accountID, concurrency)
+}
+
+func (u *prismAccountTestUpstream) DoWithTLS(req *http.Request, proxy string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, accountID, concurrency)
+}
+
+func newPrismAccountTestService(repo *openAIAccountTestRepo, upstream *prismAccountTestUpstream) *AccountTestService {
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	svc.openAIPrismTransportFactory = func() *OpenAIPrismTransport {
+		return NewOpenAIPrismTransportFromUpstream(upstream, OpenAIPrismTransportOptions{PollInterval: time.Millisecond, PollLimit: 4})
+	}
+	return svc
+}
+
+func TestAccountTestService_OpenAIPrismUsesSelectedAccountModelAndCredentialAccountTokens(t *testing.T) {
+	ctx, recorder := newTestContext()
+	parentID := int64(401)
+	parent := &Account{
+		ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Credentials: map[string]any{
+			"access_token": "parent-access-secret", "prism_session_token": "parent-session-secret",
+			"model_mapping": map[string]any{"public-model": "wrong-parent-model"},
+		},
+		Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism},
+	}
+	account := &Account{
+		ID: 402, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		ParentAccountID: &parentID, QuotaDimension: QuotaDimensionSpark, Concurrency: 3,
+		Credentials: map[string]any{"model_mapping": map[string]any{"public-model": "selected-upstream-model"}},
+		Extra:       map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism},
+	}
+	repo := &openAIAccountTestRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{
+		accountsByID: map[int64]*Account{parentID: parent, account.ID: account},
+	}}
+	upstream := &prismAccountTestUpstream{}
+	svc := newPrismAccountTestService(repo, upstream)
+
+	require.NoError(t, svc.TestAccountConnection(ctx, account.ID, "public-model", "reply OK", AccountTestModeCompact))
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	require.Contains(t, recorder.Body.String(), `"model":"public-model"`)
+	var startBody []byte
+	for i, req := range upstream.requests {
+		require.Equal(t, account.ID, upstream.accountIDs[i])
+		require.Equal(t, account.Concurrency, upstream.concurrency[i])
+		require.Contains(t, req.Header.Get("Cookie"), "prism_oai_access_token=parent-access-secret")
+		require.Contains(t, req.Header.Get("Cookie"), "prism_session_token=parent-session-secret")
+		require.NotEqual(t, chatgptCodexAPIURL, req.URL.String())
+		if req.URL.Path == OpenAIPrismStartPath {
+			var err error
+			startBody, err = io.ReadAll(req.Body)
+			require.NoError(t, err)
+		}
+	}
+	require.NotEmpty(t, startBody)
+	require.Equal(t, "selected-upstream-model", gjson.GetBytes(startBody, "metadata.model").String())
+	require.Contains(t, string(startBody), "reply OK")
+	require.Empty(t, account.GetCredential("prism_session_token"), "resolved secrets must not mutate the shadow")
+}
+
+func TestAccountTestService_OpenAIPrismRejectsUnsupportedModelsBeforeUpstream(t *testing.T) {
+	for _, model := range []string{"invalid model/name", "gpt-5.4-codex"} {
+		t.Run(model, func(t *testing.T) {
+			ctx, recorder := newTestContext()
+			upstream := &prismAccountTestUpstream{}
+			svc := newPrismAccountTestService(&openAIAccountTestRepo{}, upstream)
+			account := prismAccount(nil)
+			account.Credentials = map[string]any{"access_token": "access-secret", "prism_session_token": "session-secret"}
+			require.Error(t, svc.testOpenAIAccountConnection(ctx, account, model, "hi", ""))
+			require.Empty(t, upstream.requests)
+			require.NotContains(t, recorder.Body.String(), `"success":true`)
+		})
+	}
+}
+
+func TestAccountTestService_OpenAIPrismDefaultModel(t *testing.T) {
+	ctx, recorder := newTestContext()
+	upstream := &prismAccountTestUpstream{}
+	svc := newPrismAccountTestService(&openAIAccountTestRepo{}, upstream)
+	account := prismAccount(nil)
+	account.Credentials = map[string]any{"access_token": "access-secret", "prism_session_token": "session-secret"}
+	require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "", "", ""))
+	require.Contains(t, recorder.Body.String(), `"model":"gpt-5.6-sol"`)
+	for _, req := range upstream.requests {
+		if req.URL.Path != OpenAIPrismStartPath {
+			continue
+		}
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.Equal(t, OpenAIPrismDefaultModel, gjson.GetBytes(body, "metadata.model").String())
+		require.Equal(t, "hi", gjson.GetBytes(body, "input.0.content.0.text").String())
+		return
+	}
+	t.Fatal("missing Prism start request")
+}
+
+func TestAccountTestService_OpenAIPrismHTTPFailuresUpdateStateAndRedactCredentials(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ctx, recorder := newTestContext()
+			repo := &openAIAccountTestRepo{}
+			upstream := &prismAccountTestUpstream{
+				errorStatus: status, errorMessage: "rejected access-secret session-secret cookie-secret",
+				errorHeaders: http.Header{"Retry-After": []string{"120"}, "X-Codex-Primary-Reset-After-Seconds": []string{"86400"}},
+			}
+			svc := newPrismAccountTestService(repo, upstream)
+			account := prismAccount(nil)
+			account.ID = 403
+			account.Credentials = map[string]any{"access_token": "access-secret", "prism_session_token": "session-secret", "prism_cookie": "other=cookie-secret"}
+			if status == http.StatusTooManyRequests {
+				delete(account.Credentials, "access_token")
+				account.Credentials["prism_oai_access_token"] = "access-secret"
+			}
+			before := time.Now()
+			err := svc.testOpenAIAccountConnection(ctx, account, "", "", "")
+			require.Error(t, err)
+			require.Len(t, upstream.requests, 1)
+			require.Contains(t, upstream.requests[0].Header.Get("Cookie"), "prism_oai_access_token=access-secret")
+			require.Contains(t, upstream.requests[0].Header.Get("Cookie"), "prism_session_token=session-secret")
+			for _, secret := range []string{"access-secret", "session-secret", "cookie-secret"} {
+				require.NotContains(t, err.Error(), secret)
+				require.NotContains(t, recorder.Body.String(), secret)
+				require.NotContains(t, repo.setErrorMsg, secret)
+			}
+			require.Contains(t, recorder.Body.String(), "[redacted]")
+			require.NotContains(t, recorder.Body.String(), `"success":true`)
+			if status == http.StatusUnauthorized {
+				require.Equal(t, account.ID, repo.setErrorID)
+				require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
+				require.Empty(t, repo.modelRateLimitKey)
+			} else {
+				require.Equal(t, account.ID, repo.modelRateLimitID)
+				require.Equal(t, openAIPrismTransportRateLimitKey, repo.modelRateLimitKey)
+				require.NotNil(t, repo.modelRateLimitAt)
+				require.WithinDuration(t, before.Add(120*time.Second), *repo.modelRateLimitAt, time.Second)
+				require.Equal(t, "prism_rate_limited", account.OpenAITransportRateLimitReason())
+				require.Nil(t, account.RateLimitResetAt)
+				require.Zero(t, repo.rateLimitedID)
+				require.Zero(t, repo.setErrorID)
+				require.Empty(t, repo.updatedExtra)
+			}
+		})
+	}
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

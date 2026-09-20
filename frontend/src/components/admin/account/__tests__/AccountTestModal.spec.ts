@@ -224,6 +224,26 @@ describe('AccountTestModal', () => {
     })
   })
 
+  it('Prism uses the backend model list and prevents a stale compact test mode', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'gpt-6-astra', display_name: 'GPT-6 Astra' }])
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"test_complete","success":true}\n'
+    ])) as any
+    const wrapper = mountModal({
+      id: 43, name: 'Prism', platform: 'openai', type: 'setup-token', status: 'active',
+      extra: { openai_transport: 'prism' }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.testModeCompact')
+    ;(wrapper.vm as any).testMode = 'compact'
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toMatchObject({ model_id: 'gpt-6-astra', mode: 'default' })
+    wrapper.unmount()
+  })
+
   it('OpenAI Web 账号加载五个 Web 模型并允许选择具体模型', async () => {
     getAvailableModels.mockResolvedValue([
       { id: 'auto', display_name: 'ChatGPT Web (auto)' },

@@ -226,6 +226,7 @@ const formatScopeName = (scope: string): string => {
     // OpenAI protocol buckets
     openai_transport_web: 'Web',
     openai_transport_codex: 'Codex',
+    openai_transport_prism: 'Prism',
     // Claude 系列
     'claude-fable-5-1': 'CFable51',
     'claude-fable-5': 'CFable5',

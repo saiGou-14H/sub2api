@@ -73,6 +73,7 @@ func TestPluginManagerRoutingSelectsOnlyEligibleOpenAIOAuthAccounts(t *testing.T
 	manager.route.Store(&pluginRoute{pluginID: 1, rolloutPercent: 100, unavailable: "测试不可用"})
 
 	assert.True(t, manager.ShouldRouteOpenAIOAuth(&Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth}))
+	assert.False(t, manager.ShouldRouteOpenAIOAuth(&Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{OpenAIWebTransportExtraKey: OpenAITransportPrism}}))
 	assert.False(t, manager.ShouldRouteOpenAIOAuth(&Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}))
 	assert.False(t, manager.ShouldRouteOpenAIOAuth(&Account{ID: 10, Platform: PlatformGrok, Type: AccountTypeOAuth}))
 	assert.False(t, manager.ShouldRouteOpenAIOAuth(nil))
@@ -111,4 +112,25 @@ func TestStablePluginBucketIsDeterministicAndBounded(t *testing.T) {
 		assert.Equal(t, first, stablePluginBucket(id))
 		assert.Less(t, first, uint64(100))
 	}
+}
+
+type statusStubRepository struct {
+	PluginRepository
+}
+
+func (r *statusStubRepository) GetByID(context.Context, int64) (*PluginInstallation, error) {
+	return &PluginInstallation{ID: 7}, nil
+}
+
+// Status is the read-only, ungated runtime-status channel: when the plugin is not
+// running it must report "not running" with no status blob and never error or start
+// a runtime (that side-effecting behaviour belongs to Test, not Status).
+func TestPluginManagerStatusReportsNotRunningWithoutRuntime(t *testing.T) {
+	manager := &PluginManager{repo: &statusStubRepository{}}
+	resp, err := manager.Status(context.Background(), 7)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.False(t, resp.Healthy)
+	assert.Equal(t, "插件未运行", resp.Message)
+	assert.Empty(t, resp.StatusJson)
 }

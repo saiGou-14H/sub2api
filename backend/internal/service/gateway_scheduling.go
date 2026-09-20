@@ -2518,6 +2518,9 @@ func (s *GatewayService) collectSelectionFailureStats(
 			stats.ModelRateLimited++
 			remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel).Truncate(time.Second)
 			stats.SampleRateLimitIDs = appendSelectionFailureRateSample(stats.SampleRateLimitIDs, acc.ID, remaining)
+		case "prism_rate_limited":
+			stats.ModelRateLimited++
+			stats.SampleRateLimitIDs = appendSelectionFailureRateSample(stats.SampleRateLimitIDs, acc.ID, acc.OpenAITransportRateLimitRemaining())
 		case openAIProfitFilterReasonThreshold:
 			stats.ProfitThreshold++
 		case openAIProfitFilterReasonInvalidAccountRate:

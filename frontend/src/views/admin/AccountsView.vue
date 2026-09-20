@@ -249,6 +249,7 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+              <CodexAccountStateBadge v-if="supportsCodexState(row)" :account-id="row.id" :state="codexStates[row.id]" @open="codexAccount = { id: row.id, name: row.name }" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -450,6 +451,7 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
+    <CodexAccountStateDialog :account="codexAccount" :state="codexAccount ? codexStates[codexAccount.id] : undefined" :loading="codexLoading" :failed="codexFailed" @close="codexAccount = null" @refresh="refreshCodexStates()" />
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
@@ -462,6 +464,7 @@
     <BulkEditAccountModal
       :show="showBulkEdit"
       :account-ids="selIds"
+      :selected-accounts="accounts.filter(account => isSelected(account.id))"
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
       :target="bulkEditTarget ?? undefined"
@@ -492,6 +495,9 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import { useCodexAccountStates, supportsCodexState } from '@/composables/useCodexAccountStates'
+import CodexAccountStateBadge from '@/components/account/CodexAccountStateBadge.vue'
+import CodexAccountStateDialog from '@/components/account/CodexAccountStateDialog.vue'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
@@ -1092,6 +1098,13 @@ const {
   }
 })
 
+const codexAccount = ref<{ id: number; name: string } | null>(null)
+const codexIds = computed(() => loading.value ? [] : accounts.value.filter(account => supportsCodexState(account)).map(account => account.id))
+const codexQueryKey = computed(() => JSON.stringify([params, pagination.page, pagination.page_size,
+  accounts.value.map(account => [account.id, account.extra?.codex_turn_state_plan ?? 'inherit'])]))
+const { states: codexStates, loading: codexLoading, failed: codexFailed, refresh: refreshCodexStates } = useCodexAccountStates(codexIds, codexQueryKey)
+watch(codexIds, ids => { if (codexAccount.value && !ids.includes(codexAccount.value.id)) codexAccount.value = null })
+
 const {
   selectedSet,
   selectedIds: selIds,
@@ -1356,6 +1369,7 @@ watch(accounts, (rows) => {
 
 const isAnyModalOpen = computed(() => {
   return (
+    codexAccount.value !== null ||
     showCreate.value ||
     showEdit.value ||
     showSync.value ||
@@ -2352,9 +2366,10 @@ const handleDuplicateAccount = async (a: Account) => {
 }
 const handleRefresh = async (a: Account) => {
   try {
-    const updated = await adminAPI.accounts.refreshCredentials(a.id)
-    patchAccountInList(updated)
+    const result = await adminAPI.accounts.refreshCredentials(a.id)
+    patchAccountInList(result.account)
     enterAutoRefreshSilentWindow()
+    if (result.warning) appStore.showWarning(result.message)
   } catch (error) {
     console.error('Failed to refresh credentials:', error)
   }

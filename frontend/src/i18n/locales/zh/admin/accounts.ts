@@ -311,6 +311,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        opencode_go: 'OpenCode',
       },
       cnProviders: {
         accountMode: {
@@ -352,11 +353,29 @@ export default {
         balance: '余额 --',
         window5h: '5h',
         windowWeekly: '7d',
+        windowMonthly: '月',
         probe: '查询',
         probeTooltip: '请求供应商额度端点，查询 5 小时 / 每周滚动窗口用量',
         balanceProbeTooltip: '请求供应商余额端点，查询账户余额',
         balanceLow: '余额不足',
         noBalanceEndpoint: '该平台暂无余额查询接口',
+      },
+      opencodeGo: {
+        accountMode: {
+          zen: 'Zen',
+          zenDesc: '按量付费网关，消耗账户余额，按 Token 计费。',
+          go: 'GO',
+          goDesc: '订阅制网关，按 5 小时 / 周 / 月滚动用量窗口限流。',
+        },
+        protocolRules: {
+          title: '模型协议分流',
+          hint: '自适应模式下按模型匹配上游协议。支持精确 ID 或末尾 * 通配（如 grok-*、qwen*）；自上而下第一条命中生效；未命中走 Chat Completions。',
+          patternPlaceholder: 'grok-* 或 deepseek-v4-flash',
+          add: '添加规则',
+          remove: '删除规则',
+          restoreDefaults: '恢复默认',
+          fallback: '未命中以上规则 → Chat Completions（/v1/chat/completions）',
+        },
       },
       types: {
         oauth: 'OAuth',
@@ -581,7 +600,7 @@ export default {
         longContextShadowHint: '长上下文计费归母账号所有。选中的影子账号仍跟随母账号，筛选全量目标时同样如此。',
         longContextParentRequired: '选中的账号全部是影子账号，请选择母账号修改长上下文计费。',
         mixedPlatformWarning: '所选账号跨越多个平台（{platforms}）。显示的模型映射预设为合并结果——请确保映射对每个平台都适用。',
-        transportModeHint: '仅对 OpenAI OAuth / Setup Token 账号生效。切换到网页模式会关闭批量目标上的 Codex 专属设置。'
+        transportModeHint: '仅对 OpenAI OAuth / Setup Token 账号生效。切换到网页或 Prism 协议会关闭批量目标上的 Codex 专属设置。'
       },
       bulkDeleteTitle: '批量删除账号',
       bulkDeleteConfirm: '确定要删除选中的 {count} 个账号吗？此操作无法撤销。',
@@ -665,9 +684,18 @@ export default {
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
         transportMode: '上游协议',
         transportModeDesc:
-          '选择 OpenAI OAuth-like 账号使用的上游协议。网页模式使用 ChatGPT 网页对话接口，Codex 模式使用 Codex Responses 接口；未设置时默认为 Codex。',
+          '选择 OpenAI OAuth / Setup Token 账号使用的上游协议：Codex、ChatGPT 网页对话或 Prism。未设置时默认为 Codex。',
         transportWeb: '网页对话（web）',
         transportCodex: 'Codex（codex）',
+        transportPrism: 'Prism（prism）',
+        prismAccessToken: 'OpenAI 访问令牌（access_token）',
+        prismAccessTokenHint: '与网页对话（Web）共用此 OpenAI 访问令牌。服务端会自动登录并获取 Prism 会话，无需手动抓取 Cookie 或会话令牌。',
+        prismAccessTokenRequired: '请输入 OpenAI 访问令牌',
+        prismSessionOverride: '高级：手动覆盖 Prism 会话（可选）',
+        prismSessionToken: 'Prism 会话令牌（可选手动覆盖）',
+        prismSessionTokenHint: '通常无需填写。仅需手动覆盖会话时提供 prism_session_token；留空使用服务端自动获取的会话或保留现有会话。',
+        prismPromptToolBridge: '文本提示工具桥接',
+        prismPromptToolBridgeDesc: '默认关闭，保留 Prism 原生工具协议。仅在需要将客户端工具转为文本协议时启用；Prism 内置工具仍由上游处理。',
         flattenNamespaces: '摊平 Codex namespace 工具（兼容）',
         flattenNamespacesDesc:
           '默认关闭：/responses 上的 namespace 工具声明原样转发，这正是 ChatGPT Codex 后端期望的形态。仅当该 OAuth 账号指向不认识 namespace 的兼容上游时才开启——摊平会把工具改名为 namespace__tool，使按 functions.<命名空间>.<工具> 寻址的模型（如 gpt-5.6 多智能体）无法调用。压缩（compact）请求不受该开关影响，始终摊平。',
@@ -678,15 +706,16 @@ export default {
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',
         wsMode: 'WS mode',
         wsModeDesc:
-          '仅对当前 OpenAI 账号类型生效；包括 http_bridge 在内的账号 WS mode 仅在全局 gateway.openai_ws.mode_router_v2_enabled=true 时生效。',
+          '仅对当前 OpenAI 账号类型生效。选择“关闭”可禁用 WS；其余模式需全局 gateway.openai_ws.mode_router_v2_enabled=true 才按所选方式连接，未开启时统一使用上下文池。',
         wsModeOff: '关闭（off）',
         wsModeCtxPool: '上下文池（ctx_pool）',
         wsModePassthrough: '透传（passthrough）',
         wsModeHttpBridge: 'HTTP 桥接（http_bridge）',
         wsModeShared: '共享（shared）',
         wsModeDedicated: '独享（dedicated）',
-        wsModeConcurrencyHint: '启用 WS mode 后，该账号并发数将作为该账号 WS 连接池上限。',
-        wsModePassthroughHint: 'passthrough 模式不使用 WS 连接池。',
+        wsModeCtxPoolHint: '网关从连接池获取并复用上游 WS 连接，连接池上限由网关配置决定。',
+        wsModePassthroughHint: '网关为每个客户端会话单独建立上游 WS 连接，不使用连接池。',
+        wsModeHttpBridgeHint: '网关将客户端 WS 请求转换为上游 HTTP 请求，再将 SSE 流式响应转换为 WS 消息返回。',
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           '仅对 OpenAI OAuth 生效。开启后该账号才允许使用 OpenAI WebSocket Mode 协议。',

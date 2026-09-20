@@ -7,10 +7,11 @@ import "context"
 type HTTPUpstreamProfile string
 
 const (
-	HTTPUpstreamProfileDefault    HTTPUpstreamProfile = ""
-	HTTPUpstreamProfileOpenAI     HTTPUpstreamProfile = "openai"
-	HTTPUpstreamProfileGrok       HTTPUpstreamProfile = "grok"
-	HTTPUpstreamProfileLongStream HTTPUpstreamProfile = "long_stream"
+	HTTPUpstreamProfileCodexHarvest HTTPUpstreamProfile = "codex_harvest"
+	HTTPUpstreamProfileDefault      HTTPUpstreamProfile = ""
+	HTTPUpstreamProfileOpenAI       HTTPUpstreamProfile = "openai"
+	HTTPUpstreamProfileGrok         HTTPUpstreamProfile = "grok"
+	HTTPUpstreamProfileLongStream   HTTPUpstreamProfile = "long_stream"
 )
 
 type httpUpstreamProfileContextKey struct{}
@@ -38,7 +39,7 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileCodexHarvest:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault

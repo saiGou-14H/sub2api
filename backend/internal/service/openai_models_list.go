@@ -20,6 +20,17 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
+	if account.IsOpenAIPrismTransport() {
+		models := make([]map[string]any, 0)
+		for _, id := range OpenAIPrismAccountModels(account) {
+			models = append(models, map[string]any{"id": id, "object": "model", "owned_by": "openai", "created": 0})
+		}
+		body, err := json.Marshal(map[string]any{"object": "list", "data": models})
+		if err != nil {
+			return nil, err
+		}
+		return &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}, nil
+	}
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model list credentials: %w", err)
@@ -118,6 +129,10 @@ func modelCatalogEntries(body []byte, field string) (map[string]json.RawMessage,
 	return envelope, entries, nil
 }
 
+// standardOpenAIModelsBody projects either representation onto the OpenAI /v1/models
+// shape. Manifest entries are rebuilt to a minimal entry set; plain OpenAI lists keep
+// their upstream fields. Both keep display_name, which the admin picker and alias
+// projection read.
 func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 	field, idField := "data", "id"
 	if fromManifest {
@@ -144,7 +159,19 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 		}
 		seen[id] = struct{}{}
 		if fromManifest {
+			// Codex manifest entries carry dozens of client-only fields (instructions,
+			// model_messages, reasoning levels) that must not reach the public catalog,
+			// so the entry is rebuilt from scratch. The display name is the one manifest
+			// field user-facing surfaces need (admin test picker, mapping aliases), so it
+			// is carried over explicitly instead of being dropped with the rest.
+			var displayName string
+			if err := json.Unmarshal(entry["display_name"], &displayName); err == nil {
+				displayName = strings.TrimSpace(displayName)
+			}
 			entry = make(map[string]json.RawMessage)
+			if displayName != "" {
+				entry["display_name"], _ = json.Marshal(displayName)
+			}
 		}
 		entry["id"], _ = json.Marshal(id)
 		entry["object"] = json.RawMessage(`"model"`)
@@ -170,7 +197,7 @@ func standardOpenAIModelsBody(body []byte, fromManifest bool) ([]byte, error) {
 // representations while retaining the source entry's metadata. It never changes
 // the shared response and never synthesizes models absent from this account.
 func projectAccountModelsBody(body []byte, account *Account, group *Group, codex bool) ([]byte, error) {
-	if account.IsOpenAIWebTransport() || account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
+	if account.IsOpenAIWebTransport() || account.IsOpenAIPrismTransport() || account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
 		return body, nil
 	}
 	field, idField := "data", "id"

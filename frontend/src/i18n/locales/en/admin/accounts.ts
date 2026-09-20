@@ -108,6 +108,7 @@ export default {
         zhipu: 'Zhipu GLM',
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
+        opencode_go: 'OpenCode',
       },
       cnProviders: {
         accountMode: {
@@ -149,11 +150,29 @@ export default {
         balance: 'Balance --',
         window5h: '5h',
         windowWeekly: '7d',
+        windowMonthly: '30d',
         probe: 'Query',
         probeTooltip: 'Query the provider quota endpoint for 5-hour / weekly rolling window usage',
         balanceProbeTooltip: 'Query the provider balance endpoint for the account balance',
         balanceLow: 'Insufficient balance',
         noBalanceEndpoint: 'This platform has no balance query endpoint',
+      },
+      opencodeGo: {
+        accountMode: {
+          zen: 'Zen',
+          zenDesc: 'Pay-as-you-go gateway. Consumes account credits, billed per token.',
+          go: 'GO',
+          goDesc: 'Subscription gateway, rate-limited by 5-hour / weekly / monthly usage windows.',
+        },
+        protocolRules: {
+          title: 'Model protocol routing',
+          hint: 'In adaptive mode, each model is sent to a native upstream protocol. Use an exact ID or a trailing * glob (e.g. grok-*, qwen*). The first matching rule wins; unmatched models use Chat Completions.',
+          patternPlaceholder: 'grok-* or deepseek-v4-flash',
+          add: 'Add rule',
+          remove: 'Remove rule',
+          restoreDefaults: 'Restore defaults',
+          fallback: 'Unmatched models → Chat Completions (/v1/chat/completions)',
+        },
       },
       types: {
         oauth: 'OAuth',
@@ -493,7 +512,7 @@ export default {
         longContextShadowHint: 'Long-context billing belongs to the parent account. Selected shadow accounts keep following their parent, including when targets come from a filter.',
         longContextParentRequired: 'All selected accounts are shadows. Select the parent account to change long-context billing.',
         mixedPlatformWarning: 'Selected accounts span multiple platforms ({platforms}). Model mapping presets shown are combined — ensure mappings are appropriate for each platform.',
-        transportModeHint: 'Applies only to OpenAI OAuth / Setup Token accounts. Switching to Web also disables Codex-only settings on the bulk targets.'
+        transportModeHint: 'Applies only to OpenAI OAuth / Setup Token accounts. Switching to Web or Prism disables Codex-only settings on the bulk targets.'
       },
       bulkDeleteTitle: 'Bulk Delete Accounts',
       bulkDeleteConfirm: 'Delete the selected {count} account(s)? This action cannot be undone.',
@@ -578,9 +597,18 @@ export default {
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         transportMode: 'Upstream protocol',
         transportModeDesc:
-          'Choose the upstream protocol for OpenAI OAuth-like accounts. Web uses the ChatGPT web conversation API; Codex uses the Codex Responses API. Missing values default to Codex.',
+          'Choose the upstream protocol for OpenAI OAuth / Setup Token accounts: Codex, ChatGPT web conversation, or Prism. Missing values default to Codex.',
         transportWeb: 'Web conversation (web)',
         transportCodex: 'Codex (codex)',
+        transportPrism: 'Prism (prism)',
+        prismAccessToken: 'OpenAI access token (access_token)',
+        prismAccessTokenHint: 'Uses the same OpenAI access token as Web conversation. The server signs in and obtains the Prism session automatically; no manual cookie or session token extraction is needed.',
+        prismAccessTokenRequired: 'Enter an OpenAI access token',
+        prismSessionOverride: 'Advanced: manual Prism session override (optional)',
+        prismSessionToken: 'Prism session token (optional manual override)',
+        prismSessionTokenHint: 'Usually leave this blank. Provide prism_session_token only to override the session manually; leaving it blank uses the automatically obtained session or preserves the existing session.',
+        prismPromptToolBridge: 'Text prompt tool bridge',
+        prismPromptToolBridgeDesc: 'Off by default to preserve the native Prism tool protocol. Enable only when client tools need to be converted to a text protocol; Prism built-in tools are still handled upstream.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
         flattenNamespacesDesc:
           'Disabled by default: Codex namespace tool declarations are forwarded as-is on /responses, which is what the ChatGPT Codex backend expects. Enable only when this OAuth account is routed to a relay that rejects namespace tools — flattening renames them to namespace__tool, which breaks models that address collaboration tools as functions.<namespace>.<tool>. Compaction requests always flatten regardless of this switch.',
@@ -592,16 +620,19 @@ export default {
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
         wsMode: 'WS mode',
         wsModeDesc:
-          'Only applies to the current OpenAI account type; account WS modes, including http_bridge, take effect only when the global gateway.openai_ws.mode_router_v2_enabled=true.',
+          'Applies only to the current OpenAI account type. Select Off to disable WS. Other modes use the selected connection method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
         wsModeOff: 'Off (off)',
         wsModeCtxPool: 'Context Pool (ctx_pool)',
         wsModePassthrough: 'Passthrough (passthrough)',
         wsModeHttpBridge: 'HTTP Bridge (http_bridge)',
         wsModeShared: 'Shared (shared)',
         wsModeDedicated: 'Dedicated (dedicated)',
-        wsModeConcurrencyHint:
-          'When WS mode is enabled, account concurrency becomes the WS connection pool limit for this account.',
-        wsModePassthroughHint: 'Passthrough mode does not use the WS connection pool.',
+        wsModeCtxPoolHint:
+          'The gateway gets and reuses upstream WS connections from a pool, with the pool limit determined by gateway configuration.',
+        wsModePassthroughHint:
+          'The gateway opens a separate upstream WS connection for each client session, without using a connection pool.',
+        wsModeHttpBridgeHint:
+          'The gateway converts client WS requests to upstream HTTP requests, then converts SSE streaming responses back into WS messages.',
         oauthResponsesWebsocketsV2: 'OAuth WebSocket Mode',
         oauthResponsesWebsocketsV2Desc:
           'Only applies to OpenAI OAuth. This account can use OpenAI WebSocket Mode only when enabled.',

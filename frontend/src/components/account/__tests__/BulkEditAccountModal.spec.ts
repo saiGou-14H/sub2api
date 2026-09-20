@@ -98,6 +98,97 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it.each(['inherit', 'pro', 'team'])('patches only explicitly selected bulk plan %s', async plan => {
+    const selectedAccounts = [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth', extra: { codex_turn_state_plan: id === 1 ? 'pro' : 'team', keep: id } }))
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedAccounts })
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe('unchanged')
+    await select.setValue(plan)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { codex_turn_state_plan: plan } })
+    expect(selectedAccounts.map(account => account.extra.codex_turn_state_plan)).toEqual(['pro', 'team'])
+    wrapper.unmount()
+  })
+
+  it('cancels bulk plan changes without updating and resets to unchanged on reopen', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth' })) })
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('team')
+    await wrapper.setProps({ show: false })
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('unchanged')
+    wrapper.unmount()
+  })
+
+  it.each(['on', 'off'])('saves explicit Codex opt-in %s as a boolean patch', async (mode) => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: id === 1 ? 'oauth' : 'setup-token', extra: {} }))
+    })
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="bulk-codex-turn-state"]')
+    expect(select.element.value).toBe('unchanged')
+    await select.setValue(mode)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { codex_turn_state_enabled: mode === 'on' } })
+    wrapper.unmount()
+  })
+
+  it('unchanged and non-Codex transport updates omit the new account opt-in key', async () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth', extra: { codex_turn_state_enabled: true } }))
+    })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { extra: { openai_transport: 'codex' } })
+    await wrapper.get('[data-testid="bulk-codex-turn-state"]').setValue('off')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('web')
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { extra: expect.objectContaining({ openai_transport: 'web' }) })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.lastCall?.[1]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('codex')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="bulk-codex-turn-state"]').element.value).toBe('off')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { type: 'apikey' }, { platform: 'anthropic' }, { parent_account_id: 3 },
+    { credentials: { auth_mode: 'agentIdentity' } },
+    { extra: { openai_transport: 'web' } }, { extra: { openai_transport: 'prism' } }
+  ])('hides bulk opt-in for any excluded target %j', async (overrides) => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [
+        { id: 1, platform: 'openai', type: 'oauth' },
+        { id: 2, platform: 'openai', type: 'oauth', ...overrides }
+      ]
+    })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('explains complete-selection eligibility while hiding the option for filtered targets', () => {
+    const wrapper = mountModal({
+      selectedPlatforms: ['openai'], selectedTypes: ['oauth'],
+      selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth' })),
+      target: { mode: 'filtered', previewCount: 2, selectedPlatforms: ['openai'], selectedTypes: ['oauth'] }
+    })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="bulk-codex-turn-state-eligibility"]').text()).toBe('codexTicket.bulkEligibilityHint')
+    wrapper.unmount()
+  })
+
+  it('does not infer eligibility from platform/type without account details', () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    expect(wrapper.find('[data-testid="bulk-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
     const wrapper = mountModal()
 
@@ -355,6 +446,93 @@ describe('BulkEditAccountModal', () => {
         openai_compact_mode: null
       }
     })
+  })
+
+  it('Prism transport overrides previously selected Codex-only settings in a bulk update', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'] })
+    await wrapper.get('#bulk-edit-openai-ws-mode-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
+    expect(wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').attributes('disabled')).toBeDefined()
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { compact_model_mapping: {} },
+      extra: expect.objectContaining({
+        openai_transport: 'prism',
+        openai_passthrough: false,
+        openai_oauth_responses_websockets_v2_mode: 'off',
+        openai_oauth_responses_websockets_v2_enabled: false,
+        codex_cli_only: false,
+        codex_fingerprint_mode: 'off',
+        openai_compact_mode: null,
+        codex_image_generation_bridge: null
+      })
+    })
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('updates the Prism prompt tool bridge to %s only when separately selected', async (enabled) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'] })
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    if (enabled) await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
+      extra: expect.objectContaining({ openai_transport: 'prism', prism_prompt_tool_bridge: enabled })
+    }))
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('does not submit a checked Prism bridge option after switching to %s', async (transport) => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue(transport)
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it('does not submit the Prism bridge after its update checkbox is cleared', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(false)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it('does not submit the Prism bridge when the transport update is deselected', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-transport-select"]').setValue('prism')
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-prism-prompt-tool-bridge-toggle').trigger('click')
+    await wrapper.get('#bulk-edit-openai-transport-enabled').setValue(false)
+    expect(wrapper.find('#bulk-edit-prism-prompt-tool-bridge-enabled').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { status: 'active' })
+    wrapper.unmount()
   })
 
   it('OpenAI Setup Token 批量编辑切换到 Codex 协议', async () => {
@@ -650,6 +828,18 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       credentials: { openai_capabilities: ['embeddings'] },
       extra: { openai_responses_mode: null }
+    })
+  })
+
+  it('persists Seedance in a two-capability bulk update', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-openai-endpoint-capabilities-enabled').setValue(true)
+    await wrapper.get('[data-testid="bulk-edit-openai-endpoint-capability-embeddings"]').setValue(false)
+    await wrapper.get('[data-testid="bulk-edit-openai-endpoint-capability-seedance"]').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: { openai_capabilities: ['chat_completions', 'seedance'] }
     })
   })
 

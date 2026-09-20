@@ -1074,7 +1074,7 @@ func groupCodexModelSupportsImageInput(
 			return false
 		}
 	}
-	if platform != PlatformOpenAI && platform != PlatformGrok {
+	if platform != PlatformOpenAI && platform != PlatformGrok && platform != PlatformDeepseek {
 		return false
 	}
 
@@ -1213,7 +1213,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 		return false
 	}
 	switch account.Platform {
-	case PlatformOpenAI:
+	case PlatformOpenAI, PlatformDeepseek:
 		if metadata, ok := account.GetUpstreamModelMetadata(upstreamModel); ok {
 			if modalities := normalizeCodexInputModalities(metadata.InputModalities); len(modalities) > 0 {
 				// Official GPT-6 Astra metadata briefly shipped with a stale
@@ -1226,7 +1226,10 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 				return stringSliceContains(modalities, "image")
 			}
 		}
-		if !isOpenAICodexImageInputModel(upstreamModel) {
+		if strings.EqualFold(strings.TrimSpace(upstreamModel), "deepseek-v4-flash-vision-exp") {
+			return account.Type == AccountTypeAPIKey
+		}
+		if account.Platform != PlatformOpenAI || !isOpenAICodexImageInputModel(upstreamModel) {
 			return false
 		}
 		if account.IsOpenAIOAuthLike() {
@@ -1622,6 +1625,9 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
+	}
+	if account.IsOpenAIPrismTransport() {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_MODELS_TRANSPORT_UNSUPPORTED", "Prism accounts do not expose a Codex models manifest")
 	}
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
@@ -2470,12 +2476,8 @@ func validateCodexModelsManifestEnvelope(body []byte) error {
 		return errors.New("missing top-level models array")
 	}
 	models = bytes.TrimSpace(models)
-	var entries []json.RawMessage
 	if len(models) == 0 || models[0] != '[' {
 		return errors.New("top-level models field is not an array")
-	}
-	if err := json.Unmarshal(models, &entries); err != nil {
-		return fmt.Errorf("decode top-level models array: %w", err)
 	}
 	return nil
 }

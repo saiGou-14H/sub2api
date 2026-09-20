@@ -216,6 +216,80 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('cancels an unsaved plan without creating or importing an account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('team')
+    wrapper.getComponent(BaseDialogStub).vm.$emit('close')
+    await wrapper.setProps({ show: false })
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(importCodexSessionMock).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('inherit')
+    wrapper.unmount()
+  })
+
+  it.each(['inherit', 'pro', 'team'])('creates an independent Codex plan %s', async plan => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe('inherit')
+    await select.setValue(plan)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Plan account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_turn_state_plan).toBe(plan)
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('creates a Codex account with explicit opt-in %s', async (enabled) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="create-codex-turn-state"]')
+    expect(toggle.element.checked).toBe(false)
+    await toggle.setValue(enabled)
+    const transport = wrapper.getComponent('[data-testid="create-openai-transport-select"]')
+    transport.vm.$emit('update:modelValue', 'web')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="create-codex-turn-state"]').exists()).toBe(false)
+    transport.vm.$emit('update:modelValue', 'codex')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="create-codex-turn-state"]').element.checked).toBe(enabled)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex turn state')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_turn_state_enabled).toBe(enabled)
+    wrapper.unmount()
+  })
+
+  it('does not show or write Codex opt-in for API key accounts', async () => {
+    const wrapper = await submitApiKeyAccount('openai')
+    expect(wrapper.find('[data-testid="create-codex-turn-state"]').exists()).toBe(false)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    wrapper.unmount()
+  })
+
+  it.each([
+    JSON.stringify({ auth_mode: '  Agent_Identity  ' }),
+    JSON.stringify({ auth_mode: 'agentIdentity' }),
+    JSON.stringify([{ access_token: 'oauth' }, { agent_identity: {} }]),
+    `${JSON.stringify({ access_token: 'oauth' })}\n${JSON.stringify({ authMode: 'agentIdentity' })}`
+  ])('omits opt-in from identity and mixed imports even after selecting it in step one: %s', async (content) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-codex-turn-state"]').setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Identity')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('import-codex-session', content)
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_plan')
+    wrapper.unmount()
+  })
+
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-31T12:34:00'))
@@ -447,6 +521,65 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(probeUpstreamBillingMock).not.toHaveBeenCalled()
   })
 
+  it('submits OpenCode Zen default protocol rules with adaptive endpoints', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenCode')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('oc')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-opencode-zen')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      account_mode: 'zen',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/v1',
+      api_base_urls: {
+        chat_completions: 'https://opencode.ai/zen/v1',
+        anthropic: 'https://opencode.ai/zen',
+        responses: 'https://opencode.ai/zen/v1'
+      },
+      protocol_rules: [
+        { pattern: 'grok-*', protocol: 'responses' },
+        { pattern: 'gpt-*', protocol: 'responses' },
+        { pattern: 'muse-spark-*', protocol: 'responses' },
+        { pattern: 'claude-*', protocol: 'anthropic' },
+        { pattern: 'qwen*', protocol: 'anthropic' }
+      ]
+    })
+  })
+
+  it('submits OpenCode GO endpoints after switching account type', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenCode')
+    await selectButtonByText(wrapper, 'admin.accounts.opencodeGo.accountMode.go')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('oc-go')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-opencode-go')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      account_mode: 'go',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/go/v1',
+      api_base_urls: {
+        chat_completions: 'https://opencode.ai/zen/go/v1',
+        anthropic: 'https://opencode.ai/zen/go',
+        responses: 'https://opencode.ai/zen/go/v1'
+      },
+      protocol_rules: [
+        { pattern: 'grok-*', protocol: 'responses' },
+        { pattern: 'gpt-*', protocol: 'responses' },
+        { pattern: 'muse-spark-*', protocol: 'responses' },
+        { pattern: 'minimax-*', protocol: 'anthropic' },
+        { pattern: 'qwen*', protocol: 'anthropic' }
+      ]
+    })
+  })
+
   it('submits adaptive Kimi protocol endpoints', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'Kimi')
@@ -545,8 +678,85 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(flow.props('initialInputMethod')).toBe('manual')
   })
 
-  it('creates an OpenAI setup-token account from a direct access token', async () => {
-    const wrapper = await openCodexImportStep()
+  it.each(['', ' prism-session '])('creates a Prism setup-token account with optional session credentials: %s', async (sessionToken) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="create-openai-ws-mode"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="create-openai-flatten-namespaces-toggle"]').exists()).toBe(false)
+    expect((wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').element as HTMLInputElement).checked).toBe(false)
+    const sessionOverride = wrapper.get('[data-testid="create-prism-session-override"]')
+    expect((sessionOverride.element as HTMLDetailsElement).open).toBe(false)
+    expect(sessionOverride.get('summary').text()).toBe('admin.accounts.openai.prismSessionOverride')
+    expect(wrapper.get('label[for="create-prism-access-token"]').text()).toBe('admin.accounts.openai.prismAccessToken')
+    expect(wrapper.text()).toContain('admin.accounts.openai.prismAccessTokenHint')
+    await wrapper.get('[data-testid="create-prism-access-token"]').setValue(' openai-access ')
+    if (sessionToken) {
+      (sessionOverride.element as HTMLDetailsElement).open = true
+      await sessionOverride.get('[data-testid="create-prism-session-token"]').setValue(sessionToken)
+    }
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    const payload = createAccountMock.mock.calls[0]?.[0]
+    expect(payload).toMatchObject({ platform: 'openai', type: 'setup-token', extra: { openai_transport: 'prism', prism_prompt_tool_bridge: false } })
+    expect(payload.credentials.access_token).toBe('openai-access')
+    expect(payload.credentials).not.toHaveProperty('refresh_token')
+    expect(payload.credentials).not.toHaveProperty('compact_model_mapping')
+    if (sessionToken) expect(payload.credentials.prism_session_token).toBe('prism-session')
+    else expect(payload.credentials).not.toHaveProperty('prism_session_token')
+    expect(payload.extra).not.toHaveProperty('prism_session_token')
+    expect(payload.extra.openai_oauth_responses_websockets_v2_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('requires an OpenAI access token before creating a Prism account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(OAuthAuthorizationFlowStub).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('enables Prism prompt tool bridging only after an explicit choice', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Prism account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('[data-testid="create-prism-access-token"]').setValue('prism-access')
+    await wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_transport: 'prism',
+      prism_prompt_tool_bridge: true
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('preserves the selected %s transport when importing an access token', async (transport) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', 'prism')
+    await flushPromises()
+    await wrapper.get('[data-testid="create-prism-prompt-tool-bridge"]').setValue(true)
+    wrapper.getComponent('[data-testid="create-openai-transport-select"]').vm.$emit('update:modelValue', transport)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="create-prism-prompt-tool-bridge"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
     const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
 
     flow.vm.$emit('import-access-token', 'web-access-token')
@@ -558,7 +768,9 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.type).toBe('setup-token')
     expect(payload?.credentials).toMatchObject({ access_token: 'web-access-token' })
     expect(payload?.credentials).not.toHaveProperty('refresh_token')
-    expect(payload?.extra?.openai_transport).toBe('web')
+    expect(payload?.extra?.openai_transport).toBe(transport)
+    expect(payload?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
   })
 
   it.each([

@@ -330,6 +330,79 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it.each([undefined, 'inherit', 'pro', 'team'])('loads plan %s and preserves other extra on save', async plan => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { codex_turn_state_plan: plan, custom_metadata: { keep: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe(plan ?? 'inherit')
+    await select.setValue('team')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ codex_turn_state_plan: 'team', custom_metadata: { keep: true } })
+    expect(account.extra.codex_turn_state_plan).toBe(plan)
+    wrapper.unmount()
+  })
+
+  it('cancels a plan draft without writes and switches account plans independently', async () => {
+    const a = buildOpenAIOAuthParentAccount()
+    a.extra.codex_turn_state_plan = 'pro'
+    const b = { ...buildOpenAIOAuthParentAccount(), id: 999, extra: { codex_turn_state_plan: 'team' } }
+    updateAccountMock.mockReset()
+    const wrapper = mountModal(a)
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('inherit')
+    await wrapper.setProps({ show: false })
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(a.extra.codex_turn_state_plan).toBe('pro')
+    await wrapper.setProps({ account: b, show: true })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('team')
+    wrapper.unmount()
+  })
+
+  it.each([undefined, null, false, 'true', 1, true])('reads strict Codex account opt-in: %s', async (stored) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { codex_turn_state_enabled: stored, custom_metadata: { keep: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="edit-codex-turn-state"]')
+    expect(toggle.element.checked).toBe(stored === true)
+    await toggle.setValue(true)
+    await toggle.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      codex_turn_state_enabled: false, custom_metadata: { keep: true }
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['web', 'prism'])('retains opt-in through %s transport and back', async (transport) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra.codex_turn_state_enabled = true
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue(transport)
+    expect(wrapper.find('[data-testid="edit-codex-turn-state"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      codex_turn_state_enabled: true, openai_transport: transport
+    })
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue('codex')
+    expect(wrapper.get<HTMLInputElement>('[data-testid="edit-codex-turn-state"]').element.checked).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { type: 'apikey' }, { platform: 'anthropic' }, { parent_account_id: 3 },
+    { credentials: { auth_mode: 'agentIdentity' } },
+    { credentials: { openai_auth_mode: 'agentIdentity' } },
+    { extra: { openai_transport: 'web' } }, { extra: { openai_transport: 'prism' } }
+  ])('hides Codex opt-in for excluded account %j', async (overrides) => {
+    const account = { ...buildOpenAIOAuthParentAccount(), ...overrides }
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="edit-codex-turn-state"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2028-02-29T12:34:00'))
@@ -442,6 +515,80 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'gpt-5.2': 'gpt-5.2'
+    })
+  })
+
+  it('preserves OpenCode Zen account type and endpoints on submit', async () => {
+    const account = buildAccount()
+    account.platform = 'opencode_go'
+    account.credentials = {
+      api_key: 'sk-opencode',
+      account_mode: 'zen',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/v1',
+      api_base_urls: {
+        chat_completions: 'https://opencode.ai/zen/v1',
+        anthropic: 'https://opencode.ai/zen',
+        responses: 'https://opencode.ai/zen/v1'
+      },
+      protocol_rules: [
+        { pattern: 'grok-*', protocol: 'responses' },
+        { pattern: 'gpt-*', protocol: 'responses' },
+        { pattern: 'muse-spark-*', protocol: 'responses' },
+        { pattern: 'claude-*', protocol: 'anthropic' },
+        { pattern: 'qwen*', protocol: 'anthropic' }
+      ]
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      account_mode: 'zen',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/v1',
+      api_base_urls: {
+        chat_completions: 'https://opencode.ai/zen/v1',
+        anthropic: 'https://opencode.ai/zen',
+        responses: 'https://opencode.ai/zen/v1'
+      },
+      protocol_rules: [
+        { pattern: 'grok-*', protocol: 'responses' },
+        { pattern: 'gpt-*', protocol: 'responses' },
+        { pattern: 'muse-spark-*', protocol: 'responses' },
+        { pattern: 'claude-*', protocol: 'anthropic' },
+        { pattern: 'qwen*', protocol: 'anthropic' }
+      ]
+    })
+  })
+
+  it('treats a legacy OpenCode account without account_mode as GO', async () => {
+    const account = buildAccount()
+    account.platform = 'opencode_go'
+    account.credentials = {
+      api_key: 'sk-opencode',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/go/v1',
+      api_base_urls: {
+        chat_completions: 'https://opencode.ai/zen/go/v1',
+        anthropic: 'https://opencode.ai/zen/go',
+        responses: 'https://opencode.ai/zen/go/v1'
+      }
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      account_mode: 'go',
+      api_protocol: 'adaptive',
+      base_url: 'https://opencode.ai/zen/go/v1'
     })
   })
 
@@ -1237,6 +1384,19 @@ describe('EditAccountModal', () => {
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_7d_disabled).toBeUndefined()
 	})
 
+  it('preserves Seedance when exactly two endpoint capabilities are selected', async () => {
+    const account = buildAccount()
+    account.credentials.openai_capabilities = ['chat_completions', 'seedance']
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-seedance"]').element.checked).toBe(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual(['chat_completions', 'seedance'])
+  })
+
   it('keeps at least one OpenAI APIKey endpoint capability selected', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
@@ -1434,7 +1594,7 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('hides and clears Codex-only settings when an OAuth account switches to web transport', async () => {
+  it.each(['web', 'prism'])('hides and clears Codex-only settings when an OAuth account switches to %s transport', async (transport) => {
     const account = buildOpenAIOAuthParentAccount()
     account.extra = {
       openai_transport: 'codex',
@@ -1463,7 +1623,7 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid="edit-codex-fingerprint-mode-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="edit-openai-compact-settings"]').exists()).toBe(true)
 
-    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue('web')
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue(transport)
 
     expect(wrapper.find('[data-testid="edit-openai-passthrough-settings"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="edit-openai-flatten-namespaces-toggle"]').exists()).toBe(false)
@@ -1477,7 +1637,7 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
-    expect(extra?.openai_transport).toBe('web')
+    expect(extra?.openai_transport).toBe(transport)
     expect(extra?.openai_oauth_responses_websockets_v2_mode).toBe('off')
     expect(extra?.openai_oauth_responses_websockets_v2_enabled).toBe(false)
     expect(extra?.codex_cli_only).toBe(false)
@@ -1491,16 +1651,16 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('rehydrates a stored web transport and hides the selector for API key accounts', async () => {
+  it.each(['web', 'prism'])('rehydrates a stored %s transport and hides the selector for API key accounts', async (transport) => {
     const account = buildOpenAISetupTokenAccount()
-    account.extra = { openai_transport: 'web' }
+    account.extra = { openai_transport: transport }
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
-    expect((wrapper.get('[data-testid="edit-openai-transport-select"]').element as HTMLSelectElement).value).toBe('web')
+    expect((wrapper.get('[data-testid="edit-openai-transport-select"]').element as HTMLSelectElement).value).toBe(transport)
     wrapper.unmount()
 
     const apiKeyWrapper = mountModal(buildAccount())
@@ -1510,6 +1670,134 @@ describe('EditAccountModal', () => {
     expect(apiKeyWrapper.find('[data-testid="edit-openai-ws-settings"]').exists()).toBe(true)
     expect(apiKeyWrapper.find('[data-testid="edit-openai-compact-settings"]').exists()).toBe(true)
     apiKeyWrapper.unmount()
+  })
+
+  it.each([undefined, false, 'true', true])('loads Prism prompt tool bridge with strict boolean semantics: %s', async (storedValue) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'prism', prism_prompt_tool_bridge: storedValue }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    expect((wrapper.get('[data-testid="edit-prism-prompt-tool-bridge"]').element as HTMLInputElement).checked).toBe(storedValue === true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.prism_prompt_tool_bridge).toBe(storedValue === true)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('explicitly saves Prism prompt tool bridge as %s', async (enabled) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'prism', prism_prompt_tool_bridge: !enabled, custom_metadata: 'keep' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-prism-prompt-tool-bridge"]').setValue(enabled)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_transport: 'prism', prism_prompt_tool_bridge: enabled, custom_metadata: 'keep'
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('does not apply an unsaved Prism bridge choice after switching to %s', async (transport) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'prism' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-prism-prompt-tool-bridge"]').setValue(true)
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue(transport)
+    expect(wrapper.find('[data-testid="edit-prism-prompt-tool-bridge"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_transport).toBe(transport)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('prism_prompt_tool_bridge')
+    wrapper.unmount()
+  })
+
+  it.each(['codex', 'web'])('preserves a dormant Prism bridge preference when saving %s', async (transport) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: transport, prism_prompt_tool_bridge: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="edit-prism-prompt-tool-bridge"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_transport: transport, prism_prompt_tool_bridge: true
+    })
+    wrapper.unmount()
+  })
+
+  it('keeps Prism credentials write-only and preserves stored secrets when the inputs are blank', async () => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'prism', custom_metadata: 'keep' }
+    account.credentials = {
+      access_token: 'old-access', prism_session_token: 'old-session',
+      prism_oai_access_token: 'old-alias', prism_cookie: 'old-cookie', refresh_token: 'old-refresh'
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    const sessionOverride = wrapper.get('[data-testid="edit-prism-session-override"]')
+    expect((sessionOverride.element as HTMLDetailsElement).open).toBe(false)
+    expect(sessionOverride.get('summary').text()).toBe('admin.accounts.openai.prismSessionOverride')
+    expect(wrapper.get('label[for="edit-prism-access-token"]').text()).toBe('admin.accounts.openai.prismAccessToken')
+    expect(wrapper.text()).toContain('admin.accounts.openai.prismAccessTokenHint')
+    expect(wrapper.text()).toContain('admin.accounts.leaveEmptyToKeep')
+    expect((wrapper.get('[data-testid="edit-prism-access-token"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-testid="edit-prism-session-token"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const firstPayload = updateAccountMock.mock.calls[0]?.[1]
+    expect(firstPayload.credentials).not.toHaveProperty('access_token')
+    expect(firstPayload.credentials).not.toHaveProperty('prism_session_token')
+    expect(firstPayload.credentials).not.toHaveProperty('prism_oai_access_token')
+    expect(firstPayload.credentials).not.toHaveProperty('prism_cookie')
+    expect(firstPayload.credentials).not.toHaveProperty('refresh_token')
+    expect(firstPayload.extra).toMatchObject({ openai_transport: 'prism', custom_metadata: 'keep' })
+    wrapper.unmount()
+
+    const replacement = mountModal(account)
+    const replacementOverride = replacement.get('[data-testid="edit-prism-session-override"]')
+    ;(replacementOverride.element as HTMLDetailsElement).open = true
+    await replacement.get('[data-testid="edit-prism-access-token"]').setValue(' new-access ')
+    await replacement.get('[data-testid="edit-prism-session-token"]').setValue(' new-session ')
+    await replacement.get('form#edit-account-form').trigger('submit.prevent')
+    const secondPayload = updateAccountMock.mock.calls[1]?.[1]
+    expect(secondPayload.credentials).toMatchObject({ access_token: 'new-access', prism_session_token: 'new-session' })
+    expect(secondPayload.credentials).not.toHaveProperty('prism_oai_access_token')
+    expect(secondPayload.credentials).not.toHaveProperty('prism_cookie')
+    expect(secondPayload.credentials).not.toHaveProperty('refresh_token')
+    expect(secondPayload.extra).not.toHaveProperty('prism_session_token')
+    replacement.unmount()
+  })
+
+  it.each(['codex', 'web', 'prism'])('does not resubmit legacy secrets when switching to %s', async (transport) => {
+    const account = buildOpenAISetupTokenAccount()
+    account.extra = { openai_transport: 'prism' }
+    const secrets = {
+      access_token: 'legacy-access', refresh_token: 'legacy-refresh', id_token: 'legacy-id',
+      agent_private_key: 'legacy-agent-key', prism_session_token: 'legacy-session',
+      prism_oai_access_token: 'legacy-alias', prism_cookie: 'legacy-prism-cookie',
+      api_key: 'legacy-api-key', session_key: 'legacy-session-key', cookie: 'legacy-cookie',
+      private_key: 'legacy-private-key'
+    }
+    account.credentials = { ...secrets, email: 'user@example.com' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-openai-transport-select"]').setValue(transport)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload.extra.openai_transport).toBe(transport)
+    expect(payload.credentials.email).toBe('user@example.com')
+    for (const key of Object.keys(secrets)) expect(payload.credentials).not.toHaveProperty(key)
+    expect(account.credentials).toMatchObject(secrets)
+    wrapper.unmount()
   })
 
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {

@@ -28,6 +28,7 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
+	CodexTicket   *service.CodexTicketRuntime
 	Cleanup       func()
 }
 
@@ -58,7 +59,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		provideCleanup,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Cleanup"),
+		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "CodexTicket", "Cleanup"),
 	)
 	return nil, nil
 }
@@ -128,8 +129,14 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	codexTicket *service.CodexTicketRuntime,
 ) func() {
 	return func() {
+		// The probe consumes PluginManager/Redis/DB. Cancel and actually join it
+		// before any of those dependencies enter parallel teardown.
+		if codexTicket != nil && !shutdownCodexTicketBeforeDependencies(codexTicket) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

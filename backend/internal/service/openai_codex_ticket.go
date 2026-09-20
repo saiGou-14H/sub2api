@@ -1,0 +1,47 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+// SetCodexTicketRuntime is called once during dependency wiring, before serving.
+func (s *OpenAIGatewayService) SetCodexTicketRuntime(runtime *CodexTicketRuntime) {
+	s.codexTicketRuntime = runtime
+}
+
+var ErrCodexTicketReconnectRequired = errors.New("codex ticket reconnect required")
+
+func IsCodexTicketPolicyError(err error) bool {
+	return errors.Is(err, ErrCodexTicketMissing) || errors.Is(err, ErrCodexTicketControlUnavailable) || errors.Is(err, ErrCodexTicketReconnectRequired)
+}
+
+// Run after account echo isolation and all outbound identity/header rewriting.
+// The body already contains the final upstream model. Both legacy compact and
+// native V2 compaction bypass the experiment; the counter endpoint does not use this builder.
+func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Context, account *Account, body []byte, req *http.Request) error {
+	if req == nil || s.codexTicketRuntime == nil || !CodexTicketAccountSupported(account) {
+		return nil
+	}
+	model := gjson.GetBytes(body, "model").String()
+	if isOpenAIResponsesCompactPath(c) || HasCompactionTriggerInInput(body) {
+		s.codexTicketRuntime.ObserveCompactSkip(ctx, account, model)
+		return nil
+	}
+	receipt, err := s.codexTicketRuntime.ApplyWithReceipt(ctx, account, model, req.Header)
+	if err == nil {
+		attachCodexTicketReceipt(req, receipt)
+	}
+	if err != nil && c != nil && c.Writer != nil {
+		code := "CODEX_TICKET_CONTROL_UNAVAILABLE"
+		if errors.Is(err, ErrCodexTicketMissing) {
+			code = "CODEX_TICKET_MISSING"
+		}
+		writeOpenAIResponsesFallbackError(c, http.StatusServiceUnavailable, code, "Codex turn-state is not ready; retry later or change the configured missing-ticket policy")
+	}
+	return err
+}
