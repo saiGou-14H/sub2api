@@ -334,10 +334,11 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 		return
 	}
 	now, e := r.cache.Now(ctx)
+	observedClock := time.Now()
 	if e != nil || retry.NextAttemptAt.After(now) {
 		return
 	}
-	blocked, e := r.cache.ProbeCooldownActive(ctx, k)
+	blocked, e := r.probeRestrictionActive(ctx, k)
 	if e != nil || blocked {
 		return
 	}
@@ -349,11 +350,14 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil || !ok || ctx.Err() != nil {
 		return
 	}
-	blocked, e = r.cache.ProbeCooldownActive(ctx, k)
+	blocked, e = r.probeRestrictionActive(ctx, k)
 	if e != nil || blocked || ctx.Err() != nil {
 		return
 	}
 	result, err := probe(ctx, k.AccountID, k.Model, proxyURL)
+	if !r.recordObservedProbeRestriction(ctx, k, result, now.Add(time.Since(observedClock))) {
+		return
+	}
 	if generationCtx.Err() != nil {
 		return
 	}
@@ -437,16 +441,6 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 	quotaRejected := result.ErrorCode == "quota_limited"
 	if (authRejected || quotaRejected) && delay < time.Hour {
 		delay = time.Hour
-	}
-	// Store shared restrictions before per-model bookkeeping. Successful probes
-	// only clear their ordinary retry key, never this account-wide deadline.
-	if authRejected || quotaRejected || result.HTTPStatus == 429 {
-		if e := r.cache.ExtendProbeCooldown(ctx, owner, k, now.Add(delay)); e != nil {
-			if ctx.Err() == nil {
-				r.setError("retry_unavailable")
-			}
-			return
-		}
 	}
 	retry.NextAttemptAt = now.Add(delay)
 	retry.ErrorCode = code

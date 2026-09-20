@@ -62,13 +62,13 @@ func TestCodexTicketCooldownAtomicMaxAndIsolation(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, active)
 	}
-	// Old revisions and owners cannot extend a live generation's restriction.
+	// Observed rejections must survive a configuration/owner handoff.
 	require.NoError(t, c.ExtendProbeCooldown(ctx, "one", ticket.Key, ticket.CapturedAt.Add(time.Hour)))
-	require.NoError(t, c.ExtendProbeCooldown(ctx, "old-owner", k, ticket.CapturedAt.Add(time.Hour)))
+	require.NoError(t, c.ExtendProbeCooldown(ctx, "old-owner", k, ticket.CapturedAt.Add(30*time.Minute)))
 	deadline, err = c.client.Get(ctx, codexCooldownKey(k)).Int64()
 	require.NoError(t, err)
-	require.Equal(t, ticket.CapturedAt.Add(24*time.Minute).UnixMilli(), deadline)
-	mr.SetTime(ticket.CapturedAt.Add(25 * time.Minute))
+	require.Equal(t, ticket.CapturedAt.Add(time.Hour).UnixMilli(), deadline)
+	mr.SetTime(ticket.CapturedAt.Add(61 * time.Minute))
 	active, err = c.ProbeCooldownActive(ctx, k)
 	require.NoError(t, err)
 	require.False(t, active)

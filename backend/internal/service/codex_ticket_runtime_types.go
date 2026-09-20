@@ -41,8 +41,9 @@ type CodexTicketRetry struct {
 	ErrorCode     string
 }
 
-// Store implementations must atomically fence all mutations against owner,
-// revision and Redis-server control freshness. No raw payload is exposed by Status.
+// Ticket/retry mutations are fenced against owner, revision and fresh control.
+// Observed probe cooldowns are monotonic account-identity restrictions and must
+// survive generation changes. No raw payload is exposed by Status.
 type CodexTicketRuntimeStore interface {
 	Now(context.Context) (time.Time, error)
 	TryAcquireLeader(context.Context, string, time.Duration) (bool, error)

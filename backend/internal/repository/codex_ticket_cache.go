@@ -61,9 +61,11 @@ func (c *codexTicketCache) ProbeCooldownActive(ctx context.Context, k service.Co
 	n, err := c.client.Eval(ctx, codexLuaNow+`local deadline=tonumber(redis.call('GET',KEYS[1]) or '0'); if deadline>now then return 1 end return 0`, []string{codexCooldownKey(k)}).Int()
 	return n == 1, err
 }
-func (c *codexTicketCache) ExtendProbeCooldown(ctx context.Context, owner string, k service.CodexTicketKey, until time.Time) error {
-	return c.client.Eval(ctx, codexLuaFence+`local deadline=tonumber(ARGV[3]); local old=tonumber(redis.call('GET',KEYS[3]) or '0');
-if deadline>now and deadline>old then redis.call('SET',KEYS[3],ARGV[3],'PX',deadline-now) end return 1`, []string{codexPrefix + "leader", codexPrefix + "control", codexCooldownKey(k)}, owner, fmt.Sprint(k.Revision), until.UnixMilli()).Err()
+func (c *codexTicketCache) ExtendProbeCooldown(ctx context.Context, _ string, k service.CodexTicketKey, until time.Time) error {
+	// Observed rejections outlive the generation that made the request. This
+	// monotonic restriction must not be fenced like a usable ticket.
+	return c.client.Eval(ctx, codexLuaNow+`local deadline=tonumber(ARGV[1]); local old=tonumber(redis.call('GET',KEYS[1]) or '0');
+if deadline>now and deadline>old then redis.call('SET',KEYS[1],ARGV[1],'PX',deadline-now) end return 1`, []string{codexCooldownKey(k)}, until.UnixMilli()).Err()
 }
 func (c *codexTicketCache) ReadForRequest(ctx context.Context, id int64, scope, model string) (service.CodexTicketRuntimeView, error) {
 	started := time.Now()

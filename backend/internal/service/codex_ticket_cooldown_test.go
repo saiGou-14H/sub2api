@@ -64,7 +64,7 @@ func TestCodexTicketSharedCooldownAcrossModelsAndRevisions(t *testing.T) {
 			s := &ticketCooldownStore{ticketTestStore: base}
 			r.cache = s
 			ctx := context.Background()
-			r.recordProbeFailure(ctx, "owner", key, CodexTicketRetry{}, tc.result, errors.New("redacted"))
+			require.True(t, r.recordObservedProbeRestriction(ctx, key, tc.result, base.v.ServerTime))
 			require.GreaterOrEqual(t, s.until.Sub(base.v.ServerTime), tc.minimum)
 			cfg := base.v.Control.Settings
 			for _, revision := range []uint64{key.Revision, key.Revision + 1} {

@@ -24,6 +24,7 @@ type CodexTicketRuntime struct {
 	ready             map[CodexTicketKey]time.Time
 	lastError         string
 	knownSettings     *CodexTicketSettings
+	pendingCooldowns  map[CodexTicketKey]time.Time
 }
 
 func NewCodexTicketRuntime(s CodexTicketSettingsRepository, p ProxyRepository, a AccountRepository, c CodexTicketRuntimeStore) *CodexTicketRuntime {
