@@ -126,6 +126,8 @@ func codexProbeRuntimeErrorCode(code string) string {
 		return "identity_unresolved"
 	case "credential_unavailable":
 		return "token_unavailable"
+	case "quota_limited":
+		return "quota_limited"
 	case "http_status":
 		return "" // Let runtime classify HTTPStatus (including 401/429/503).
 	default:
@@ -198,22 +200,35 @@ func readCodexProbeCompletion(r io.Reader) string {
 			if !strings.HasSuffix(raw, "\n") {
 				return "completion_missing"
 			}
-			if eventName == "error" || eventName == "response.failed" || eventName == "response.incomplete" {
-				return "response_failed"
-			}
+			failedEvent := eventName == "error" || eventName == "response.failed" || eventName == "response.incomplete"
 			if len(data) != 0 {
 				payload := bytes.TrimSpace(data)
 				if bytes.Equal(payload, []byte("[DONE]")) {
 					return "completion_missing"
 				}
 				var event struct {
-					Type     string `json:"type"`
+					Type  string `json:"type"`
+					Code  string `json:"code"`
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
 					Response struct {
 						Status string `json:"status"`
+						Error  struct {
+							Code string `json:"code"`
+						} `json:"error"`
 					} `json:"response"`
 				}
 				if json.Unmarshal(payload, &event) != nil {
 					return "sse_invalid"
+				}
+				if failedEvent || event.Type == "response.failed" || event.Type == "response.incomplete" || event.Type == "error" {
+					for _, code := range []string{event.Response.Error.Code, event.Error.Code, event.Code} {
+						if code == "rate_limit_exceeded" || code == "insufficient_quota" {
+							return "quota_limited"
+						}
+					}
+					return "response_failed"
 				}
 				switch event.Type {
 				case "response.completed":
@@ -221,9 +236,10 @@ func readCodexProbeCompletion(r io.Reader) string {
 						return "response_failed"
 					}
 					return ""
-				case "response.failed", "response.incomplete", "error":
-					return "response_failed"
 				}
+			}
+			if failedEvent {
+				return "response_failed"
 			}
 			data = data[:0]
 			frameBytes = 0

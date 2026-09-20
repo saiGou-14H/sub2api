@@ -55,6 +55,8 @@ type CodexTicketRuntimeStore interface {
 	AcquireProbeBudget(context.Context, string, uint64, int) (bool, error)
 	ReadRetry(context.Context, CodexTicketKey) (CodexTicketRetry, error)
 	WriteRetry(context.Context, string, CodexTicketKey, CodexTicketRetry) error
+	ProbeCooldownActive(context.Context, CodexTicketKey) (bool, error)
+	ExtendProbeCooldown(context.Context, string, CodexTicketKey, time.Time) error
 }
 type CodexTicketProbeResult struct {
 	State, IdentityScope string

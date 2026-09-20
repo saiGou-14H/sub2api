@@ -335,12 +335,20 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil || retry.NextAttemptAt.After(now) {
 		return
 	}
+	blocked, e := r.cache.ProbeCooldownActive(ctx, k)
+	if e != nil || blocked {
+		return
+	}
 	ok, e := r.cache.AcquireProbeBudget(ctx, owner, k.Revision, cfg.MaxProbesPerMinute)
 	if e != nil || !ok {
 		return
 	}
 	ok, e = r.cache.CheckCurrent(ctx, owner, k.Revision)
 	if e != nil || !ok || ctx.Err() != nil {
+		return
+	}
+	blocked, e = r.cache.ProbeCooldownActive(ctx, k)
+	if e != nil || blocked || ctx.Err() != nil {
 		return
 	}
 	result, err := probe(ctx, k.AccountID, k.Model, proxyURL)
@@ -393,7 +401,7 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 	switch {
 	case result.HTTPStatus == 401 || result.HTTPStatus == 403:
 		code = "authentication_failed"
-	case result.HTTPStatus == 429:
+	case result.HTTPStatus == 429 || result.ErrorCode == "quota_limited":
 		code = "rate_limited"
 	case result.HTTPStatus >= 500:
 		code = "upstream_unavailable"
@@ -421,8 +429,18 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 		jitter = float64(random[0]) / 255
 	}
 	delay := CodexTicketRetryDelay(retry.Attempt, parseCodexRetryAfter(result.RetryAfter, now), jitter)
-	if code == "authentication_failed" && delay < time.Hour {
+	authRejected := result.HTTPStatus == 401 || result.HTTPStatus == 403
+	quotaRejected := result.ErrorCode == "quota_limited"
+	if (authRejected || quotaRejected) && delay < time.Hour {
 		delay = time.Hour
+	}
+	// Store shared restrictions before per-model bookkeeping. Successful probes
+	// only clear their ordinary retry key, never this account-wide deadline.
+	if authRejected || quotaRejected || result.HTTPStatus == 429 {
+		if e := r.cache.ExtendProbeCooldown(ctx, owner, k, now.Add(delay)); e != nil {
+			r.setError("retry_unavailable")
+			return
+		}
 	}
 	retry.NextAttemptAt = now.Add(delay)
 	retry.ErrorCode = code

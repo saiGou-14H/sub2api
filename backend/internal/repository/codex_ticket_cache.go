@@ -52,6 +52,19 @@ func codexPayloadKey(k service.CodexTicketKey) string {
 	return fmt.Sprintf("%sticket:%d:%d:%s:%s", codexPrefix, k.Revision, k.AccountID, service.CodexTicketModelHash(k.IdentityScope), service.CodexTicketModelHash(k.Model))
 }
 func codexRetryKey(k service.CodexTicketKey) string { return codexPayloadKey(k) + ":retry" }
+
+// Rejections survive model, configuration and proxy changes, but not identity changes.
+func codexCooldownKey(k service.CodexTicketKey) string {
+	return fmt.Sprintf("%scooldown:%d:%s", codexPrefix, k.AccountID, service.CodexTicketModelHash(k.IdentityScope))
+}
+func (c *codexTicketCache) ProbeCooldownActive(ctx context.Context, k service.CodexTicketKey) (bool, error) {
+	n, err := c.client.Eval(ctx, codexLuaNow+`local deadline=tonumber(redis.call('GET',KEYS[1]) or '0'); if deadline>now then return 1 end return 0`, []string{codexCooldownKey(k)}).Int()
+	return n == 1, err
+}
+func (c *codexTicketCache) ExtendProbeCooldown(ctx context.Context, owner string, k service.CodexTicketKey, until time.Time) error {
+	return c.client.Eval(ctx, codexLuaFence+`local deadline=tonumber(ARGV[3]); local old=tonumber(redis.call('GET',KEYS[3]) or '0');
+if deadline>now and deadline>old then redis.call('SET',KEYS[3],ARGV[3],'PX',deadline-now) end return 1`, []string{codexPrefix + "leader", codexPrefix + "control", codexCooldownKey(k)}, owner, fmt.Sprint(k.Revision), until.UnixMilli()).Err()
+}
 func (c *codexTicketCache) ReadForRequest(ctx context.Context, id int64, scope, model string) (service.CodexTicketRuntimeView, error) {
 	started := time.Now()
 	var v service.CodexTicketRuntimeView
