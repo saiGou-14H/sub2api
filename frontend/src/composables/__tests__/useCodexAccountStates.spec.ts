@@ -106,7 +106,7 @@ describe('visible Codex account state', () => {
     expect(oldSignal.aborted).toBe(true)
     expect(state.states.value[1].status).toBe('backoff')
   })
-  it('keeps a valid refreshing model alive alongside an expired model', async () => {
+  it('aggregates expiry over another still-valid refreshing model', async () => {
     const payload = snapshot([1])
     payload.accounts[0].status = 'refreshing'
     const live = { ...account(1).models[0], model: 'live', status: 'refreshing' as const, expires_at: new Date(base + 10000).toISOString() }
@@ -117,10 +117,21 @@ describe('visible Codex account state', () => {
     api.mockReturnValue(new Promise(() => {}))
     await vi.advanceTimersByTimeAsync(1001)
     expect(state.states.value[1].models.map(model => model.status)).toEqual(['expired', 'refreshing'])
-    expect(state.states.value[1].status).toBe('refreshing')
+    expect(state.states.value[1].status).toBe('expired')
     await vi.advanceTimersByTimeAsync(9000)
     expect(state.states.value[1].status).toBe('expired')
     expect(api).toHaveBeenCalledTimes(2)
+  })
+  it.each(['unavailable', 'unsupported', 'disabled', 'inactive', 'proxy_unavailable', 'backoff'] as const)('preserves more severe %s when a model expires locally', async status => {
+    const payload = snapshot([1])
+    payload.accounts[0].status = status
+    api.mockResolvedValueOnce(payload)
+    const state = setup()
+    await flushPromises()
+    api.mockReturnValue(new Promise(() => {}))
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(state.states.value[1].models[0].status).toBe('expired')
+    expect(state.states.value[1].status).toBe(status)
   })
   it('preserves explicit unavailable and unsupported even when global enabled is false', async () => {
     const payload = snapshot([1, 2])
