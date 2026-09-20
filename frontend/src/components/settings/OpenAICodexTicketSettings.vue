@@ -79,6 +79,7 @@ const numericFields = [
   { key: 'max_probes_per_minute', min: 1, max: 60 }
 ] as const
 const runtimeErrorCodes = [
+  'model_mismatch', 'verification_failed', 'state_312',
   'transport_unsupported', 'identity_unresolved', 'token_unavailable', 'stream_failed',
   'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable',
   'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost',

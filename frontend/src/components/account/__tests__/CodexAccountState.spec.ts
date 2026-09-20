@@ -6,9 +6,46 @@ import Badge from '../CodexAccountStateBadge.vue'
 import Dialog from '../CodexAccountStateDialog.vue'
 vi.mock('@/api/admin/codexTicket', () => ({ getCodexAccountStates: vi.fn() }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key.split('.').slice(1).reduce<unknown>((value, part) => (value as Record<string, unknown>)?.[part], en) ?? key }) }))
-const state = (id = 1): CodexAccountState => ({ account_id: id, enabled: true, supported: true, status: 'ready', models: [{ model: 'gpt-test', status: 'ready', captured_at: null, expires_at: null, refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 3, last_injected_at: null, last_request_id: 'request-one', last_outcome: 'header_set', last_reason: null }] })
+const state = (id = 1): CodexAccountState => ({ account_id: id, plan: id === 1 ? 'pro' : 'team', target_length: id === 1 ? 292 : 332, enabled: true, supported: true, status: 'ready', models: [{ model: 'gpt-test', status: 'ready', captured_at: null, expires_at: null, refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 3, last_injected_at: null, last_request_id: 'request-one', last_outcome: 'header_set', last_reason: null, verified: true, verified_at: null, actual_model: null, verification_model: null, invalidation_count: 0, last_invalidated_at: null, last_invalidation_reason: null }] })
 const global = { stubs: { BaseDialog: { template: '<div><slot/><slot name="footer"/></div>' }, Icon: true } }
 describe('Codex account UI', () => {
+  it.each(['model_mismatch', 'verification_failed', 'state_312'] as const)('localizes two-phase error %s', code => {
+    const record = state()
+    record.models[0].last_error_code = code
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.text()).toContain(en.runtimeErrors[code])
+  })
+  it('shows independent Pro/Team policies and two-phase metadata', async () => {
+    const record = state(1)
+    record.models[0].actual_model = 'actual-A'
+    record.models[0].verification_model = 'verified-A'
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.text()).toContain('Pro (292)')
+    expect(wrapper.text()).toContain('actual-A')
+    expect(wrapper.text()).toContain('verified-A')
+    expect(wrapper.get('[data-testid="codex-verification"]').text()).toBe(en.accounts.verified)
+    await wrapper.setProps({ account: { id: 2, name: 'B' }, state: state(2) })
+    expect(wrapper.text()).toContain('Team (332)')
+    expect(wrapper.text()).not.toContain('actual-A')
+  })
+  it.each(['expired', 'invalidated'] as const)('does not derive current verification from history when %s', status => {
+    const record = state()
+    record.status = status
+    Object.assign(record.models[0], { status, verified: true, verified_at: '2026-01-01T00:00:00Z', invalidation_count: 2, last_invalidated_at: '2026-01-02T00:00:00Z', last_invalidation_reason: 'state_312' })
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.get('[data-testid="codex-verification"]').text()).toBe(en.accounts.notVerified)
+    expect(wrapper.text()).toContain(en.accounts.invalidations.state_312)
+    expect(wrapper.text()).toContain(en.accounts.verified_at)
+    expect(wrapper.html()).not.toContain('text-green-600')
+  })
+  it('requires verified true and never displays unknown invalidation text', () => {
+    const record = state()
+    Object.assign(record.models[0], { verified: false, verified_at: '2026-01-01T00:00:00Z', last_invalidation_reason: 'secret-state' })
+    const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })
+    expect(wrapper.get('[data-testid="codex-verification"]').text()).toBe(en.accounts.notVerified)
+    expect(wrapper.text()).not.toContain('secret-state')
+    expect(wrapper.text()).toContain(en.accounts.invalidations.unknown)
+  })
   it('keeps two accounts separate and does not equate ready with header injection', () => {
     const one = mount(Badge, { props: { accountId: 1, state: state() }, global })
     const twoState = state(2)

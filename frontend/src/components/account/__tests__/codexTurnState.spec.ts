@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { readCodexTurnStateEnabled, supportsCodexTurnState } from '@/utils/codexTurnState'
+import { readCodexTurnStateEnabled, readCodexTurnStatePlan, supportsCodexTurnState } from '@/utils/codexTurnState'
 
 describe('Codex turn-state account eligibility', () => {
+  it.each([undefined, null, false, '', 'unknown', 'PRO', 292, {}])('inherits global policy for absent or malformed plan %j', value => {
+    expect(readCodexTurnStatePlan({ codex_turn_state_plan: value })).toBe('inherit')
+  })
+  it.each(['inherit', 'pro', 'team'])('reads only supported plan %s', plan => {
+    expect(readCodexTurnStatePlan({ codex_turn_state_plan: plan })).toBe(plan)
+    expect(readCodexTurnStatePlan()).toBe('inherit')
+  })
   it.each([undefined, null, false, 'true', 'false', 0, 1, {}, []])('defaults malformed or absent %j opt-in to false', value => {
     expect(readCodexTurnStateEnabled({ codex_turn_state_enabled: value })).toBe(false)
   })

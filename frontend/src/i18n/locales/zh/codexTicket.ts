@@ -1,5 +1,16 @@
 export default {
+  plan: {
+    label: '状态长度策略', inherit: '跟随全局', pro: 'Pro（292）', team: 'Team（332）', unknown: '未知策略',
+    targetLength: '实际目标长度',
+    hint: '手动设置本账号的长度筛选策略，不会自动读取或更改账号订阅。',
+    requestsHint: '候选采集与账号业务出口复验均会额外发送短请求，受现有预算与冷却限制。',
+    verificationHint: '312 仅为实验信号；模型名匹配不保证回答质量或并发能力。'
+  },
   accounts: {
+    verified: '当前状态已通过复验', notVerified: '当前无已复验状态', verified_at: '最近复验时间（历史）',
+    actual_model: '采集返回模型', verification_model: '复验返回模型',
+    invalidation_count: '共享缓存窗口内失效次数', last_invalidated_at: '最近失效时间（历史）', last_invalidation_reason: '最近失效原因',
+    invalidations: { model_mismatch: '响应模型不匹配', state_312: '312 字节实验信号', unknown: '未知失效原因' },
     title: 'Codex 状态', refresh: '刷新状态', loading: '读取中', empty: '暂无模型状态',
     failed: '状态读取失败。', injected: '请求头已写入', history: '历史请求头注入',
     captured_at: '捕获时间', expires_at: '过期时间', refresh_at: '下次刷新', next_attempt_at: '退避截止',
@@ -9,7 +20,7 @@ export default {
     headerHint: 'header_set 仅表示出站请求头已写入，不证明上游接收或响应质量。',
     reasons: { ticket_ready: '状态可用', ticket_missing: '缺少状态', control_unavailable: '运行时控制不可用', proxy_unavailable: '代理不可用', compact: '压缩请求', identity_changed: '账号身份已变化', unknown: '未知原因' },
     outcomes: { header_set: '出站请求头已写入', skipped: '已跳过', rejected: '已拒绝', unknown: '未知决策' },
-    statuses: { disabled: '已关闭', unsupported: '不支持', inactive: '未激活', waiting: '等待采集', ready: '状态可用', refreshing: '刷新中', expired: '已过期', backoff: '退避等待', proxy_unavailable: '代理不可用', unavailable: '不可用' }
+    statuses: { disabled: '已关闭', unsupported: '不支持', inactive: '未激活', waiting: '等待采集', ready: '状态可用', refreshing: '刷新中', expired: '已过期', invalidated: '已作废', backoff: '退避等待', proxy_unavailable: '代理不可用', unavailable: '不可用' }
   },
   title: 'Codex 状态采集与注入（实验性）',
   description: '全局开关与每个账号的独立开关必须同时开启。采集使用所选托管代理，业务请求沿用账号代理；采集代理不可用时不会回退到直连。',
@@ -56,6 +67,9 @@ export default {
   localCounterScope: '以下为当前实例观察数量，不代表所有实例的总数或全局健康状态。',
   unknownCounterScope: '以下数量的统计范围尚未确认，不代表全局健康状态。',
   runtimeErrors: {
+    model_mismatch: '响应模型与请求模型不匹配。',
+    verification_failed: '账号业务出口复验失败。',
+    state_312: '检测到 312 字节状态实验信号。',
     transport_unsupported: '插件传输不支持强制 HTTP/1 采集。',
     identity_unresolved: '无法确定账号身份，暂不能采集。',
     token_unavailable: '账号访问令牌暂不可用。',

@@ -2998,6 +2998,7 @@
             <span>{{ t('codexTicket.accountEnabled') }}</span>
           </label>
           <p class="input-hint">{{ t('codexTicket.accountHint') }}</p>
+          <CodexTurnStatePlanSelect id="create-codex-plan" :model-value="codexTurnStatePlan" @update:model-value="codexTurnStatePlan = $event === 'unchanged' ? 'inherit' : $event" />
         </div>
         <div v-if="openaiTransportMode === 'prism'" class="mt-4 space-y-3">
           <div>
@@ -3945,6 +3946,8 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import CodexTurnStatePlanSelect from './CodexTurnStatePlanSelect.vue'
+import { supportsCodexTurnState, type CodexTurnStatePlan } from '@/utils/codexTurnState'
 import { openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
@@ -4346,10 +4349,12 @@ const openaiPassthroughEnabled = ref(false)
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
 const openaiTransportOptions = computed(() => openAITransportOptions(t))
 const codexTurnStateEnabled = ref(false)
-const showCodexTurnState = computed(() =>
-  form.platform === 'openai' && accountCategory.value === 'oauth-based' &&
-  openaiTransportMode.value === 'codex' && oauthFlowRef.value?.inputMethod !== 'agent_identity'
-)
+const codexTurnStatePlan = ref<CodexTurnStatePlan>('inherit')
+const showCodexTurnState = computed(() => supportsCodexTurnState({
+  platform: form.platform,
+  type: accountCategory.value === 'oauth-based' ? 'oauth' : 'apikey',
+  credentials: { auth_mode: oauthFlowRef.value?.inputMethod === 'agent_identity' ? 'agent_identity' : undefined }
+}, openaiTransportMode.value))
 const prismAccessToken = ref('')
 const prismSessionToken = ref('')
 const prismPromptToolBridge = ref(false)
@@ -4833,6 +4838,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiTransportMode.value = 'codex'
       codexTurnStateEnabled.value = false
+      codexTurnStatePlan.value = 'inherit'
       prismAccessToken.value = ''
       prismSessionToken.value = ''
       prismPromptToolBridge.value = false
@@ -5290,6 +5296,7 @@ const resetForm = () => {
   openaiPassthroughEnabled.value = false
   openaiTransportMode.value = 'codex'
   codexTurnStateEnabled.value = false
+  codexTurnStatePlan.value = 'inherit'
   prismAccessToken.value = ''
   prismSessionToken.value = ''
   prismPromptToolBridge.value = false
@@ -5372,6 +5379,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
       (openaiTransportMode.value === 'codex' || codexTurnStateEnabled.value)) {
       extra.codex_turn_state_enabled = codexTurnStateEnabled.value
     }
+    if (showCodexTurnState.value) extra.codex_turn_state_plan = codexTurnStatePlan.value
     if (openaiTransportMode.value === 'prism') {
       extra.prism_prompt_tool_bridge = prismPromptToolBridge.value
     } else {
@@ -6417,7 +6425,10 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   try {
     const extra = buildOpenAICodexImportExtra()
     // The import endpoint can receive identity JSON through the ordinary session tab too.
-    if (extra && isAgentIdentityImportContent(trimmed, false)) delete extra.codex_turn_state_enabled
+    if (extra && isAgentIdentityImportContent(trimmed, false)) {
+      delete extra.codex_turn_state_enabled
+      delete extra.codex_turn_state_plan
+    }
     const result = await adminAPI.accounts.importCodexSession({
       content: trimmed,
       name: form.name,

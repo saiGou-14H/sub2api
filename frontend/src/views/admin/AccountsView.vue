@@ -1100,7 +1100,8 @@ const {
 
 const codexAccount = ref<{ id: number; name: string } | null>(null)
 const codexIds = computed(() => loading.value ? [] : accounts.value.filter(account => supportsCodexState(account)).map(account => account.id))
-const codexQueryKey = computed(() => JSON.stringify([params, pagination.page, pagination.page_size]))
+const codexQueryKey = computed(() => JSON.stringify([params, pagination.page, pagination.page_size,
+  accounts.value.map(account => [account.id, account.extra?.codex_turn_state_plan ?? 'inherit'])]))
 const { states: codexStates, loading: codexLoading, failed: codexFailed, refresh: refreshCodexStates } = useCodexAccountStates(codexIds, codexQueryKey)
 watch(codexIds, ids => { if (codexAccount.value && !ids.includes(codexAccount.value.id)) codexAccount.value = null })
 

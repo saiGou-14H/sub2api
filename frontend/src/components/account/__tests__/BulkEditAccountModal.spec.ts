@@ -98,6 +98,29 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it.each(['inherit', 'pro', 'team'])('patches only explicitly selected bulk plan %s', async plan => {
+    const selectedAccounts = [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth', extra: { codex_turn_state_plan: id === 1 ? 'pro' : 'team', keep: id } }))
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedAccounts })
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe('unchanged')
+    await select.setValue(plan)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { extra: { codex_turn_state_plan: plan } })
+    expect(selectedAccounts.map(account => account.extra.codex_turn_state_plan)).toEqual(['pro', 'team'])
+    wrapper.unmount()
+  })
+
+  it('cancels bulk plan changes without updating and resets to unchanged on reopen', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'], selectedAccounts: [1, 2].map(id => ({ id, platform: 'openai', type: 'oauth' })) })
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('team')
+    await wrapper.setProps({ show: false })
+    expect(adminAPI.accounts.bulkUpdate).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('unchanged')
+    wrapper.unmount()
+  })
+
   it.each(['on', 'off'])('saves explicit Codex opt-in %s as a boolean patch', async (mode) => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'setup-token'],

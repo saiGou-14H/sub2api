@@ -31,7 +31,7 @@ export interface TicketSettingsSnapshot {
   runtime: TicketRuntimeStatus | null
   runtime_error_reason: string | null
 }
-export type CodexAccountStatus = 'disabled' | 'unsupported' | 'inactive' | 'waiting' | 'ready' | 'refreshing' | 'expired' | 'backoff' | 'proxy_unavailable' | 'unavailable'
+export type CodexAccountStatus = 'disabled' | 'unsupported' | 'inactive' | 'waiting' | 'ready' | 'refreshing' | 'expired' | 'invalidated' | 'backoff' | 'proxy_unavailable' | 'unavailable'
 export interface CodexAccountModel {
   model: string
   status: CodexAccountStatus
@@ -45,9 +45,18 @@ export interface CodexAccountModel {
   last_request_id: string | null
   last_outcome: string | null
   last_reason: string | null
+  verified: boolean
+  verified_at: string | null
+  actual_model: string | null
+  verification_model: string | null
+  invalidation_count: number
+  last_invalidated_at: string | null
+  last_invalidation_reason: 'model_mismatch' | 'state_312' | null
 }
 export interface CodexAccountState {
   account_id: number
+  plan: string
+  target_length: number
   enabled: boolean
   supported: boolean
   status: CodexAccountStatus

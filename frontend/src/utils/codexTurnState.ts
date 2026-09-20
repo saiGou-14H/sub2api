@@ -1,5 +1,13 @@
 import { normalizeOpenAITransport } from './openaiTransport'
 
+export type CodexTurnStatePlan = 'inherit' | 'pro' | 'team'
+
+/** Legacy or unknown settings inherit the existing global length policy. */
+export function readCodexTurnStatePlan(extra?: Record<string, unknown> | null): CodexTurnStatePlan {
+  const plan = extra?.codex_turn_state_plan
+  return plan === 'pro' || plan === 'team' ? plan : 'inherit'
+}
+
 export interface CodexTurnStateAccount {
   id?: number
   platform: string

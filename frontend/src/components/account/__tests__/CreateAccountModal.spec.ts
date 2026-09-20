@@ -216,6 +216,34 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('cancels an unsaved plan without creating or importing an account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('team')
+    wrapper.getComponent(BaseDialogStub).vm.$emit('close')
+    await wrapper.setProps({ show: false })
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(importCodexSessionMock).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('inherit')
+    wrapper.unmount()
+  })
+
+  it.each(['inherit', 'pro', 'team'])('creates an independent Codex plan %s', async plan => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe('inherit')
+    await select.setValue(plan)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Plan account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.codex_turn_state_plan).toBe(plan)
+    wrapper.unmount()
+  })
+
   it.each([false, true])('creates a Codex account with explicit opt-in %s', async (enabled) => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
@@ -258,6 +286,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('import-codex-session', content)
     await flushPromises()
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_enabled')
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('codex_turn_state_plan')
     wrapper.unmount()
   })
 

@@ -1,5 +1,16 @@
 export default {
+  plan: {
+    label: 'State length policy', inherit: 'Follow global', pro: 'Pro (292)', team: 'Team (332)', unknown: 'Unknown policy',
+    targetLength: 'Effective target length',
+    hint: 'Manual per-account length filter; this does not read or change the account subscription.',
+    requestsHint: 'Candidate collection and verification through the account business route each send an extra short request, within the existing budget and cooldown.',
+    verificationHint: '312 is an experimental signal. Matching model names does not guarantee response quality or concurrency.'
+  },
   accounts: {
+    verified: 'Current state passed verification', notVerified: 'No currently verified state', verified_at: 'Last verification (history)',
+    actual_model: 'Collection response model', verification_model: 'Verification response model',
+    invalidation_count: 'Invalidations in shared cache window', last_invalidated_at: 'Last invalidation (history)', last_invalidation_reason: 'Last invalidation reason',
+    invalidations: { model_mismatch: 'Response model mismatch', state_312: 'Experimental 312-byte signal', unknown: 'Unknown invalidation reason' },
     title: 'Codex state', refresh: 'Refresh status', loading: 'Loading', empty: 'No model status',
     failed: 'Status could not be read.', injected: 'Header set', history: 'Historical header injection',
     captured_at: 'Captured', expires_at: 'Expires', refresh_at: 'Next refresh', next_attempt_at: 'Retry after',
@@ -9,7 +20,7 @@ export default {
     headerHint: 'header_set means only that an outbound request header was set. It does not confirm upstream acceptance or response quality.',
     reasons: { ticket_ready: 'State available', ticket_missing: 'State missing', control_unavailable: 'Control unavailable', proxy_unavailable: 'Proxy unavailable', compact: 'Compaction request', identity_changed: 'Account identity changed', unknown: 'Unknown reason' },
     outcomes: { header_set: 'Outbound header set', skipped: 'Skipped', rejected: 'Rejected', unknown: 'Unknown decision' },
-    statuses: { disabled: 'Disabled', unsupported: 'Unsupported', inactive: 'Inactive', waiting: 'Waiting', ready: 'State available', refreshing: 'Refreshing', expired: 'Expired', backoff: 'Retry backoff', proxy_unavailable: 'Proxy unavailable', unavailable: 'Unavailable' }
+    statuses: { disabled: 'Disabled', unsupported: 'Unsupported', inactive: 'Inactive', waiting: 'Waiting', ready: 'State available', refreshing: 'Refreshing', expired: 'Expired', invalidated: 'Invalidated', backoff: 'Retry backoff', proxy_unavailable: 'Proxy unavailable', unavailable: 'Unavailable' }
   },
   title: 'Codex turn state (experimental)',
   description: 'The global switch and each account switch must both be enabled. Harvesting uses the selected managed proxy; business requests keep their account proxy. An unavailable proxy never falls back to a direct connection.',
@@ -56,6 +67,9 @@ export default {
   localCounterScope: 'These counts are observed by the current instance. They are not totals across all instances or a measure of global health.',
   unknownCounterScope: 'The scope of these counts is unconfirmed. They do not represent global health.',
   runtimeErrors: {
+    model_mismatch: 'The response model did not match the requested model.',
+    verification_failed: 'Verification through the account business route failed.',
+    state_312: 'The experimental 312-byte state signal was observed.',
     transport_unsupported: 'The plugin transport does not support collection with forced HTTP/1.',
     identity_unresolved: 'The account identity could not be resolved for collection.',
     token_unavailable: 'The account access token is temporarily unavailable.',

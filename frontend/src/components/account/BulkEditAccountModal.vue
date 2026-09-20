@@ -93,6 +93,7 @@
           <option value="off">{{ t('codexTicket.off') }}</option>
         </select>
         <p class="input-hint">{{ t('codexTicket.accountHint') }}</p>
+        <CodexTurnStatePlanSelect id="bulk-codex-plan" v-model="codexTurnStatePlan" bulk />
       </div>
 
       <!-- OpenAI OAuth-like upstream transport -->
@@ -1612,7 +1613,8 @@ import {
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 import { openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
-import { supportsCodexTurnState, type CodexTurnStateAccount } from '@/utils/codexTurnState'
+import CodexTurnStatePlanSelect from './CodexTurnStatePlanSelect.vue'
+import { supportsCodexTurnState, type CodexTurnStateAccount, type CodexTurnStatePlan } from '@/utils/codexTurnState'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1795,6 +1797,7 @@ const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
 const openaiTransportOptions = computed(() => openAITransportOptions(t))
+const codexTurnStatePlan = ref<CodexTurnStatePlan | 'unchanged'>('unchanged')
 const codexTurnStateMode = ref<'unchanged' | 'on' | 'off'>('unchanged')
 const showCodexTurnState = computed(() => {
   if (targetMode.value !== 'selected' || !allOpenAIOAuth.value || !props.accountIds.length) return false
@@ -2105,6 +2108,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   if (showCodexTurnState.value && codexTurnStateMode.value !== 'unchanged') {
     ensureExtra().codex_turn_state_enabled = codexTurnStateMode.value === 'on'
   }
+  if (showCodexTurnState.value && codexTurnStatePlan.value !== 'unchanged') {
+    ensureExtra().codex_turn_state_plan = codexTurnStatePlan.value
+  }
 
   if (enableOpenAITransport.value && allOpenAIOAuth.value) {
     const extra = ensureExtra()
@@ -2361,7 +2367,7 @@ const handleSubmit = async () => {
   const hasAnyFieldEnabled =
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
-    (showCodexTurnState.value && codexTurnStateMode.value !== 'unchanged') ||
+    (showCodexTurnState.value && (codexTurnStateMode.value !== 'unchanged' || codexTurnStatePlan.value !== 'unchanged')) ||
     (enableOpenAITransport.value && allOpenAIOAuth.value) ||
     enableOpenAIFlattenNamespaces.value ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
@@ -2568,6 +2574,7 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiTransportMode.value = 'codex'
       codexTurnStateMode.value = 'unchanged'
+      codexTurnStatePlan.value = 'unchanged'
       prismPromptToolBridge.value = false
       upstreamBillingAutoProbeMode.value = 'enabled'
       codexCLIOnlyEnabled.value = false

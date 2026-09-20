@@ -7,7 +7,7 @@ vi.mock('@/api/admin/codexTicket', () => ({ getCodexAccountStates: vi.fn() }))
 const api = vi.mocked(getCodexAccountStates)
 let scope: EffectScope
 const base = Date.parse('2026-01-01T00:00:00Z')
-const account = (id: number): CodexAccountState => ({ account_id: id, enabled: true, supported: true, status: 'ready', models: [{ model: `model-${id}`, status: 'ready', captured_at: null, expires_at: new Date(base + 1000).toISOString(), refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 2, last_injected_at: new Date(base - 1000).toISOString(), last_request_id: `req-${id}`, last_outcome: 'header_set', last_reason: null }] })
+const account = (id: number): CodexAccountState => ({ account_id: id, plan: id === 1 ? 'pro' : 'team', target_length: id === 1 ? 292 : 332, enabled: true, supported: true, status: 'ready', models: [{ model: `model-${id}`, status: 'ready', captured_at: null, expires_at: new Date(base + 1000).toISOString(), refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 2, last_injected_at: new Date(base - 1000).toISOString(), last_request_id: `req-${id}`, last_outcome: 'header_set', last_reason: null, verified: true, verified_at: null, actual_model: null, verification_model: null, invalidation_count: 0, last_invalidated_at: null, last_invalidation_reason: null }] })
 const snapshot = (ids = [1]): CodexAccountsSnapshot => ({ desired_revision: '1', applied_revision: '1', global_enabled: true, proxy_state: 'ready', server_time: new Date(base).toISOString(), counter_scope: 'shared_cache_window', accounts: ids.map(account) })
 function setup(values = [1]) {
   const ids = ref(values)
@@ -24,6 +24,19 @@ beforeEach(() => {
 })
 afterEach(() => { scope?.stop(); vi.useRealTimers() })
 describe('visible Codex account state', () => {
+  it('keeps Pro and Team account plans isolated and invalidated above local expiry', async () => {
+    const payload = snapshot([1, 2])
+    payload.accounts[0].status = 'invalidated'
+    api.mockResolvedValueOnce(payload)
+    const state = setup([1, 2])
+    await flushPromises()
+    expect(state.states.value[1]).toMatchObject({ plan: 'pro', target_length: 292 })
+    expect(state.states.value[2]).toMatchObject({ plan: 'team', target_length: 332 })
+    api.mockReturnValue(new Promise(() => {}))
+    await vi.advanceTimersByTimeAsync(1001)
+    expect(state.states.value[1].status).toBe('invalidated')
+    expect(state.states.value[2].status).toBe('expired')
+  })
   it('batches deduplicated pages and never requests an empty page', async () => {
     const state = setup([])
     expect(api).not.toHaveBeenCalled()

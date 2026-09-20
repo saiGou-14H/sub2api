@@ -1,10 +1,10 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { getCodexAccountStates, type CodexAccountState, type CodexAccountStatus } from '@/api/admin/codexTicket'
 
-export const codexAccountStatuses: CodexAccountStatus[] = ['disabled', 'unsupported', 'inactive', 'waiting', 'ready', 'refreshing', 'expired', 'backoff', 'proxy_unavailable', 'unavailable']
+export const codexAccountStatuses: CodexAccountStatus[] = ['disabled', 'unsupported', 'inactive', 'waiting', 'ready', 'refreshing', 'expired', 'invalidated', 'backoff', 'proxy_unavailable', 'unavailable']
 export const safeCodexStatus = (status: string): CodexAccountStatus => codexAccountStatuses.includes(status as CodexAccountStatus) ? status as CodexAccountStatus : 'unavailable'
 export { supportsCodexTurnState as supportsCodexState } from '@/utils/codexTurnState'
-const unavailable = (id: number): CodexAccountState => ({ account_id: id, enabled: false, supported: true, status: 'unavailable', models: [] })
+const unavailable = (id: number): CodexAccountState => ({ account_id: id, plan: 'inherit', target_length: 0, enabled: false, supported: true, status: 'unavailable', models: [] })
 
 /** One cancellable scheduler for the visible page; no account owns a timer or shared fallback. */
 export function useCodexAccountStates(ids: Ref<number[]>, queryKey?: Ref<string>) {

@@ -330,6 +330,35 @@ describe('EditAccountModal', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it.each([undefined, 'inherit', 'pro', 'team'])('loads plan %s and preserves other extra on save', async plan => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { codex_turn_state_plan: plan, custom_metadata: { keep: true } }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]')
+    expect(select.element.value).toBe(plan ?? 'inherit')
+    await select.setValue('team')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ codex_turn_state_plan: 'team', custom_metadata: { keep: true } })
+    expect(account.extra.codex_turn_state_plan).toBe(plan)
+    wrapper.unmount()
+  })
+
+  it('cancels a plan draft without writes and switches account plans independently', async () => {
+    const a = buildOpenAIOAuthParentAccount()
+    a.extra.codex_turn_state_plan = 'pro'
+    const b = { ...buildOpenAIOAuthParentAccount(), id: 999, extra: { codex_turn_state_plan: 'team' } }
+    updateAccountMock.mockReset()
+    const wrapper = mountModal(a)
+    await wrapper.get('[data-testid="codex-turn-state-plan"]').setValue('inherit')
+    await wrapper.setProps({ show: false })
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(a.extra.codex_turn_state_plan).toBe('pro')
+    await wrapper.setProps({ account: b, show: true })
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="codex-turn-state-plan"]').element.value).toBe('team')
+    wrapper.unmount()
+  })
+
   it.each([undefined, null, false, 'true', 1, true])('reads strict Codex account opt-in: %s', async (stored) => {
     const account = buildOpenAIOAuthParentAccount()
     account.extra = { codex_turn_state_enabled: stored, custom_metadata: { keep: true } }

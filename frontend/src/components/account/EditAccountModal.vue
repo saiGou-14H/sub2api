@@ -1740,6 +1740,7 @@
             <span>{{ t('codexTicket.accountEnabled') }}</span>
           </label>
           <p class="input-hint">{{ t('codexTicket.accountHint') }}</p>
+          <CodexTurnStatePlanSelect id="edit-codex-plan" :model-value="codexTurnStatePlan" @update:model-value="codexTurnStatePlan = $event === 'unchanged' ? 'inherit' : $event" />
         </div>
         <div v-if="openaiTransportMode === 'prism'" class="mt-4 space-y-3">
           <div>
@@ -3106,7 +3107,8 @@ import {
   resolveOpenAIWSModeFromExtra
 } from '@/utils/openaiWsMode'
 import { normalizeOpenAITransport, openAITransportOptions, type OpenAITransportMode } from '@/utils/openaiTransport'
-import { supportsCodexTurnState, readCodexTurnStateEnabled } from '@/utils/codexTurnState'
+import CodexTurnStatePlanSelect from './CodexTurnStatePlanSelect.vue'
+import { supportsCodexTurnState, readCodexTurnStateEnabled, readCodexTurnStatePlan, type CodexTurnStatePlan } from '@/utils/codexTurnState'
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
@@ -3487,6 +3489,7 @@ const openaiPassthroughEnabled = ref(false)
 const openaiTransportMode = ref<OpenAITransportMode>('codex')
 const openaiTransportOptions = computed(() => openAITransportOptions(t))
 const codexTurnStateEnabled = ref(false)
+const codexTurnStatePlan = ref<CodexTurnStatePlan>('inherit')
 const showCodexTurnState = computed(() => !!props.account && supportsCodexTurnState(props.account, openaiTransportMode.value))
 // Write-only secrets: existing values are deliberately never loaded into the form.
 const prismAccessToken = ref('')
@@ -3970,6 +3973,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   allowOverages.value = false
 	const extra = newAccount.extra as Record<string, unknown> | undefined
   codexTurnStateEnabled.value = readCodexTurnStateEnabled(extra)
+  codexTurnStatePlan.value = readCodexTurnStatePlan(extra)
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
@@ -5626,6 +5630,7 @@ const handleSubmit = async () => {
         (showCodexTurnState.value || codexTurnStateEnabled.value !== readCodexTurnStateEnabled(currentExtra))) {
         newExtra.codex_turn_state_enabled = codexTurnStateEnabled.value
       }
+      if (showCodexTurnState.value) newExtra.codex_turn_state_plan = codexTurnStatePlan.value
       updatePayload.extra = newExtra
     }
 
