@@ -10,6 +10,7 @@ type CodexTicketReceipt struct {
 	Key        CodexTicketKey `json:"-"`
 	CapturedAt time.Time      `json:"-"`
 	state      string
+	bundleID   string
 }
 
 type CodexTicketInvalidationStore interface {
@@ -44,7 +45,7 @@ func (r *CodexTicketRuntime) InvalidateReceipt(ctx context.Context, receipt Code
 	if ctx.Err() != nil || CodexTicketPolicyScope(a, time.Now()) != policy {
 		return false
 	}
-	matched, err := store.InvalidateCodexTicket(ctx, CodexTicket{Key: receipt.Key, State: receipt.state, CapturedAt: receipt.CapturedAt}, reason)
+	matched, err := store.InvalidateCodexTicket(ctx, CodexTicket{Key: receipt.Key, State: receipt.state, CapturedAt: receipt.CapturedAt, BundleID: receipt.bundleID}, reason)
 	if err != nil || !matched {
 		return false
 	}

@@ -144,6 +144,7 @@ docs/*
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/CHATGPT_WEB_TOOL_CALLING_DESIGN.md
 !docs/PRISM_TRANSPORT.md
+!docs/CODEX_COOKIE_BUNDLE_VALIDATION.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

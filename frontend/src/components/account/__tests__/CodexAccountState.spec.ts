@@ -9,7 +9,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key.split('.'
 const state = (id = 1): CodexAccountState => ({ account_id: id, plan: id === 1 ? 'pro' : 'team', target_length: id === 1 ? 292 : 332, enabled: true, supported: true, status: 'ready', models: [{ model: 'gpt-test', status: 'ready', captured_at: null, expires_at: null, refresh_at: null, next_attempt_at: null, last_error_code: null, injection_count: 3, last_injected_at: null, last_request_id: 'request-one', last_outcome: 'header_set', last_reason: null, verified: true, verified_at: null, actual_model: null, verification_model: null, invalidation_count: 0, last_invalidated_at: null, last_invalidation_reason: null }] })
 const global = { stubs: { BaseDialog: { template: '<div><slot/><slot name="footer"/></div>' }, Icon: true } }
 describe('Codex account UI', () => {
-  it.each(['model_mismatch', 'verification_failed', 'state_312'] as const)('localizes two-phase error %s', code => {
+  it.each(['cookie_missing', 'model_mismatch', 'verification_failed', 'state_312'] as const)('localizes two-phase error %s', code => {
     const record = state()
     record.models[0].last_error_code = code
     const wrapper = mount(Dialog, { props: { account: { id: 1, name: 'A' }, state: record, loading: false, failed: false }, global })

@@ -21,11 +21,16 @@ type CodexTicketKey struct {
 type CodexTicket struct {
 	Key                            CodexTicketKey
 	State                          string
+	BundleID                       string `json:",omitempty"`
 	CapturedAt, ExpiresAt          time.Time
 	Verified                       bool
 	VerifiedAt                     time.Time
 	ActualModel, VerificationModel string
 	TargetLength                   int
+	// Cookies are the secret Set-Cookie name=value pairs captured with State.
+	// They are persisted only in the private Redis ticket payload and never
+	// exposed through status DTOs or logs.
+	Cookies []CodexTicketCookie `json:"cookies,omitempty"`
 }
 type CodexTicketControl struct {
 	Owner            string              `json:"owner"`
@@ -74,6 +79,8 @@ type CodexTicketProbeResult struct {
 	Verified                       bool
 	VerifiedAt                     time.Time
 	ActualModel, VerificationModel string
+	Cookies                        []CodexTicketCookie
+	CapturedAt                     time.Time
 }
 type CodexTicketProbe func(context.Context, int64, string, string) (CodexTicketProbeResult, error)
 type CodexTicketRuntimeStatus struct {
@@ -106,6 +113,14 @@ func ValidateCodexTicket(t CodexTicket, k CodexTicketKey, c CodexTicketSettings,
 	for _, ch := range t.State {
 		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '=') {
 			return errors.New("ticket format mismatch")
+		}
+	}
+	if CodexTicketCookiesRequired(c) || len(t.Cookies) > 0 {
+		if !CodexTicketCookiesValid(t.Cookies, now) {
+			return errors.New("ticket cookies missing or invalid")
+		}
+		if t.ExpiresAt.After(CodexTicketCookieExpiry(t.Cookies)) || t.ExpiresAt.Sub(t.CapturedAt) > codexTicketBundleTTL {
+			return errors.New("ticket cookie lifetime invalid")
 		}
 	}
 	if t.CapturedAt.IsZero() || t.CapturedAt.After(now.Add(5*time.Second)) || !t.ExpiresAt.After(now) || !t.ExpiresAt.After(t.CapturedAt) || t.ExpiresAt.Sub(t.CapturedAt) > time.Duration(c.TTLSeconds)*time.Second {

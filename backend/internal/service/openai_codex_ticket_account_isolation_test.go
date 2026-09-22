@@ -50,6 +50,12 @@ func TestCodexTicketHTTPAccountIsolationAcrossRefreshAndFailover(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
 			runtime, one, base, key := ticketRuntimeFixture()
+			cfg := base.v.Control.Settings
+			cfg.CookiePinMode = CodexTicketCookiePinOptional
+			cfg.TTLSeconds = 3600
+			cfg.RefreshBeforeSeconds = 600
+			base.v.Control.Settings = cfg
+			runtime.settings.(*ticketTestSettings).cfg = cfg
 			accountA := *one.a
 			accountB := accountA
 			accountB.ID = 2

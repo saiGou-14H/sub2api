@@ -181,7 +181,7 @@ func TestCodexTicketInvalidationLateCaptureAndFullScope(t *testing.T) {
 	newer := a
 	newer.CapturedAt = a.CapturedAt.Add(time.Second)
 	newer.VerifiedAt = newer.CapturedAt
-	newer.ExpiresAt = newer.CapturedAt.Add(time.Hour)
+	newer.ExpiresAt = newer.CapturedAt.Add(a.ExpiresAt.Sub(a.CapturedAt))
 	ok, err := c.CommitIfCurrent(ctx, "one", newer)
 	require.NoError(t, err)
 	require.True(t, ok)

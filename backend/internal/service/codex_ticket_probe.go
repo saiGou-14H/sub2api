@@ -62,29 +62,38 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	if err != nil || cfg.TargetLength != task.Settings.TargetLength {
 		return fail("verification_failed")
 	}
-	capture, err := s.codexTicketProbeStage(ctx, account, model, proxyURL, "")
+	capture, err := s.codexTicketProbeStage(ctx, account, model, proxyURL, "", nil)
 	capture.PolicyScope = policy
 	if err != nil {
 		return capture, err
 	}
 	if validCodexProbeState(capture.State, 312) {
 		capture.State = ""
+		capture.Cookies = nil
 		capture.Completed = false
 		capture.ErrorCode = "state_312"
 		return capture, errors.New("state_312")
 	}
 	if !validCodexProbeState(capture.State, cfg.TargetLength) {
 		capture.State = ""
+		capture.Cookies = nil
 		capture.Completed = false
 		capture.ErrorCode = "verification_failed"
 		return capture, errors.New("verification_failed")
+	}
+	if CodexTicketCookiesRequired(cfg) && !CodexTicketCookiesValid(capture.Cookies, time.Now()) {
+		capture.State = ""
+		capture.Cookies = nil
+		capture.Completed = false
+		capture.ErrorCode = "cookie_missing"
+		return capture, errors.New("cookie_missing")
 	}
 	candidate := capture.State
 	fresh, businessRoute, err := task.VerificationGuard(ctx, true)
 	if err != nil || !CodexTicketAccountSupported(fresh) || fresh.ID != accountID || !fresh.CodexTurnStateEnabled() || CodexTicketIdentityScope(fresh) != task.Key.IdentityScope || CodexTicketPolicyScope(fresh, time.Now()) != policy || businessRoute != route {
 		return fail("verification_failed")
 	}
-	verification, err := s.codexTicketProbeStage(ctx, fresh, model, businessRoute, candidate)
+	verification, err := s.codexTicketProbeStage(ctx, fresh, model, businessRoute, candidate, capture.Cookies)
 	verification.IdentityScope = task.Key.IdentityScope
 	verification.PolicyScope = policy
 	if err != nil {
@@ -92,6 +101,7 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	}
 	if validCodexProbeState(verification.State, 312) {
 		verification.State = ""
+		verification.Cookies = nil
 		verification.Completed = false
 		verification.ErrorCode = "state_312"
 		return verification, errors.New("state_312")
@@ -103,6 +113,11 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	capture.Verified = true
 	capture.VerifiedAt = time.Now()
 	capture.VerificationModel = verification.ActualModel
+	// Verification proves the original bundle on the business route. Cookies
+	// returned by verification belong to that response, never to candidate.
+	if CodexTicketCookiesRequired(cfg) && !CodexTicketCookiesValid(capture.Cookies, time.Now()) {
+		return fail("cookie_missing")
+	}
 	capture.State = candidate
 	return capture, nil
 }
@@ -119,9 +134,10 @@ func validCodexProbeState(state string, length int) bool {
 	return true
 }
 
-func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, account *Account, model, proxyURL, injectedState string) (result CodexTicketProbeResult, err error) {
+func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, account *Account, model, proxyURL, injectedState string, injectedCookies []CodexTicketCookie) (result CodexTicketProbeResult, err error) {
 	fail := func(code string) (CodexTicketProbeResult, error) {
 		result.State = ""
+		result.Cookies = nil
 		result.Completed = false
 		result.ErrorCode = codexProbeRuntimeErrorCode(code)
 		return result, errors.New(code)
@@ -183,6 +199,12 @@ func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, accoun
 	if injectedState != "" {
 		req.Header.Set("X-Codex-Turn-State", injectedState)
 	}
+	if len(injectedCookies) > 0 && !CodexTicketCookiesValid(injectedCookies, time.Now()) {
+		return fail("cookie_missing")
+	}
+	if cookieHeader := CodexTicketCookieHeader(injectedCookies, time.Now()); cookieHeader != "" {
+		req.Header.Set("Cookie", cookieHeader)
+	}
 	resp, e := s.httpUpstream.Do(req, proxyURL, account.ID, 4)
 	if e != nil {
 		return fail("transport_error")
@@ -199,6 +221,9 @@ func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, accoun
 	if resp.StatusCode != http.StatusOK {
 		return fail("http_status")
 	}
+	// Anchor lifetime at receipt of the headers, before consuming the SSE body.
+	result.CapturedAt = time.Now()
+	result.Cookies = CodexTicketCookiesFromResponse(resp, req.URL, result.CapturedAt)
 	if code := readCodexProbeCompletion(resp.Body, model); code != "" {
 		return fail(code)
 	}
@@ -219,7 +244,7 @@ func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, accoun
 
 func codexProbeRuntimeErrorCode(code string) string {
 	switch code {
-	case "model_mismatch", "verification_failed", "state_312":
+	case "model_mismatch", "verification_failed", "state_312", "cookie_missing":
 		return code
 	case "transport_unsupported":
 		return "transport_unsupported"

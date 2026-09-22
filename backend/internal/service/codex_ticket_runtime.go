@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -130,9 +131,20 @@ func (r *CodexTicketRuntime) ApplyWithReceipt(ctx context.Context, a *Account, m
 	if CodexTicketPolicyScope(fresh, now) != policy {
 		reason = "proxy_unavailable"
 	} else if c.ProxyState == "active" && (c.ProxyExpiresAtMS == 0 || c.ProxyExpiresAtMS > now.UnixMilli()) && v.Ticket != nil && ValidateCodexTicket(*v.Ticket, k, cfg, now) == nil {
+		// Replace all caller cookies with this validated account/model bundle.
+		// Never combine client affinity cookies with managed credentials. Include
+		// noncanonical map keys so there is exactly one state and cookie header.
+		for name := range h {
+			if strings.EqualFold(name, "Cookie") || strings.EqualFold(name, "X-Codex-Turn-State") {
+				delete(h, name)
+			}
+		}
 		h.Set("X-Codex-Turn-State", v.Ticket.State)
+		if cookieHeader := CodexTicketCookieHeader(v.Ticket.Cookies, now); cookieHeader != "" {
+			h.Set("Cookie", cookieHeader)
+		}
 		outcome, reason = "header_set", "ticket_ready"
-		return &CodexTicketReceipt{Key: k, CapturedAt: v.Ticket.CapturedAt, state: v.Ticket.State}, nil
+		return &CodexTicketReceipt{Key: k, CapturedAt: v.Ticket.CapturedAt, state: v.Ticket.State, bundleID: v.Ticket.BundleID}, nil
 	}
 	if c.ProxyState != "active" || (c.ProxyExpiresAtMS > 0 && c.ProxyExpiresAtMS <= now.UnixMilli()) {
 		reason = "proxy_unavailable"

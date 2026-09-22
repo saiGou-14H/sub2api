@@ -40,12 +40,17 @@ func TestCodexTicketCollectorRefreshExpiryAndRestrictions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r, a, base, _ := ticketRuntimeFixture()
 			cfg := base.v.Control.Settings
+			cfg.CookiePinMode = CodexTicketCookiePinOptional
+			cfg.TTLSeconds = 3600
+			cfg.RefreshBeforeSeconds = 600
+			r.settings.(*ticketTestSettings).cfg = cfg
 			cfg.Models = cfg.Models[:1]
 			cfg.MaxConcurrency = 1
 			base.v.Control.Settings = cfg
 			if tc.missing {
 				base.v.Ticket = nil
 			} else {
+				base.v.Ticket.Cookies = nil
 				base.v.Ticket.ExpiresAt = base.v.ServerTime.Add(tc.expiry)
 			}
 			base.budget = !tc.budgetDenied

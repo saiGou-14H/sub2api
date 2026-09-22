@@ -53,7 +53,7 @@ const payload = computed<CodexTicketConfig | null>(() => draft.value ? { ...draf
 const dirty = computed(() => {
   if (!saved.value || !payload.value) return false
   const { revision: _revision, ...config } = saved.value.settings
-  return JSON.stringify(config) !== JSON.stringify(payload.value)
+  return JSON.stringify({ ...config, cookie_pin_mode: config.cookie_pin_mode ?? 'optional' }) !== JSON.stringify(payload.value)
 })
 const integerIn = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max
 const errors = computed(() => {
@@ -64,6 +64,7 @@ const errors = computed(() => {
     target_length: !integerIn(c.target_length, 64, 4096),
     ttl_seconds: !integerIn(c.ttl_seconds, 60, 3600),
     refresh_before_seconds: !integerIn(c.refresh_before_seconds, 0, c.ttl_seconds - 1),
+    cookie_pin_mode: c.cookie_pin_mode !== 'required' && c.cookie_pin_mode !== 'optional',
     max_concurrency: !integerIn(c.max_concurrency, 1, 8),
     max_probes_per_minute: !integerIn(c.max_probes_per_minute, 1, 60),
     proxy: c.enabled && (!proxiesFresh.value || !selectedAvailable.value)
@@ -79,7 +80,7 @@ const numericFields = [
   { key: 'max_probes_per_minute', min: 1, max: 60 }
 ] as const
 const runtimeErrorCodes = [
-  'model_mismatch', 'verification_failed', 'state_312',
+  'model_mismatch', 'verification_failed', 'state_312', 'cookie_missing',
   'transport_unsupported', 'identity_unresolved', 'token_unavailable', 'stream_failed',
   'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable',
   'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost',
@@ -104,7 +105,7 @@ function adopt(value: TicketSettingsSnapshot) {
   const { revision: nextRevision, ...config } = value.settings
   saved.value = value
   revision.value = nextRevision
-  draft.value = { ...config, models: [...config.models] }
+  draft.value = { ...config, cookie_pin_mode: config.cookie_pin_mode ?? 'optional', models: [...config.models] }
   modelsText.value = config.models.join('\n')
   runtime.value = value.runtime
   runtimeError.value = value.runtime_error_reason ? t('codexTicket.runtimeUnknown') : ''
@@ -314,6 +315,15 @@ onUnmounted(() => { alive = false; stopReads(); cancelTest(); writeAbort?.abort(
               <option value="passthrough">{{ t('codexTicket.passthrough') }}</option>
               <option value="reject">{{ t('codexTicket.reject') }}</option>
             </select>
+          </label>
+          <label class="block sm:col-span-2">
+            <span class="input-label">{{ t('codexTicket.cookiePinMode') }}</span>
+            <select v-model="draft.cookie_pin_mode" data-testid="ticket-cookie-pin-mode" class="input">
+              <option value="required">{{ t('codexTicket.cookiePinRequired') }}</option>
+              <option value="optional">{{ t('codexTicket.cookiePinOptional') }}</option>
+            </select>
+            <span v-if="errors.cookie_pin_mode" role="alert" class="text-sm text-red-600">{{ t('codexTicket.validation.cookie_pin_mode') }}</span>
+            <p class="input-hint">{{ t('codexTicket.cookiePinHint') }}</p>
           </label>
           <p class="input-hint sm:col-span-2">{{ t('codexTicket.advancedHint') }}</p>
         </div>

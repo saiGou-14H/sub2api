@@ -9,6 +9,9 @@ export interface CodexTicketConfig {
   target_length: number
   ttl_seconds: number
   refresh_before_seconds: number
+  // Legacy snapshots/clients may omit this; omission preserves optional mode.
+  // Fresh backend defaults explicitly use required.
+  cookie_pin_mode?: 'required' | 'optional'
   missing_ticket_policy: 'passthrough' | 'reject'
   max_concurrency: number
   max_probes_per_minute: number

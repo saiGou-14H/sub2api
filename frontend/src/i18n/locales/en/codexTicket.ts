@@ -49,7 +49,11 @@ export default {
   missingPolicy: 'When state is missing',
   passthrough: 'Continue the original request',
   reject: 'Reject applicable model requests',
-  advancedHint: 'Length is only a filter. Cache TTL does not guarantee upstream validity. All advanced values are saved even when this section is collapsed.',
+  cookiePinMode: 'Cookie pinning',
+  cookiePinRequired: 'Required (new configuration default)',
+  cookiePinOptional: 'Optional (allow state without cookies)',
+  cookiePinHint: 'Both cflb and oailb must be captured from the same upstream response as X-Codex-Turn-State and pass scope and lifetime checks. Bundles are isolated per account and model and verified by a completed response from the target model; the verification response never replaces either captured cookie. Required mode rejects candidates without a complete valid pair. Optional mode allows state alone; malformed or partial pairs are never injected. Legacy settings without this field retain optional mode.',
+  advancedHint: 'New configuration defaults: required mode, TTL 240 seconds, refresh 210 seconds before expiry (normally after 30 seconds). Cookie pair lifetime is capped by the configured TTL, 240 seconds, and each cookie expiry. Session cookies without Expires or Max-Age receive a local 240-second cap; this does not establish their upstream lifetime. These timings are recommended when switching to required; changing mode preserves saved timings. Length is only a filter; cache TTL does not guarantee upstream validity. All advanced values are saved even when this section is collapsed.',
   invalid: 'Correct the highlighted fields before saving (including advanced settings).',
   save: 'Save these settings',
   saving: 'Saving…',
@@ -69,6 +73,7 @@ export default {
   runtimeErrors: {
     model_mismatch: 'The response model did not match the requested model.',
     verification_failed: 'Verification through the account business route failed.',
+    cookie_missing: 'Valid pinning cookies from the state response are missing or expired.',
     state_312: 'The experimental 312-byte state signal was observed.',
     transport_unsupported: 'The plugin transport does not support collection with forced HTTP/1.',
     identity_unresolved: 'The account identity could not be resolved for collection.',
@@ -109,6 +114,7 @@ export default {
     proxy_unavailable: 'Harvest proxy unavailable'
   },
   validation: {
+    cookie_pin_mode: 'Select required or optional cookie pinning.',
     models: 'Enter 1–16 model names, each no longer than 128 characters.',
     target_length: 'Enter an integer from 64 to 4096.',
     ttl_seconds: 'Enter an integer from 60 to 3600 seconds.',

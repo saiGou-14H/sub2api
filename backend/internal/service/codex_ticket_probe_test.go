@@ -65,6 +65,8 @@ func codexProbeSuccessResponse(model, state string) *http.Response {
 	if state != "" {
 		h.Set("X-Codex-Turn-State", state)
 	}
+	h.Add("Set-Cookie", "cflb=fixture-cflb; Domain=.chatgpt.com; Path=/; Max-Age=240; HttpOnly; Secure")
+	h.Add("Set-Cookie", "oailb=fixture-oailb; Domain=.chatgpt.com; Path=/; Max-Age=240; HttpOnly; Secure")
 	return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(strings.NewReader(codexProbeCompleteModel(model)))}
 }
 
@@ -104,8 +106,10 @@ func TestCodexProbeRequestIsolation(t *testing.T) {
 		require.NotEmpty(t, r.Header.Get("X-Codex-Window-ID"))
 		if capture {
 			require.Empty(t, r.Header.Get("X-Codex-Turn-State"))
+			require.Empty(t, r.Header.Get("Cookie"))
 		} else {
 			require.Equal(t, codexProbeValidCandidate(), r.Header.Get("X-Codex-Turn-State"))
+			require.Equal(t, "cflb=fixture-cflb; oailb=fixture-oailb", r.Header.Get("Cookie"))
 		}
 		session := r.Header.Get("session_id")
 		require.NotEmpty(t, session)

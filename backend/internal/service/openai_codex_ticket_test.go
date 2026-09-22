@@ -40,6 +40,8 @@ func TestCodexTicketHTTPBuildersUseFinalModelAndOptIn(t *testing.T) {
 			request, err, _ := build("/v1/responses", key.Model)
 			require.NoError(t, err)
 			require.Equal(t, store.v.Ticket.State, request.Header.Get("X-Codex-Turn-State"))
+			require.Equal(t, "cflb=fixture-cflb; oailb=fixture-oailb", request.Header.Get("Cookie"))
+			require.True(t, HTTPUpstreamRedirectsDisabled(request.Context()))
 			require.Equal(t, "Bearer test-token", request.Header.Get("Authorization"))
 			require.Equal(t, chatgptCodexURL, request.URL.String())
 			require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(request.Context()))

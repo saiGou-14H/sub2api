@@ -32,8 +32,15 @@ func (s *OpenAIGatewayService) applyCodexTicket(ctx context.Context, c *gin.Cont
 		s.codexTicketRuntime.ObserveCompactSkip(ctx, account, model)
 		return nil
 	}
+	if !codexTicketCookieTarget(req.URL) {
+		return nil
+	}
 	receipt, err := s.codexTicketRuntime.ApplyWithReceipt(ctx, account, model, req.Header)
 	if err == nil {
+		if receipt != nil {
+			// Injected credentials must not follow a redirect to another URL.
+			*req = *req.WithContext(WithHTTPUpstreamRedirectsDisabled(req.Context()))
+		}
 		attachCodexTicketReceipt(req, receipt)
 	}
 	if err != nil && c != nil && c.Writer != nil {

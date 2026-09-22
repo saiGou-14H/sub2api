@@ -154,7 +154,15 @@ func decodeCodexTicketPut(body io.Reader) (uint64, service.CodexTicketSettings, 
 		return 0, cfg, invalid
 	}
 	required := []string{"schema_version", "enabled", "harvest_proxy_id", "models", "target_length", "ttl_seconds", "refresh_before_seconds", "missing_ticket_policy", "max_concurrency", "max_probes_per_minute"}
-	if len(fields) != len(required) {
+	optionalCount := 0
+	if raw, ok := fields["cookie_pin_mode"]; ok {
+		var mode string
+		if err := json.Unmarshal(raw, &mode); err != nil || (mode != string(service.CodexTicketCookiePinRequired) && mode != string(service.CodexTicketCookiePinOptional)) {
+			return 0, cfg, invalid
+		}
+		optionalCount++
+	}
+	if len(fields) != len(required)+optionalCount {
 		return 0, cfg, invalid
 	}
 	for _, key := range required {

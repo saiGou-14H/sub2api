@@ -69,7 +69,8 @@ func (c *codexTicketCache) InvalidateCodexTicket(ctx context.Context, t service.
 		Key        service.CodexTicketKey
 		State      string
 		CapturedAt time.Time
-	}{Key: t.Key, State: t.State, CapturedAt: t.CapturedAt})
+		BundleID   string
+	}{Key: t.Key, State: t.State, CapturedAt: t.CapturedAt, BundleID: t.BundleID})
 	if err != nil {
 		return false, err
 	}
@@ -82,7 +83,7 @@ if c.settings.enabled~=true or tonumber(c.settings.revision)~=expected.Key.Revis
 local configured=false;for _,model in ipairs(c.settings.models or {}) do if model==expected.Key.Model then configured=true end end;if not configured then return 0 end
 local rawTicket=redis.call('GET',KEYS[3]);if not rawTicket then return 0 end
 local payload=cjson.decode(rawTicket);local key=payload.Key;local wanted=expected.Key
-if not key or key.Revision~=wanted.Revision or key.AccountID~=wanted.AccountID or key.IdentityScope~=wanted.IdentityScope or key.Model~=wanted.Model or key.PolicyScope~=wanted.PolicyScope or payload.State~=expected.State or payload.CapturedAt~=expected.CapturedAt then return 0 end
+if not key or key.Revision~=wanted.Revision or key.AccountID~=wanted.AccountID or key.IdentityScope~=wanted.IdentityScope or key.Model~=wanted.Model or key.PolicyScope~=wanted.PolicyScope or payload.State~=expected.State or payload.CapturedAt~=expected.CapturedAt or (payload.BundleID or '')~=expected.BundleID then return 0 end
 redis.call('HINCRBY',KEYS[4],'invalidation_count',1)
 redis.call('HSET',KEYS[4],'last_invalidated_at',tostring(now),'last_invalidation_reason',ARGV[2])
 if redis.call('PTTL',KEYS[4])<0 then redis.call('PEXPIRE',KEYS[4],ARGV[3]) end

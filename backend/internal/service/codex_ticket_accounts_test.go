@@ -195,7 +195,7 @@ func TestCodexTicketAccountExpiryCooldownAndUnavailable(t *testing.T) {
 	now := s.v.ServerTime
 	row := s.rows[k]
 	row.Ticket = nil
-	row.Metadata = &CodexTicketMetadata{CapturedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Second), VerifiedAt: now.Add(-time.Hour), ActualModel: k.Model, VerificationModel: k.Model}
+	row.Metadata = &CodexTicketMetadata{CapturedAt: now.Add(-240 * time.Second), ExpiresAt: now.Add(-time.Second), VerifiedAt: now.Add(-240 * time.Second), ActualModel: k.Model, VerificationModel: k.Model}
 	s.rows[k] = row
 	out, err := r.AccountStatuses(ctx, []int64{1, 2})
 	require.NoError(t, err)

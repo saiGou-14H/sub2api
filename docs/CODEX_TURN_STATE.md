@@ -25,11 +25,13 @@
 
 ## 配置与缓存
 
-默认目标长度292、TTL3600秒、提前刷新600秒、缺票 `passthrough`、2个worker、全功能12次/分钟探测预算。模型1-16个、目标长度64-4096、TTL60-3600秒、提前刷新必须小于TTL、worker1-8、预算1-60次/分钟。
+新配置默认目标长度292、TTL240秒、提前刷新210秒（即通常采集约30秒后进入刷新窗口）、Cookie模式 `required`、缺票 `passthrough`、2个worker、全功能12次/分钟探测预算。模型1-16个、目标长度64-4096、TTL60-3600秒、提前刷新必须小于TTL、worker1-8、预算1-60次/分钟。
+
+`cookie_pin_mode` 可选 `required` / `optional`。新配置显式为 `required`；旧数据库配置或旧API请求缺少该字段时按 `optional` 解释，保留原来的TTL和刷新设置。界面切换模式不会自动覆盖自定义时间值，建议短期组合使用240/210。`required` 缺少完整、有效的Cookie对时不产生可用票据；`optional` 允许原有state-only行为，存在完整有效Cookie对时仍按组合管理，残缺或无效Cookie不参与注入。
 
 - 配置保存到 settings 专用 JSON 行，revision 为十进制字符串，PUT 使用 `expected_revision` 乐观锁。
 - 配置与所选代理更新遵循同一事务锁序；代理身份、状态、有效期变更提升配置版本，改名不提升。被选择的代理即使全局关闭也不能直接删除，先取消选择或换选。
-- 原始 state 只存在内部内存/独立 Redis TTL 缓存，不进入账号 Extra、CRUD DTO、导出、状态接口或普通日志。
+- 原始 state 与 `cflb`、`oailb` 值只存在内部内存/独立 Redis TTL 缓存，不进入账号 Extra、CRUD DTO、导出、状态接口或普通日志；脱敏metadata不包含Cookie或组合ID。
 - 票据按配置版本、账号ID、稳定上游身份摘要、最终模型及账号策略/业务出口作用域隔离；普通 token 刷新不清除稳定身份，相同账号记录更换身份使旧票不匹配。
 - Redis owner 租约15秒、5秒续租；数据库控制快照每2秒刷新、最多新鲜6秒。查库失败不能给旧快照续期，旧任务不能跨版本写回。
 - 队列32，账号分页100，固定worker，单任务最多30秒；Redis共享预算不因换模型、配置版本或leader重启而重新计算当前分钟次数。
@@ -67,9 +69,23 @@
 
 作废后由原有有界采集器重新安排，继续遵守预算和冷却。312只是实验异常提示，不是经过验证的上游撤销协议；返回模型匹配也不能证明模型能力或并发已经恢复。
 
+## 同响应票据与Cookie组合
+
+参考 [446599/ccodex-rotate@76490e235c](https://github.com/446599/ccodex-rotate/tree/76490e235c82be1d54337c916c96026353490cac) 的短期组合思路。240秒是本项目采用的保守实验缓存上限，阅读参考源码和本地测试不构成对上游有效期或cookie绑定规则的实测证明。
+
+1. 使用已选采集代理发起一次请求，从同一次响应头读取 `X-Codex-Turn-State` 与 `Set-Cookie` 中的 `cflb`、`oailb`；忽略所有其他Cookie。
+2. 检查名称、值、域、路径和有效期：仅允许 `chatgpt.com` 的HTTPS Codex Responses端点；无Domain时绑定捕获主机，无Path时采用请求目录；路径按完整目录边界匹配。同名重复、删除、已过期、非法期限或残缺Cookie对不可用于组合。
+3. `Max-Age` 优先于 `Expires`；没有两者的会话Cookie只获得本地240秒上限。组合截止时间取配置TTL、捕获后240秒、两个Cookie截止时间中的最早值。收到响应头时记录捕获时间，消费SSE及复验用时计入剩余寿命，提交Redis不会重新起算TTL。时间在提交时投影到Redis时钟域，跨实例读取使用同一时间基准。
+4. 候选响应必须HTTP200、完整 `response.completed` 且 `response.status=completed`，实际返回模型必须精确匹配目标模型。再将同一组合用于同账号原业务出口复验，两次请求仍遵守原有预算和30秒期限。复验响应里的新state或Cookie不会替换候选的任一成员。
+5. 通过后整体写入原账号ID、稳定身份、模型、配置版本、业务策略/出口作用域的独立Redis记录。每次新组合有内部 `BundleID`，整包替换；旧请求的迟到响应只能作废自己使用的组合，不能删除已轮换的新组合，即使state字符串相同。
+6. 后续请求取出有效组合，再同时设置 `X-Codex-Turn-State` 和 `Cookie`。注入包覆盖客户端Cookie，不保留或拼接客户端亲和信息；凭据请求不跟随重定向。任何一项过期都停止组合注入。
+7. 实际业务响应继续按完整完成状态、实际返回模型及312异常信号判断；模型不匹配或312信号按请求回执精确失效，不自动重放业务请求。返回模型字段是协议层证据，不能验证模型能力或订阅权益。
+
+短Cookie期限可能早于配置的提前刷新点，此时允许立即安排刷新，继续受共享预算与冷却限制；不会因TTL缩短而跳过原来的提前刷新条件。刷新失败期间仅可使用仍有效的旧组合，过期后按缺票策略处理。`cookie_missing` 是固定错误分类，不回显Cookie内容。
+
 ## 转发规则
 
-在现有 turn-state echo guard 之后决策：不适用/关闭/模型不匹配时不干预；有合法缓存时只覆盖本次出站状态头；缺票 `passthrough` 时保留原行为，`reject` 时返回本功能503且不惩罚账号。换号后重新按新账号、身份和最终模型决策。
+在现有 turn-state echo guard 之后决策：不适用/关闭/模型不匹配时不干预；有合法组合时同时覆盖本次出站状态头与Cookie头（兼容模式的state-only票不携带Cookie）；缺票 `passthrough` 时保留原行为，`reject` 时返回本功能503且不惩罚账号。换号后重新按新账号、身份和最终模型决策。
 
 旧 `/responses/compact` 及普通 Responses body 内带 `input[].type=compaction_trigger` 的V2远程压缩都跳过实验注入和缺票门禁，保留原echo guard；下一轮正常生成继续匹配策略。专用计数端点不参与。普通转发按账号映射后的最终模型决策；passthrough遵守main不重写普通账号映射的规则，按实际保留的出站模型决策。
 
@@ -106,4 +122,4 @@ GET/PUT 返回 `settings`、脱敏 `selected_proxy`、`runtime`、`runtime_error
 
 ## 开发验证
 
-本轮只进行本地模拟、临时数据库/缓存、构建和回归。任何真实账号采集或生产发布都需要另行明确执行；程序测试通过不能证明实验策略有效。完整测试命令、结果、提交及已知限制记录在 [CODEX_ACCOUNT_STATE_VALIDATION.md](CODEX_ACCOUNT_STATE_VALIDATION.md)；初版历史验证见 [CODEX_TURN_STATE_VALIDATION.md](CODEX_TURN_STATE_VALIDATION.md)。
+本轮只进行本地模拟、临时数据库/缓存、构建和回归。任何真实账号采集或生产发布都需要另行明确执行；程序测试通过不能证明实验策略有效。同响应Cookie组合本轮验证见 [CODEX_COOKIE_BUNDLE_VALIDATION.md](CODEX_COOKIE_BUNDLE_VALIDATION.md)。原账号状态功能测试命令、结果、提交及已知限制记录在 [CODEX_ACCOUNT_STATE_VALIDATION.md](CODEX_ACCOUNT_STATE_VALIDATION.md)；初版历史验证见 [CODEX_TURN_STATE_VALIDATION.md](CODEX_TURN_STATE_VALIDATION.md)。

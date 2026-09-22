@@ -15,7 +15,7 @@ var (
 )
 
 func DefaultCodexTicketSettings() CodexTicketSettings {
-	return CodexTicketSettings{SchemaVersion: 1, Models: []string{"gpt-6-astra", "gpt-5.6-sol"}, TargetLength: 292, TTLSeconds: 3600, RefreshBeforeSeconds: 600, MissingPolicy: CodexTicketPassthrough, MaxConcurrency: 2, MaxProbesPerMinute: 12}
+	return CodexTicketSettings{SchemaVersion: 1, Models: []string{"gpt-6-astra", "gpt-5.6-sol"}, TargetLength: 292, TTLSeconds: 240, RefreshBeforeSeconds: 210, CookiePinMode: CodexTicketCookiePinRequired, MissingPolicy: CodexTicketPassthrough, MaxConcurrency: 2, MaxProbesPerMinute: 12}
 }
 
 func NormalizeCodexTicketSettings(in CodexTicketSettings) (CodexTicketSettings, error) {
@@ -37,6 +37,14 @@ func NormalizeCodexTicketSettings(in CodexTicketSettings) (CodexTicketSettings, 
 		}
 	}
 	if out.SchemaVersion != 1 || out.Revision > CodexTicketMaxRevision || len(out.Models) == 0 || len(out.Models) > 16 {
+		return out, ErrCodexTicketInvalidConfig
+	}
+	if out.CookiePinMode == "" {
+		// Existing saved settings and older API clients keep state-only support.
+		// Newly created settings explicitly default to required cookie bundles.
+		out.CookiePinMode = CodexTicketCookiePinOptional
+	}
+	if out.CookiePinMode != CodexTicketCookiePinRequired && out.CookiePinMode != CodexTicketCookiePinOptional {
 		return out, ErrCodexTicketInvalidConfig
 	}
 	if out.Enabled && out.HarvestProxyID == nil {

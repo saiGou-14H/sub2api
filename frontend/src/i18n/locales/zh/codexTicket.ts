@@ -49,7 +49,11 @@ export default {
   missingPolicy: '无状态时的策略',
   passthrough: '继续原业务请求',
   reject: '拒绝适用模型的请求',
-  advancedHint: '字符长度只是筛选条件，缓存时间不代表上游有效期。收起高级设置仍会完整保存其中的值。',
+  cookiePinMode: 'Cookie 绑定策略',
+  cookiePinRequired: '必需（新配置默认）',
+  cookiePinOptional: '可选（允许无 Cookie 的状态）',
+  cookiePinHint: '必须从 X-Codex-Turn-State 所在的同一上游响应中同时采集 cflb 与 oailb，并校验作用域和有效期。组合按账号和模型独立保存，以目标模型完整响应复验；复验响应不会替换已采集的任一 Cookie。必需模式拒绝缺少完整有效 Cookie 对的候选；可选模式允许仅使用状态，格式无效或不完整的 Cookie 对均不注入。缺少此字段的旧配置保留可选模式。',
+  advancedHint: '新配置默认必需模式、TTL 240 秒、过期前 210 秒刷新（通常为采集 30 秒后）。Cookie 对的有效期取配置 TTL、240 秒和各 Cookie 有效期中的最短值。未设置 Expires 或 Max-Age 的会话 Cookie 使用本地 240 秒上限，不代表其上游有效期。切换到必需模式时建议使用上述时间，但切换不会覆盖已保存的时间设置。字符长度只是筛选条件，缓存时间不代表上游有效期。收起高级设置仍会完整保存其中的值。',
   invalid: '请修正标出的字段后保存（包括高级设置）。',
   save: '保存本项设置',
   saving: '正在保存…',
@@ -69,6 +73,7 @@ export default {
   runtimeErrors: {
     model_mismatch: '响应模型与请求模型不匹配。',
     verification_failed: '账号业务出口复验失败。',
+    cookie_missing: '状态响应中缺少有效的绑定 Cookie，或 Cookie 已过期。',
     state_312: '检测到 312 字节状态实验信号。',
     transport_unsupported: '插件传输不支持强制 HTTP/1 采集。',
     identity_unresolved: '无法确定账号身份，暂不能采集。',
@@ -108,6 +113,7 @@ export default {
     ready: '已有可用状态', degraded: '部分状态缺失或采集失败', proxy_unavailable: '采集代理不可用'
   },
   validation: {
+    cookie_pin_mode: '请选择必需或可选的 Cookie 绑定策略。',
     models: '请输入 1–16 个模型名，每个名称不超过 128 个字符。',
     target_length: '请输入 64–4096 的整数。',
     ttl_seconds: '请输入 60–3600 秒的整数。',

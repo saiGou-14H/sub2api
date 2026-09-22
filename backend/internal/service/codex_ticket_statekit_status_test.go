@@ -82,6 +82,9 @@ func statekitStatusFixture(t *testing.T) (*CodexTicketRuntime, *statekitStatusAc
 	t.Helper()
 	now := time.Now().UTC()
 	cfg := DefaultCodexTicketSettings()
+	cfg.CookiePinMode = CodexTicketCookiePinOptional
+	cfg.TTLSeconds = 3600
+	cfg.RefreshBeforeSeconds = 600
 	cfg.Enabled = true
 	cfg.Revision = 7
 	cfg.Models = []string{"gpt-statekit"}

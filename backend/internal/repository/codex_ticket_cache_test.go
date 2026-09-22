@@ -31,7 +31,9 @@ func ticketCacheFixture(t *testing.T) (*codexTicketCache, *miniredis.Miniredis, 
 	cfg.Enabled = true
 	cfg.Revision = 1
 	control := service.CodexTicketControl{Owner: "one", Settings: cfg, ProxyState: "active", ValidUntilMS: now.Add(6 * time.Second).UnixMilli()}
-	ticket := service.CodexTicket{Key: service.CodexTicketKey{Revision: 1, AccountID: 3, IdentityScope: "scope", Model: cfg.Models[0], PolicyScope: "policy"}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: true, VerifiedAt: now, ActualModel: cfg.Models[0], VerificationModel: cfg.Models[0], TargetLength: cfg.TargetLength}
+	cookieExpiry := now.Add(time.Hour)
+	cookies := []service.CodexTicketCookie{{Name: "cflb", Value: "fixture-cflb", Domain: ".chatgpt.com", Path: "/", ExpiresAt: cookieExpiry}, {Name: "oailb", Value: "fixture-oailb", Domain: ".chatgpt.com", Path: "/", ExpiresAt: cookieExpiry}}
+	ticket := service.CodexTicket{Key: service.CodexTicketKey{Revision: 1, AccountID: 3, IdentityScope: "scope", Model: cfg.Models[0], PolicyScope: "policy"}, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), Cookies: cookies, CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: true, VerifiedAt: now, ActualModel: cfg.Models[0], VerificationModel: cfg.Models[0], TargetLength: cfg.TargetLength}
 	ok, e := cache.TryAcquireLeader(ctx, "one", 15*time.Second)
 	require.NoError(t, e)
 	require.True(t, ok)

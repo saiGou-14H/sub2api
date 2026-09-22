@@ -5,12 +5,30 @@ import (
 	"testing"
 )
 
+func TestCodexTicketSettingsLegacyCookiePinMode(t *testing.T) {
+	for _, mode := range []string{"", CodexTicketCookiePinOptional} {
+		cfg := DefaultCodexTicketSettings()
+		cfg.CookiePinMode = mode
+		cfg.TTLSeconds = 3600
+		cfg.RefreshBeforeSeconds = 600
+		normalized, err := NormalizeCodexTicketSettings(cfg)
+		require.NoError(t, err)
+		require.Equal(t, CodexTicketCookiePinOptional, normalized.CookiePinMode)
+		require.Equal(t, 3600, normalized.TTLSeconds)
+		require.Equal(t, 600, normalized.RefreshBeforeSeconds)
+		require.Equal(t, mode, cfg.CookiePinMode, "normalization must not mutate input")
+	}
+}
+
 func TestCodexTicketSettingsNormalize(t *testing.T) {
 	cfg := DefaultCodexTicketSettings()
 	normalized, err := NormalizeCodexTicketSettings(cfg)
 	require.NoError(t, err)
 	require.False(t, normalized.Enabled)
 	require.Zero(t, normalized.Revision)
+	require.Equal(t, CodexTicketCookiePinRequired, normalized.CookiePinMode)
+	require.Equal(t, 240, normalized.TTLSeconds)
+	require.Equal(t, 210, normalized.RefreshBeforeSeconds)
 	cfg.Models = []string{" a ", "a", "b"}
 	id := int64(8)
 	cfg.HarvestProxyID = &id
@@ -29,6 +47,8 @@ func TestCodexTicketSettingsNormalize(t *testing.T) {
 		func(c *CodexTicketSettings) { c.Models = []string{"a\nb"} },
 		func(c *CodexTicketSettings) { c.TTLSeconds = 59 },
 		func(c *CodexTicketSettings) { c.RefreshBeforeSeconds = c.TTLSeconds },
+		func(c *CodexTicketSettings) { c.CookiePinMode = "unknown" },
+		func(c *CodexTicketSettings) { c.CookiePinMode = " required " },
 		func(c *CodexTicketSettings) { c.MissingPolicy = "unknown" },
 		func(c *CodexTicketSettings) { c.MaxConcurrency = 9 },
 		func(c *CodexTicketSettings) { c.MaxProbesPerMinute = 61 },

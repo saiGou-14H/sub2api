@@ -337,7 +337,7 @@ func codexTicketSnapshotStatus(snapshot CodexTicketAccountSnapshot, key CodexTic
 	}
 	if meta != nil {
 		captured, expiry := meta.CapturedAt.UTC(), meta.ExpiresAt.UTC()
-		refresh := expiry.Add(-time.Duration(cfg.RefreshBeforeSeconds) * time.Second)
+		refresh := codexTicketRefreshAt(captured, expiry, cfg)
 		m.CapturedAt = &captured
 		m.ExpiresAt = &expiry
 		m.RefreshAt = &refresh
@@ -389,7 +389,7 @@ func codexTicketAggregateStatus(models []CodexTicketModelStatus) string {
 }
 func codexTicketPublicError(code string) string {
 	switch code {
-	case "probe_timeout", "probe_failed", "authentication_failed", "upstream_unavailable", "state_mismatch", "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable", "rate_limited", "model_mismatch", "verification_failed", "state_312":
+	case "probe_timeout", "probe_failed", "authentication_failed", "upstream_unavailable", "state_mismatch", "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable", "rate_limited", "model_mismatch", "verification_failed", "state_312", "cookie_missing":
 		return code
 	}
 	return "probe_failed"

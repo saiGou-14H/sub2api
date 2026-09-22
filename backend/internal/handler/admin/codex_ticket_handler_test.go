@@ -37,6 +37,54 @@ func TestCodexTicketPutPresenceAndStrictBody(t *testing.T) {
 	}
 }
 
+func TestCodexTicketPutCookiePinMode(t *testing.T) {
+	valid := codexTicketValidBody(t)
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		want    string
+		invalid bool
+	}{
+		{name: "required", raw: `"required"`, want: service.CodexTicketCookiePinRequired},
+		{name: "optional", raw: `"optional"`, want: service.CodexTicketCookiePinOptional},
+		{name: "omitted legacy", want: service.CodexTicketCookiePinOptional},
+		{name: "null", raw: `null`, invalid: true},
+		{name: "boolean", raw: `true`, invalid: true},
+		{name: "number", raw: `1`, invalid: true},
+		{name: "object", raw: `{}`, invalid: true},
+		{name: "array", raw: `[]`, invalid: true},
+		{name: "empty", raw: `""`, invalid: true},
+		{name: "unknown", raw: `"legacy"`, invalid: true},
+		{name: "wrong case", raw: `"Required"`, invalid: true},
+		{name: "whitespace", raw: `" optional "`, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Replace(valid, `"cookie_pin_mode":"required"`, `"cookie_pin_mode":`+tc.raw, 1)
+			if tc.raw == "" {
+				body = strings.Replace(valid, `"cookie_pin_mode":"required",`, "", 1)
+			}
+			_, cfg, err := decodeCodexTicketPut(strings.NewReader(body))
+			if tc.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			cfg, err = service.NormalizeCodexTicketSettings(cfg)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, cfg.CookiePinMode)
+		})
+	}
+	legacy := strings.Replace(valid, `"cookie_pin_mode":"required",`, "", 1)
+	for _, body := range []string{
+		strings.Replace(legacy, `"models":`, `"unknown":0,"models":`, 1),
+		strings.Replace(valid, `"enabled":false,`, `"unknown":false,`, 1),
+		strings.Replace(legacy, `"enabled":false,`, `"unknown":false,`, 1),
+	} {
+		_, _, err := decodeCodexTicketPut(strings.NewReader(body))
+		require.Error(t, err, body)
+	}
+}
+
 type codexTicketHandlerRepo struct {
 	cfg   service.CodexTicketSettings
 	saves int

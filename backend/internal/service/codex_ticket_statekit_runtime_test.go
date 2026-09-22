@@ -82,7 +82,7 @@ func TestCodexTicketStatekitHarvestBudgetsAndVerification(t *testing.T) {
 					}
 				}
 				body := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":\"" + model + "\"}}\n\n"
-				h := http.Header{}
+				h := http.Header{"Set-Cookie": {"cflb=fixture-cflb; Path=/; Max-Age=240", "oailb=fixture-oailb; Path=/; Max-Age=240"}}
 				if state != "" {
 					h.Set("X-Codex-Turn-State", state)
 				}

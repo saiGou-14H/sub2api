@@ -14,7 +14,7 @@ const own = computed(() => props.account && props.state?.account_id === props.ac
 const canShowModelVerification = computed(() => own.value?.enabled === true && own.value.supported === true &&
   !['unavailable', 'unsupported', 'disabled', 'inactive', 'proxy_unavailable'].includes(safeCodexStatus(own.value.status)))
 const dates = ['captured_at', 'expires_at', 'refresh_at', 'next_attempt_at', 'verified_at', 'last_injected_at', 'last_invalidated_at'] as const
-const errors = ['model_mismatch', 'verification_failed', 'state_312', 'transport_unsupported', 'identity_unresolved', 'token_unavailable', 'stream_failed', 'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable', 'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost', 'snapshot_unavailable', 'collector_unavailable', 'candidate_read_failed', 'commit_unavailable', 'probe_failed', 'probe_timeout', 'retry_unavailable']
+const errors = ['cookie_missing', 'model_mismatch', 'verification_failed', 'state_312', 'transport_unsupported', 'identity_unresolved', 'token_unavailable', 'stream_failed', 'proxy_unavailable', 'authentication_failed', 'rate_limited', 'upstream_unavailable', 'state_mismatch', 'random_unavailable', 'control_unavailable', 'lease_lost', 'snapshot_unavailable', 'collector_unavailable', 'candidate_read_failed', 'commit_unavailable', 'probe_failed', 'probe_timeout', 'retry_unavailable']
 const reasons = ['ticket_ready', 'ticket_missing', 'control_unavailable', 'proxy_unavailable', 'compact', 'identity_changed']
 const reasonLabel = (code: string) => t(`codexTicket.accounts.reasons.${reasons.includes(code) ? code : 'unknown'}`)
 const errorLabel = (code: string) => t(`codexTicket.runtimeErrors.${errors.includes(code) ? code : 'unknown'}`)

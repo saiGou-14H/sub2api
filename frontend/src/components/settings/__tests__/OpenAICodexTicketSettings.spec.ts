@@ -45,6 +45,44 @@ beforeEach(() => {
 afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); vi.useRealTimers() })
 
 describe('Codex ticket settings', () => {
+  it('preserves an omitted legacy cookie mode as optional without marking the saved draft dirty', async () => {
+    const wrapper = await render()
+    expect((wrapper.get('[data-testid="ticket-cookie-pin-mode"]').element as HTMLSelectElement).value).toBe('optional')
+    expect(wrapper.text()).toContain('codexTicket.noChanges')
+    await wrapper.get('[data-testid="save-ticket"]').trigger('click')
+    expect(api.saveCodexTicketSettings.mock.calls[0][0]).toMatchObject({ cookie_pin_mode: 'optional', ttl_seconds: 3600, refresh_before_seconds: 600 })
+  })
+  it('preserves saved timings when explicitly switching legacy settings to required', async () => {
+    const wrapper = await render()
+    await wrapper.get('[data-testid="ticket-cookie-pin-mode"]').setValue('required')
+    expect(wrapper.text()).toContain('codexTicket.unsaved')
+    await wrapper.get('[data-testid="save-ticket"]').trigger('click')
+    expect(api.saveCodexTicketSettings.mock.calls[0][0]).toMatchObject({ cookie_pin_mode: 'required', ttl_seconds: 3600, refresh_before_seconds: 600 })
+  })
+  it('shows backend timing defaults and saves an explicitly optional cookie mode', async () => {
+    const value = snapshot()
+    Object.assign(value.settings, { cookie_pin_mode: 'required', ttl_seconds: 240, refresh_before_seconds: 210 })
+    api.getCodexTicketSettings.mockResolvedValue(value)
+    const wrapper = await render()
+    expect((wrapper.get('[data-testid="ticket-cookie-pin-mode"]').element as HTMLSelectElement).value).toBe('required')
+    expect((wrapper.get('[data-testid="ticket-ttl_seconds"]').element as HTMLInputElement).value).toBe('240')
+    expect((wrapper.get('[data-testid="ticket-refresh_before_seconds"]').element as HTMLInputElement).value).toBe('210')
+    expect(wrapper.text()).toContain('codexTicket.noChanges')
+    await wrapper.get('[data-testid="ticket-cookie-pin-mode"]').setValue('optional')
+    expect(wrapper.text()).toContain('codexTicket.unsaved')
+    await wrapper.get('[data-testid="save-ticket"]').trigger('click')
+    expect(api.saveCodexTicketSettings.mock.calls[0][0]).toMatchObject({ cookie_pin_mode: 'optional', ttl_seconds: 240, refresh_before_seconds: 210 })
+  })
+  it('blocks an unknown cookie mode until a supported mode is selected', async () => {
+    const value = snapshot()
+    Object.assign(value.settings, { cookie_pin_mode: 'unknown' })
+    api.getCodexTicketSettings.mockResolvedValue(value)
+    const wrapper = await render()
+    expect(wrapper.get('[data-testid="save-ticket"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('codexTicket.validation.cookie_pin_mode')
+    await wrapper.get('[data-testid="ticket-cookie-pin-mode"]').setValue('required')
+    expect(wrapper.get('[data-testid="save-ticket"]').attributes('disabled')).toBeUndefined()
+  })
   it('labels counts as local observations and displays the supported WebSocket bridge', async () => {
     const wrapper = await render()
     expect(wrapper.get('[data-testid="runtime-counter-scope"]').text()).toBe('codexTicket.localCounterScope')
@@ -54,7 +92,7 @@ describe('Codex ticket settings', () => {
     expect(wrapper.get('[data-testid="runtime-counter-scope"]').text()).toBe('codexTicket.unknownCounterScope')
     expect(wrapper.text()).not.toContain('future_scope')
   })
-  it.each(['transport_unsupported', 'rate_limited', 'authentication_failed', 'probe_timeout', 'retry_unavailable'])('maps the fixed runtime classification %s', async code => {
+  it.each(['cookie_missing', 'transport_unsupported', 'rate_limited', 'authentication_failed', 'probe_timeout', 'retry_unavailable'])('maps the fixed runtime classification %s', async code => {
     api.getCodexTicketSettings.mockResolvedValue({ ...snapshot(), runtime: { ...runtime(), last_error_code: code } })
     const wrapper = await render()
     expect(wrapper.get('[data-testid="runtime-error"]').text()).toBe(`codexTicket.runtimeErrors.${code}`)
@@ -86,7 +124,7 @@ describe('Codex ticket settings', () => {
     expect(api.saveCodexTicketSettings).toHaveBeenCalledWith({
       schema_version: 1, enabled: true, harvest_proxy_id: 7, models: ['custom-a', 'custom-b'],
       target_length: 356, ttl_seconds: 3600, refresh_before_seconds: 600,
-      missing_ticket_policy: 'reject', max_concurrency: 2, max_probes_per_minute: 12
+      missing_ticket_policy: 'reject', max_concurrency: 2, max_probes_per_minute: 12, cookie_pin_mode: 'optional'
     }, '1', expect.any(AbortSignal))
     expect(api.testHarvestProxy).not.toHaveBeenCalled()
     expect(wrapper.find('form').exists()).toBe(false)

@@ -90,7 +90,9 @@ func ticketRuntimeFixture() (*CodexTicketRuntime, *ticketTestAccounts, *ticketTe
 	accounts := &ticketTestAccounts{a: a}
 	now := time.Now()
 	key := CodexTicketKey{Revision: cfg.Revision, AccountID: a.ID, IdentityScope: CodexTicketIdentityScope(a), Model: cfg.Models[0], PolicyScope: CodexTicketPolicyScope(a, now)}
-	ticket := &CodexTicket{Key: key, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), CapturedAt: now, ExpiresAt: now.Add(time.Hour), Verified: true, VerifiedAt: now, ActualModel: key.Model, VerificationModel: key.Model, TargetLength: cfg.TargetLength}
+	cookieExpiry := now.Add(time.Hour)
+	cookies := []CodexTicketCookie{{Name: "cflb", Value: "fixture-cflb", Domain: ".chatgpt.com", Path: "/", ExpiresAt: cookieExpiry}, {Name: "oailb", Value: "fixture-oailb", Domain: ".chatgpt.com", Path: "/", ExpiresAt: cookieExpiry}}
+	ticket := &CodexTicket{Key: key, State: "gAAAAA" + strings.Repeat("a", cfg.TargetLength-6), Cookies: cookies, CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: true, VerifiedAt: now, ActualModel: key.Model, VerificationModel: key.Model, TargetLength: cfg.TargetLength}
 	store := &ticketTestStore{v: CodexTicketRuntimeView{Control: CodexTicketControl{Settings: cfg, ProxyState: "active", ValidUntilMS: now.Add(6 * time.Second).UnixMilli()}, Ticket: ticket, ServerTime: now}, budget: true}
 	return NewCodexTicketRuntime(&ticketTestSettings{cfg: cfg}, nil, accounts, store), accounts, store, key
 }
@@ -100,6 +102,7 @@ func TestCodexTicketApplyFreshAccountSwitchAndIdentity(t *testing.T) {
 	h := http.Header{"X-Codex-Turn-State": []string{"echo"}}
 	require.NoError(t, r.Apply(context.Background(), &stale, key.Model, h))
 	require.Equal(t, s.v.Ticket.State, h.Get("X-Codex-Turn-State"))
+	require.Equal(t, "cflb=fixture-cflb; oailb=fixture-oailb", h.Get("Cookie"))
 	a.a.Extra = map[string]any{"codex_turn_state_enabled": false}
 	h.Set("X-Codex-Turn-State", "echo")
 	require.NoError(t, r.Apply(context.Background(), &stale, key.Model, h))
@@ -127,7 +130,7 @@ func TestCodexTicketHarvestPrecommitAccountRecheck(t *testing.T) {
 	cfg := s.v.Control.Settings
 	r.harvest(context.Background(), "owner", cfg, "http://proxy", k, func(context.Context, int64, string, string) (CodexTicketProbeResult, error) {
 		a.a.Extra = map[string]any{"codex_turn_state_enabled": false}
-		return CodexTicketProbeResult{State: s.v.Ticket.State, IdentityScope: k.IdentityScope, HTTPStatus: 200, Completed: true, Verified: true, PolicyScope: k.PolicyScope, ActualModel: k.Model, VerificationModel: k.Model}, nil
+		return CodexTicketProbeResult{State: s.v.Ticket.State, Cookies: append([]CodexTicketCookie(nil), s.v.Ticket.Cookies...), IdentityScope: k.IdentityScope, HTTPStatus: 200, Completed: true, Verified: true, PolicyScope: k.PolicyScope, ActualModel: k.Model, VerificationModel: k.Model}, nil
 	})
 	require.Zero(t, s.commits)
 }

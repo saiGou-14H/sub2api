@@ -35,7 +35,7 @@ func TestCodexTicketCancellationDuringStorageDoesNotReportFailure(t *testing.T) 
 			r.cache = store
 			r.harvest(ctx, "owner", base.v.Control.Settings, "http://proxy", key, func(context.Context, int64, string, string) (CodexTicketProbeResult, error) {
 				if success {
-					return CodexTicketProbeResult{HTTPStatus: 200, Completed: true, IdentityScope: key.IdentityScope, State: base.v.Ticket.State, Verified: true, PolicyScope: key.PolicyScope, ActualModel: key.Model, VerificationModel: key.Model}, nil
+					return CodexTicketProbeResult{HTTPStatus: 200, Completed: true, IdentityScope: key.IdentityScope, State: base.v.Ticket.State, Cookies: append([]CodexTicketCookie(nil), base.v.Ticket.Cookies...), Verified: true, PolicyScope: key.PolicyScope, ActualModel: key.Model, VerificationModel: key.Model}, nil
 				}
 				return CodexTicketProbeResult{HTTPStatus: 429}, errors.New("synthetic limit")
 			})

@@ -294,7 +294,7 @@ func (r *CodexTicketRuntime) collect(ctx context.Context, owner string, cfg Code
 						r.mu.Lock()
 						r.ready[k] = v.Ticket.ExpiresAt
 						r.mu.Unlock()
-						if v.Ticket.ExpiresAt.Sub(v.ServerTime) > time.Duration(cfg.RefreshBeforeSeconds)*time.Second {
+						if codexTicketRefreshAt(v.Ticket.CapturedAt, v.Ticket.ExpiresAt, cfg).After(v.ServerTime) {
 							continue
 						}
 					}
@@ -395,7 +395,29 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 	if e != nil {
 		return
 	}
-	t := CodexTicket{Key: k, State: result.State, CapturedAt: now, ExpiresAt: now.Add(time.Duration(cfg.TTLSeconds) * time.Second), Verified: result.Verified, VerifiedAt: now, ActualModel: result.ActualModel, VerificationModel: result.VerificationModel, TargetLength: cfg.TargetLength}
+	localNow := time.Now()
+	capturedAt := result.CapturedAt
+	if capturedAt.IsZero() {
+		capturedAt = observedClock // Conservative fallback for internal adapters.
+	}
+	// Translate remaining lifetimes into Redis's clock domain without granting
+	// a new TTL after verification. Never mutate the adapter's bundle slice.
+	clockOffset := now.Sub(localNow)
+	capturedAt = capturedAt.Add(clockOffset)
+	cookies := append([]CodexTicketCookie(nil), result.Cookies...)
+	for i := range cookies {
+		cookies[i].ExpiresAt = cookies[i].ExpiresAt.Add(clockOffset)
+	}
+	expiresAt := capturedAt.Add(time.Duration(cfg.TTLSeconds) * time.Second)
+	if len(cookies) > 0 {
+		if capAt := capturedAt.Add(codexTicketBundleTTL); capAt.Before(expiresAt) {
+			expiresAt = capAt
+		}
+		if cookieExpiry := CodexTicketCookieExpiry(cookies); cookieExpiry.Before(expiresAt) {
+			expiresAt = cookieExpiry
+		}
+	}
+	t := CodexTicket{Key: k, State: result.State, Cookies: cookies, CapturedAt: capturedAt, ExpiresAt: expiresAt, Verified: result.Verified, VerifiedAt: now, ActualModel: result.ActualModel, VerificationModel: result.VerificationModel, TargetLength: cfg.TargetLength}
 	if err == nil && result.HTTPStatus == http.StatusOK && result.Completed && result.IdentityScope == k.IdentityScope && result.PolicyScope == k.PolicyScope && ValidateCodexTicket(t, k, cfg, now) == nil {
 		if !r.codexTicketAccountCurrent(ctx, k) {
 			return
@@ -407,6 +429,14 @@ func (r *CodexTicketRuntime) harvestWithTaskContext(generationCtx, ctx context.C
 		ok, e = r.cache.CheckCurrent(ctx, owner, k.Revision)
 		if e != nil || !ok {
 			return
+		}
+		if len(t.Cookies) > 0 {
+			var id [16]byte
+			if _, err := rand.Read(id[:]); err != nil {
+				r.setError("commit_unavailable")
+				return
+			}
+			t.BundleID = hex.EncodeToString(id[:])
 		}
 		ok, e = r.cache.CommitIfCurrent(ctx, owner, t)
 		if e == nil && ok {
@@ -448,7 +478,7 @@ func (r *CodexTicketRuntime) recordProbeFailure(ctx context.Context, owner strin
 	// Adapters can refine classification using a closed set of safe codes.
 	// Never surface their raw transport error or an arbitrary ErrorCode value.
 	switch result.ErrorCode {
-	case "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable", "model_mismatch", "verification_failed", "state_312":
+	case "transport_unsupported", "identity_unresolved", "token_unavailable", "stream_failed", "proxy_unavailable", "model_mismatch", "verification_failed", "state_312", "cookie_missing":
 		code = result.ErrorCode
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

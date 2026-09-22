@@ -28,6 +28,9 @@ func (s *codexWSSettings) Load(context.Context) (CodexTicketSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := DefaultCodexTicketSettings()
+	c.CookiePinMode = CodexTicketCookiePinOptional
+	c.TTLSeconds = 3600
+	c.RefreshBeforeSeconds = 600
 	c.Enabled = s.enabled
 	return c, s.err
 }
