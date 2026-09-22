@@ -115,7 +115,7 @@ func (s *OpenAIGatewayService) ProbeCodexTicket(ctx context.Context, accountID i
 	capture.VerificationModel = verification.ActualModel
 	// Verification proves the original bundle on the business route. Cookies
 	// returned by verification belong to that response, never to candidate.
-	if CodexTicketCookiesRequired(cfg) && !CodexTicketCookiesValid(capture.Cookies, time.Now()) {
+	if (CodexTicketCookiesRequired(cfg) || len(capture.Cookies) > 0) && !CodexTicketCookiesValid(capture.Cookies, time.Now()) {
 		return fail("cookie_missing")
 	}
 	capture.State = candidate
@@ -199,10 +199,13 @@ func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, accoun
 	if injectedState != "" {
 		req.Header.Set("X-Codex-Turn-State", injectedState)
 	}
-	if len(injectedCookies) > 0 && !CodexTicketCookiesValid(injectedCookies, time.Now()) {
-		return fail("cookie_missing")
-	}
-	if cookieHeader := CodexTicketCookieHeader(injectedCookies, time.Now()); cookieHeader != "" {
+	// Validate and render once: a present pair must never silently turn into
+	// a state-only verification when it expires between two clock reads.
+	if len(injectedCookies) > 0 {
+		cookieHeader := CodexTicketCookieHeader(injectedCookies, time.Now())
+		if cookieHeader == "" {
+			return fail("cookie_missing")
+		}
 		req.Header.Set("Cookie", cookieHeader)
 	}
 	resp, e := s.httpUpstream.Do(req, proxyURL, account.ID, 4)
@@ -221,13 +224,16 @@ func (s *OpenAIGatewayService) codexTicketProbeStage(ctx context.Context, accoun
 	if resp.StatusCode != http.StatusOK {
 		return fail("http_status")
 	}
-	// Anchor lifetime at receipt of the headers, before consuming the SSE body.
+	// Snapshot the candidate at receipt of headers. Verification responses are
+	// signals only: their cookies must never enter or renew the captured bundle.
 	result.CapturedAt = time.Now()
-	result.Cookies = CodexTicketCookiesFromResponse(resp, req.URL, result.CapturedAt)
+	states := append([]string(nil), resp.Header.Values("X-Codex-Turn-State")...)
+	if injectedState == "" {
+		result.Cookies = CodexTicketCookiesFromResponse(resp, req.URL, result.CapturedAt)
+	}
 	if code := readCodexProbeCompletion(resp.Body, model); code != "" {
 		return fail(code)
 	}
-	states := resp.Header.Values("X-Codex-Turn-State")
 	if len(states) > 1 {
 		return fail("state_missing")
 	}
